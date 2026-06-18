@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.log
+.env
+# secrets — never commit
+.mailwarden/
+credentials.json
+token.json

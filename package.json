@@ -1,0 +1,50 @@
+{
+  "name": "mailwarden",
+  "version": "0.1.0",
+  "description": "A reliable, native Gmail MCP server with full mailbox control — search, labels, archive, trash, attachments, and snooze.",
+  "type": "module",
+  "bin": {
+    "mailwarden": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "auth": "tsx src/index.ts --auth",
+    "sweep": "tsx src/index.ts --sweep"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "gmail",
+    "email",
+    "claude",
+    "snooze",
+    "google",
+    "ai"
+  ],
+  "author": "Christian Sitte",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@google-cloud/local-auth": "^3.0.1",
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "express": "^4.21.0",
+    "googleapis": "^144.0.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.21",
+    "@types/node": "^22.7.0",
+    "tsx": "^4.19.1",
+    "typescript": "^5.6.2"
+  }
+}
