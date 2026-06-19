@@ -6,7 +6,7 @@ import { getAuth } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 
-const VERSION = "0.1.0";
+const VERSION = "0.1.1";
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);

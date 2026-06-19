@@ -45,11 +45,12 @@ export class Gmail {
     const list = await this.api.users.threads.list({ userId: "me", q: query, maxResults });
     const out: ThreadSummary[] = [];
     for (const t of list.data.threads ?? []) {
+      // 'full' (not 'metadata') so the MIME parts are present — otherwise attachment
+      // detection always returns false (metadata format omits payload.parts).
       const meta = await this.api.users.threads.get({
         userId: "me",
         id: t.id!,
-        format: "metadata",
-        metadataHeaders: ["From", "Subject", "Date"],
+        format: "full",
       });
       const msgs = meta.data.messages ?? [];
       const headers = msgs[0]?.payload?.headers ?? [];
