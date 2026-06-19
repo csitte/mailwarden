@@ -81,4 +81,4 @@ claude mcp add --transport http mailwarden https://your-host/mcp
 
 ## License
 
-MIT © Christian Sitte
+MIT © C.Sitte Softwaretechnik
