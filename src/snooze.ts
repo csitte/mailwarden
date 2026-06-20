@@ -9,6 +9,20 @@ const PARENT = "MCP/Snoozed";
 const datedLabel = (isoDate: string) => `${PARENT}/${isoDate}`;
 const todayIso = (d = new Date()) => d.toISOString().slice(0, 10);
 
+/** Max search/modify iterations per dated label — guards against an infinite sweep loop. */
+const MAX_SWEEP_ITERATIONS = 1000;
+
+/**
+ * A dated snooze label `MCP/Snoozed/<YYYY-MM-DD>` is due when its date is
+ * on or before the cutoff (today). ISO date strings compare lexicographically,
+ * so a plain `<=` is a valid "due" check. Returns false for non-dated labels.
+ */
+export function isDue(labelName: string, cutoffIso: string): boolean {
+  if (!labelName.startsWith(`${PARENT}/`)) return false;
+  const date = labelName.slice(PARENT.length + 1);
+  return date <= cutoffIso;
+}
+
 export async function snooze(gmail: Gmail, threadId: string, until: string) {
   const parentId = await gmail.ensureLabel(PARENT);
   const dueId = await gmail.ensureLabel(datedLabel(until));
@@ -40,17 +54,23 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
   const cutoff = todayIso(today);
   const labels = await gmail.listLabels();
   const parent = labels.find((l) => l.name === PARENT);
-  // ISO date strings compare lexicographically, so `<=` is a valid "due" check.
-  const dueLabels = labels.filter(
-    (l) => l.name.startsWith(`${PARENT}/`) && l.name.slice(PARENT.length + 1) <= cutoff,
-  );
+  const dueLabels = labels.filter((l) => isDue(l.name, cutoff));
 
   const woken: string[] = [];
   for (const label of dueLabels) {
-    for (const t of await gmail.search(`label:"${label.name}"`, 100)) {
+    // search() caps at 100 results; each modifyLabels strips the dated label off
+    // the thread, so re-searching yields the next batch. Loop until empty so a
+    // date with >100 threads is fully drained before the label is deleted.
+    let iterations = 0;
+    for (;;) {
+      const batch = await gmail.search(`label:"${label.name}"`, 100);
+      if (batch.length === 0) break;
       const remove = [label.id, ...(parent ? [parent.id] : [])];
-      await gmail.modifyLabels(t.threadId, ["INBOX", "UNREAD"], remove);
-      woken.push(t.threadId);
+      for (const t of batch) {
+        await gmail.modifyLabels(t.threadId, ["INBOX", "UNREAD"], remove);
+        woken.push(t.threadId);
+      }
+      if (++iterations >= MAX_SWEEP_ITERATIONS) break; // safety: never spin forever
     }
     // dated label is now empty — tidy up
     try {

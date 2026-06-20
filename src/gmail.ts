@@ -13,6 +13,14 @@ export interface ThreadSummary {
   hasAttachments: boolean;
 }
 
+export interface Attachment {
+  messageId: string;
+  attachmentId: string;
+  filename: string;
+  mimeType: string;
+  size: number;
+}
+
 export interface ParsedMessage {
   id: string;
   threadId: string;
@@ -24,7 +32,7 @@ export interface ParsedMessage {
   snippet: string;
   plaintextBody: string;
   htmlBody: string;
-  attachments: { messageId: string; attachmentId: string; filename: string; mimeType: string; size: number }[];
+  attachments: Attachment[];
 }
 
 export interface LabelInfo {
@@ -33,12 +41,123 @@ export interface LabelInfo {
   type?: string | null;
 }
 
+// ---------------------------------------------------------------------------
+// Pure helpers (exported & API-free so they're unit-testable without a mock).
+// The Gmail class methods are thin wrappers around these.
+// ---------------------------------------------------------------------------
+
+/** Read a part header value (case-insensitive name match). */
+function partHeader(p: gmail_v1.Schema$MessagePart, name: string): string | undefined {
+  return p.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
+}
+
+/** Walk every nested MIME part of a payload, applying `fn`. */
+function walkParts(
+  p: gmail_v1.Schema$MessagePart | undefined,
+  fn: (p: gmail_v1.Schema$MessagePart) => void,
+): void {
+  if (!p) return;
+  fn(p);
+  (p.parts ?? []).forEach((child) => walkParts(child, fn));
+}
+
+/**
+ * True when a part carries a downloadable file rather than an inline asset
+ * (logo / tracking pixel). A real attachment needs a filename + attachmentId
+ * and must NOT be marked `Content-Disposition: inline`. Parts with no
+ * disposition header but a filename + attachmentId are still treated as
+ * attachments (some senders omit the header).
+ */
+export function isRealAttachment(p: gmail_v1.Schema$MessagePart): boolean {
+  if (!p.filename || !p.body?.attachmentId) return false;
+  const disposition = partHeader(p, "Content-Disposition")?.trim().toLowerCase();
+  if (disposition?.startsWith("inline")) return false;
+  // `Content-ID` / `X-Attachment-Id` indicate an inline-referenced asset; only
+  // exclude when the part isn't explicitly flagged as an attachment.
+  const hasInlineRef =
+    partHeader(p, "Content-ID") !== undefined || partHeader(p, "X-Attachment-Id") !== undefined;
+  if (hasInlineRef && !disposition?.startsWith("attachment")) return false;
+  return true;
+}
+
+/** Decode + concatenate the text/plain and text/html bodies of a message payload. */
+export function collectBodies(payload?: gmail_v1.Schema$MessagePart): { text: string; html: string } {
+  let text = "";
+  let html = "";
+  const decode = (d?: string | null) => (d ? Buffer.from(d, "base64url").toString("utf8") : "");
+  walkParts(payload, (p) => {
+    if (p.mimeType === "text/plain") text += decode(p.body?.data);
+    else if (p.mimeType === "text/html") html += decode(p.body?.data);
+  });
+  return { text, html };
+}
+
+/** Collect the real (non-inline) attachments of a message. */
+export function collectAttachments(m: gmail_v1.Schema$Message): Attachment[] {
+  const out: Attachment[] = [];
+  walkParts(m.payload ?? undefined, (p) => {
+    if (isRealAttachment(p)) {
+      out.push({
+        messageId: m.id!,
+        attachmentId: p.body!.attachmentId!,
+        filename: p.filename!,
+        mimeType: p.mimeType ?? "application/octet-stream",
+        size: p.body?.size ?? 0,
+      });
+    }
+  });
+  return out;
+}
+
+/** Parse a raw Gmail message into the flat ParsedMessage shape. */
+export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
+  const headers = m.payload?.headers ?? [];
+  const h = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+  const { text, html } = collectBodies(m.payload ?? undefined);
+  return {
+    id: m.id!,
+    threadId: m.threadId!,
+    labelIds: m.labelIds ?? [],
+    from: h("From"),
+    to: h("To"),
+    subject: h("Subject"),
+    date: h("Date"),
+    snippet: m.snippet ?? "",
+    plaintextBody: text,
+    htmlBody: html,
+    attachments: collectAttachments(m),
+  };
+}
+
+/** System-label ids and `Label_*` ids pass through modifyLabels unresolved. */
+const SYSTEM_LABEL_IDS = new Set([
+  "INBOX",
+  "UNREAD",
+  "STARRED",
+  "TRASH",
+  "SPAM",
+  "IMPORTANT",
+  "SENT",
+  "DRAFT",
+]);
+
+/** True when a string is already a Gmail label *id* (vs. a human-readable name). */
+export function looksLikeLabelId(s: string): boolean {
+  return SYSTEM_LABEL_IDS.has(s) || s.startsWith("CATEGORY_") || /^Label_/.test(s);
+}
+
 /** Thin wrapper over the native Gmail API. Every call is live — no cache. */
 export class Gmail {
   private api: gmail_v1.Gmail;
 
-  constructor(auth: OAuth2Client) {
-    this.api = google.gmail({ version: "v1", auth });
+  /**
+   * Pass an OAuth2 client (normal runtime) or a ready-made gmail_v1.Gmail
+   * (tests / injection). The auth-client signature stays backward compatible.
+   */
+  constructor(authOrApi: OAuth2Client | gmail_v1.Gmail) {
+    this.api = isGmailApi(authOrApi)
+      ? authOrApi
+      : google.gmail({ version: "v1", auth: authOrApi });
   }
 
   async search(query: string, maxResults = 25): Promise<ThreadSummary[]> {
@@ -64,7 +183,7 @@ export class Gmail {
         date: h("Date"),
         labelIds: [...new Set(msgs.flatMap((m) => m.labelIds ?? []))],
         snippet: t.snippet ?? msgs[0]?.snippet ?? "",
-        hasAttachments: msgs.some((m) => this.collectAttachments(m).length > 0),
+        hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),
       });
     }
     return out;
@@ -76,66 +195,42 @@ export class Gmail {
       id: threadId,
       format: full ? "full" : "metadata",
     });
-    return { threadId, messages: (res.data.messages ?? []).map((m) => this.parseMessage(m)) };
+    return { threadId, messages: (res.data.messages ?? []).map((m) => parseMessage(m)) };
   }
 
-  private parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
-    const headers = m.payload?.headers ?? [];
-    const h = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
-    const { text, html } = this.collectBodies(m.payload);
-    return {
-      id: m.id!,
-      threadId: m.threadId!,
-      labelIds: m.labelIds ?? [],
-      from: h("From"),
-      to: h("To"),
-      subject: h("Subject"),
-      date: h("Date"),
-      snippet: m.snippet ?? "",
-      plaintextBody: text,
-      htmlBody: html,
-      attachments: this.collectAttachments(m),
-    };
-  }
-
-  private collectBodies(payload?: gmail_v1.Schema$MessagePart): { text: string; html: string } {
-    let text = "";
-    let html = "";
-    const decode = (d?: string | null) => (d ? Buffer.from(d, "base64").toString("utf8") : "");
-    const visit = (p?: gmail_v1.Schema$MessagePart) => {
-      if (!p) return;
-      if (p.mimeType === "text/plain") text += decode(p.body?.data);
-      else if (p.mimeType === "text/html") html += decode(p.body?.data);
-      (p.parts ?? []).forEach(visit);
-    };
-    visit(payload);
-    return { text, html };
-  }
-
-  private collectAttachments(m: gmail_v1.Schema$Message): ParsedMessage["attachments"] {
-    const out: ParsedMessage["attachments"] = [];
-    const visit = (p?: gmail_v1.Schema$MessagePart) => {
-      if (!p) return;
-      if (p.filename && p.body?.attachmentId) {
-        out.push({
-          messageId: m.id!,
-          attachmentId: p.body.attachmentId,
-          filename: p.filename,
-          mimeType: p.mimeType ?? "application/octet-stream",
-          size: p.body.size ?? 0,
-        });
-      }
-      (p.parts ?? []).forEach(visit);
-    };
-    visit(m.payload);
-    return out;
-  }
-
+  /**
+   * Add/remove labels on a thread. Accepts label *ids* (INBOX, Label_7, …) or
+   * human-readable *names* ("ToDo", "MCP/Snoozed"). Names are resolved to ids via
+   * listLabels(); an unknown name in `add` is created (ensureLabel), an unknown
+   * name in `remove` is skipped. listLabels() is only fetched when a non-id
+   * string is present.
+   */
   async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []): Promise<void> {
+    const needsLookup = [...add, ...remove].some((s) => !looksLikeLabelId(s));
+    const byName = new Map<string, string>();
+    if (needsLookup) {
+      for (const l of await this.listLabels()) byName.set(l.name, l.id);
+    }
+
+    const addLabelIds: string[] = [];
+    for (const s of add) {
+      if (looksLikeLabelId(s)) addLabelIds.push(s);
+      else addLabelIds.push(byName.get(s) ?? (await this.ensureLabel(s)));
+    }
+
+    const removeLabelIds: string[] = [];
+    for (const s of remove) {
+      if (looksLikeLabelId(s)) removeLabelIds.push(s);
+      else {
+        const id = byName.get(s);
+        if (id) removeLabelIds.push(id); // unknown name → nothing to remove, skip
+      }
+    }
+
     await this.api.users.threads.modify({
       userId: "me",
       id: threadId,
-      requestBody: { addLabelIds: add, removeLabelIds: remove },
+      requestBody: { addLabelIds, removeLabelIds },
     });
   }
 
@@ -173,4 +268,9 @@ export class Gmail {
     await fs.writeFile(destPath, Buffer.from(res.data.data, "base64url"));
     return destPath;
   }
+}
+
+/** Heuristic: a ready-made gmail_v1.Gmail exposes a `users` resource; an OAuth2Client doesn't. */
+function isGmailApi(x: OAuth2Client | gmail_v1.Gmail): x is gmail_v1.Gmail {
+  return typeof (x as gmail_v1.Gmail).users === "object" && (x as gmail_v1.Gmail).users !== null;
 }
