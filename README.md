@@ -79,7 +79,7 @@ claude mcp add --transport http mailwarden https://your-host/mcp
 
 ## Status
 
-`0.1.0` — scaffold. Core Gmail tools + snooze implemented against `googleapis`. The HTTP transport is a thin wrapper to verify against your installed `@modelcontextprotocol/sdk` version. PRs welcome.
+`0.1.2` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (30 tests). The HTTP transport is a thin wrapper to verify against your installed `@modelcontextprotocol/sdk` version. See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
