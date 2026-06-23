@@ -4,6 +4,7 @@ import {
   collectAttachments,
   collectBodies,
   isRealAttachment,
+  referencedCids,
   looksLikeLabelId,
   deriveLabelFilters,
   threadMatchesFilters,
@@ -67,6 +68,71 @@ describe("collectAttachments — Bug 1: inline images must not count", () => {
       body: { attachmentId: "att-nd", size: 5 },
     };
     expect(isRealAttachment(noDisposition)).toBe(true);
+  });
+});
+
+describe("collectAttachments — Bug 6: attachment with unreferenced Content-ID, no disposition (maut1 invoices)", () => {
+  // Real maut1 shape: multipart/mixed with the HTML, a PDF carrying a Content-ID
+  // but NO Content-Disposition (and whose cid is never referenced in the HTML),
+  // and inline images whose cids ARE referenced. The PDF was wrongly dropped.
+  const html =
+    '<p>Rechnung</p><img src="cid:logo-da4b845d"><img src="cid:fb-1db1fee0">';
+
+  const invoicePdf: gmail_v1.Schema$MessagePart = {
+    filename: "Rechnung VR02056331.pdf",
+    mimeType: "application/pdf",
+    headers: [{ name: "Content-ID", value: "<pdf-4b301948>" }], // present but NOT referenced
+    body: { attachmentId: "att-pdf", size: 55244 },
+  };
+  const inlineLogo: gmail_v1.Schema$MessagePart = {
+    filename: "image.jpeg",
+    mimeType: "image/jpeg",
+    headers: [{ name: "Content-ID", value: "<logo-da4b845d>" }], // referenced in html
+    body: { attachmentId: "att-logo", size: 2896 },
+  };
+  const inlineFb: gmail_v1.Schema$MessagePart = {
+    filename: "faceb.png",
+    mimeType: "image/png",
+    headers: [{ name: "Content-ID", value: "<fb-1db1fee0>" }], // referenced in html
+    body: { attachmentId: "att-fb", size: 1059 },
+  };
+
+  const message: gmail_v1.Schema$Message = {
+    id: "msg-maut1",
+    threadId: "th-maut1",
+    payload: {
+      mimeType: "multipart/mixed",
+      parts: [{ mimeType: "text/html", body: { data: b64url(html) } }, invoicePdf, inlineLogo, inlineFb],
+    },
+  };
+
+  it("referencedCids extracts only the cids used via cid: in the body", () => {
+    expect(referencedCids(html)).toEqual(new Set(["logo-da4b845d", "fb-1db1fee0"]));
+  });
+
+  it("treats a PDF with an UNreferenced Content-ID + no disposition as a real attachment", () => {
+    expect(isRealAttachment(invoicePdf, referencedCids(html))).toBe(true);
+  });
+
+  it("excludes images whose Content-ID IS referenced in the body", () => {
+    const refs = referencedCids(html);
+    expect(isRealAttachment(inlineLogo, refs)).toBe(false);
+    expect(isRealAttachment(inlineFb, refs)).toBe(false);
+  });
+
+  it("collects exactly the invoice PDF (not the inline images)", () => {
+    const atts = collectAttachments(message);
+    expect(atts).toHaveLength(1);
+    expect(atts[0]).toMatchObject({
+      attachmentId: "att-pdf",
+      filename: "Rechnung VR02056331.pdf",
+      mimeType: "application/pdf",
+      size: 55244,
+    });
+  });
+
+  it("marks the thread as having attachments", () => {
+    expect(collectAttachments(message).length > 0).toBe(true);
   });
 });
 

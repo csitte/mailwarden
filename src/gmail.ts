@@ -51,6 +51,29 @@ function partHeader(p: gmail_v1.Schema$MessagePart, name: string): string | unde
   return p.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
 }
 
+/** Normalize a Content-ID header value: strip surrounding `<>`, trim, lowercase. */
+function normalizeCid(v?: string): string | undefined {
+  if (!v) return undefined;
+  const s = v.trim().replace(/^<|>$/g, "").trim().toLowerCase();
+  return s || undefined;
+}
+
+/**
+ * Collect every Content-ID actually referenced as `cid:<id>` in the message
+ * bodies (html / plain text). Only a *referenced* Content-ID marks a part as a
+ * genuinely inline asset (logo, tracking pixel). An unreferenced Content-ID is
+ * not inline — some mailers tag real attachments with one (e.g. maut1 invoices
+ * carry the PDF with a Content-ID but no `Content-Disposition`).
+ */
+export function referencedCids(...bodies: string[]): Set<string> {
+  const ids = new Set<string>();
+  const re = /cid:([^"'\s)>\]]+)/gi;
+  const hay = bodies.join("\n");
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(hay)) !== null) ids.add(m[1].trim().toLowerCase());
+  return ids;
+}
+
 /** Walk every nested MIME part of a payload, applying `fn`. */
 function walkParts(
   p: gmail_v1.Schema$MessagePart | undefined,
@@ -63,20 +86,30 @@ function walkParts(
 
 /**
  * True when a part carries a downloadable file rather than an inline asset
- * (logo / tracking pixel). A real attachment needs a filename + attachmentId
- * and must NOT be marked `Content-Disposition: inline`. Parts with no
- * disposition header but a filename + attachmentId are still treated as
- * attachments (some senders omit the header).
+ * (logo / tracking pixel). A real attachment needs a filename + attachmentId.
+ *
+ * Disposition decides when explicit: `attachment` → keep, `inline` → drop.
+ * When the part has no `Content-Disposition` header (common — many mailers omit
+ * it), it counts as inline ONLY if its `Content-ID` is actually referenced via
+ * `cid:<id>` in the message body (`refCids`). An unreferenced Content-ID — or no
+ * Content-ID at all — means a real attachment. This is why maut1 invoice PDFs
+ * (Content-ID present, never referenced, no disposition) were previously, and
+ * wrongly, dropped.
+ *
+ * `refCids` defaults to empty for isolated/unit use; callers that have the
+ * message body (collectAttachments) pass the real referenced-cid set.
  */
-export function isRealAttachment(p: gmail_v1.Schema$MessagePart): boolean {
+export function isRealAttachment(
+  p: gmail_v1.Schema$MessagePart,
+  refCids: Set<string> = new Set(),
+): boolean {
   if (!p.filename || !p.body?.attachmentId) return false;
   const disposition = partHeader(p, "Content-Disposition")?.trim().toLowerCase();
+  if (disposition?.startsWith("attachment")) return true;
   if (disposition?.startsWith("inline")) return false;
-  // `Content-ID` / `X-Attachment-Id` indicate an inline-referenced asset; only
-  // exclude when the part isn't explicitly flagged as an attachment.
-  const hasInlineRef =
-    partHeader(p, "Content-ID") !== undefined || partHeader(p, "X-Attachment-Id") !== undefined;
-  if (hasInlineRef && !disposition?.startsWith("attachment")) return false;
+  // No explicit disposition → inline only if its Content-ID is referenced in the body.
+  const cid = normalizeCid(partHeader(p, "Content-ID"));
+  if (cid && refCids.has(cid)) return false;
   return true;
 }
 
@@ -94,9 +127,11 @@ export function collectBodies(payload?: gmail_v1.Schema$MessagePart): { text: st
 
 /** Collect the real (non-inline) attachments of a message. */
 export function collectAttachments(m: gmail_v1.Schema$Message): Attachment[] {
+  const { text, html } = collectBodies(m.payload ?? undefined);
+  const refCids = referencedCids(html, text);
   const out: Attachment[] = [];
   walkParts(m.payload ?? undefined, (p) => {
-    if (isRealAttachment(p)) {
+    if (isRealAttachment(p, refCids)) {
       out.push({
         messageId: m.id!,
         attachmentId: p.body!.attachmentId!,
