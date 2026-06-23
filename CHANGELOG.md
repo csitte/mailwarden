@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Attachments with a `Content-ID` but no `Content-Disposition` are no longer
+  dropped.** Some mailers (e.g. maut1 invoice PDFs) tag a real attachment with a
+  `Content-ID` and omit the disposition header; the old heuristic treated any
+  `Content-ID` part as inline, so `get_thread` returned `attachments: []` and
+  `search` reported `hasAttachments: false` — making the file impossible to
+  download. A part without an explicit disposition now counts as inline only when
+  its `Content-ID` is actually referenced via `cid:<id>` in the message body
+  (new `referencedCids()` helper); an unreferenced `Content-ID` is a real
+  attachment, and `Content-Disposition: attachment` always wins.
+
 ## [0.1.2] - 2026-06-23
 
 ### Fixed
