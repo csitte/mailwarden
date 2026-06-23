@@ -5,6 +5,8 @@ import {
   collectBodies,
   isRealAttachment,
   looksLikeLabelId,
+  deriveLabelFilters,
+  threadMatchesFilters,
   Gmail,
 } from "../src/gmail.js";
 
@@ -108,6 +110,139 @@ describe("looksLikeLabelId", () => {
     for (const name of ["ToDo", "MCP/Snoozed", "Scanbot/zu-löschen"]) {
       expect(looksLikeLabelId(name)).toBe(false);
     }
+  });
+});
+
+describe("deriveLabelFilters — Bug 5: re-verify is:unread & co against live labels", () => {
+  it("maps read-state and category operators (with negation) to label predicates", () => {
+    expect(deriveLabelFilters("is:unread")).toEqual([{ labelId: "UNREAD", present: true }]);
+    expect(deriveLabelFilters("-is:unread")).toEqual([{ labelId: "UNREAD", present: false }]);
+    expect(deriveLabelFilters("is:read")).toEqual([{ labelId: "UNREAD", present: false }]);
+    expect(deriveLabelFilters("is:starred")).toEqual([{ labelId: "STARRED", present: true }]);
+    expect(deriveLabelFilters("is:unstarred")).toEqual([{ labelId: "STARRED", present: false }]);
+    expect(deriveLabelFilters("-in:inbox")).toEqual([{ labelId: "INBOX", present: false }]);
+    expect(deriveLabelFilters("category:updates")).toEqual([
+      { labelId: "CATEGORY_UPDATES", present: true },
+    ]);
+    expect(deriveLabelFilters("category:primary")).toEqual([
+      { labelId: "CATEGORY_PERSONAL", present: true },
+    ]);
+  });
+
+  it("collects every recognised token from a compound query, ignoring the rest", () => {
+    // the exact failing real-world query — plus free-text/date operators we don't map
+    expect(deriveLabelFilters("category:updates is:unread -in:inbox newer_than:30d invoice")).toEqual([
+      { labelId: "CATEGORY_UPDATES", present: true },
+      { labelId: "UNREAD", present: true },
+      { labelId: "INBOX", present: false },
+    ]);
+  });
+
+  it("is case-insensitive on the operator", () => {
+    expect(deriveLabelFilters("IS:UNREAD")).toEqual([{ labelId: "UNREAD", present: true }]);
+  });
+
+  it("returns no filter for queries with no mappable predicate", () => {
+    expect(deriveLabelFilters("from:foo@bar.com newer_than:7d")).toEqual([]);
+    expect(deriveLabelFilters("label:ToDo")).toEqual([]); // user-label names are not resolved here
+  });
+
+  it("disables filtering for boolean-grouped queries to respect the user's logic", () => {
+    expect(deriveLabelFilters("is:unread OR is:starred")).toEqual([]);
+    expect(deriveLabelFilters("{is:unread is:starred}")).toEqual([]);
+    expect(deriveLabelFilters("(is:unread from:x)")).toEqual([]);
+  });
+});
+
+describe("threadMatchesFilters", () => {
+  const filters = [
+    { labelId: "UNREAD", present: true },
+    { labelId: "INBOX", present: false },
+  ];
+  it("passes a thread satisfying every predicate", () => {
+    expect(threadMatchesFilters(["UNREAD", "CATEGORY_UPDATES"], filters)).toBe(true);
+  });
+  it("rejects a read thread (missing required UNREAD)", () => {
+    expect(threadMatchesFilters(["CATEGORY_UPDATES"], filters)).toBe(false);
+  });
+  it("rejects a thread carrying a forbidden label (INBOX present)", () => {
+    expect(threadMatchesFilters(["UNREAD", "INBOX"], filters)).toBe(false);
+  });
+  it("an empty filter set matches anything (raw index passthrough)", () => {
+    expect(threadMatchesFilters(["CATEGORY_PROMOTIONS"], [])).toBe(true);
+  });
+});
+
+describe("Gmail.search — drops index false positives via live-label re-verify", () => {
+  // Fake api whose threads.list index is LOOSE: it returns read mail for an
+  // is:unread query (the real Gmail bug). threads.get returns the true labels.
+  function fakeSearchApi(threads: Record<string, string[]>) {
+    const ids = Object.keys(threads);
+    let listMaxResults = 0;
+    let getCount = 0;
+    const api: any = {
+      users: {
+        threads: {
+          list: async (req: any) => {
+            listMaxResults = req.maxResults;
+            return { data: { threads: ids.map((id) => ({ id, snippet: `snip-${id}` })) } };
+          },
+          get: async (req: any) => {
+            getCount++;
+            return {
+              data: {
+                messages: [
+                  {
+                    id: `m-${req.id}`,
+                    labelIds: threads[req.id],
+                    snippet: `snip-${req.id}`,
+                    payload: { headers: [{ name: "Subject", value: `subj-${req.id}` }] },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      },
+    };
+    return { api, stats: () => ({ listMaxResults, getCount }) };
+  }
+
+  it("returns only genuinely-unread threads for an is:unread query", async () => {
+    const { api } = fakeSearchApi({
+      a: ["CATEGORY_UPDATES", "UNREAD"],
+      b: ["CATEGORY_UPDATES"], // read → index false positive, must be dropped
+      c: ["CATEGORY_UPDATES", "UNREAD"],
+    });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.search("category:updates is:unread -in:inbox", 25);
+    expect(res.map((r) => r.threadId)).toEqual(["a", "c"]);
+  });
+
+  it("over-scans candidates (full page) when filtering so maxResults stays meaningful", async () => {
+    const { api, stats } = fakeSearchApi({ a: ["UNREAD"] });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await gmail.search("is:unread", 25);
+    expect(stats().listMaxResults).toBe(100); // FILTER_SCAN_CAP, not 25
+  });
+
+  it("stops fetching once maxResults genuine matches are found (early break)", async () => {
+    const { api, stats } = fakeSearchApi({
+      a: ["UNREAD"],
+      b: ["UNREAD"],
+      c: ["UNREAD"], // should never be fetched once 2 are collected
+    });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.search("is:unread", 2);
+    expect(res.map((r) => r.threadId)).toEqual(["a", "b"]);
+    expect(stats().getCount).toBe(2);
+  });
+
+  it("leaves an unfiltered query untouched (lists exactly maxResults)", async () => {
+    const { api, stats } = fakeSearchApi({ a: ["INBOX"], b: ["INBOX"] });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await gmail.search("from:foo@bar.com", 25);
+    expect(stats().listMaxResults).toBe(25); // no over-scan when nothing to verify
   });
 });
 

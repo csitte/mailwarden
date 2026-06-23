@@ -8,11 +8,13 @@ Every operation hits the **live Gmail API** (no cached snapshot), so it reliably
 
 Hosted Gmail connectors run on a synced index that can silently miss messages. `mailwarden` talks straight to the Gmail API, so what you see is what's there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
 
+`search` goes one step further than the raw API: Gmail's `threads.list` index is sometimes *loose* for read-state operators — `is:unread` is silently dropped in some operator combinations (e.g. `category:updates is:unread -in:inbox` returns read mail too). Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
+
 ## Tools
 
 | Tool | What it does |
 |---|---|
-| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet) |
+| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
 | `modify_labels` | Add/remove labels (archive = remove `INBOX`, read = remove `UNREAD`) |

@@ -146,6 +146,78 @@ export function looksLikeLabelId(s: string): boolean {
   return SYSTEM_LABEL_IDS.has(s) || s.startsWith("CATEGORY_") || /^Label_/.test(s);
 }
 
+/** `category:` query values → their Gmail label id. `primary` is `CATEGORY_PERSONAL`. */
+const CATEGORY_IDS: Record<string, string> = {
+  primary: "CATEGORY_PERSONAL",
+  personal: "CATEGORY_PERSONAL",
+  social: "CATEGORY_SOCIAL",
+  promotions: "CATEGORY_PROMOTIONS",
+  updates: "CATEGORY_UPDATES",
+  forums: "CATEGORY_FORUMS",
+};
+
+/** A single label predicate to re-verify against a thread's live labels. */
+export interface LabelFilter {
+  labelId: string;
+  /** true = thread must carry this label; false = must NOT carry it. */
+  present: boolean;
+}
+
+/**
+ * Derive label predicates from a Gmail query so search hits can be re-checked
+ * against each thread's *live* labels.
+ *
+ * Why: Gmail's `threads.list` search index is sometimes loose for read-state
+ * operators — notably `is:unread` is silently dropped in some operator
+ * combinations (e.g. `category:updates is:unread -in:inbox`), so the index
+ * returns read mail too. Because `search()` already fetches every hit live, we
+ * can drop those false positives by comparing the predicates that map 1:1 to a
+ * system/category label.
+ *
+ * Only unambiguous predicates are translated. Anything else (free text,
+ * `label:NAME`, `from:`, `newer_than:`, …) yields no filter for that token, and
+ * an `OR` / parenthesised / braced query disables filtering entirely — so the
+ * raw index result always passes through unchanged. We only ever ADD precision,
+ * never drop a thread the user's boolean logic meant to keep.
+ */
+export function deriveLabelFilters(query: string): LabelFilter[] {
+  // Boolean grouping makes a flat AND post-filter unsafe → don't filter at all.
+  if (/\bOR\b|[(){}]/.test(query)) return [];
+
+  const filters: LabelFilter[] = [];
+  const add = (labelId: string, present: boolean) => filters.push({ labelId, present });
+
+  for (const raw of query.split(/\s+/)) {
+    if (!raw) continue;
+    const neg = raw.startsWith("-");
+    const tok = (neg ? raw.slice(1) : raw).toLowerCase();
+    switch (tok) {
+      case "is:unread": add("UNREAD", !neg); break;
+      case "is:read": add("UNREAD", neg); break;
+      case "is:starred": add("STARRED", !neg); break;
+      case "is:unstarred": add("STARRED", neg); break;
+      case "is:important": add("IMPORTANT", !neg); break;
+      case "is:unimportant": add("IMPORTANT", neg); break;
+      case "in:inbox": add("INBOX", !neg); break;
+      case "in:trash": add("TRASH", !neg); break;
+      case "in:spam": add("SPAM", !neg); break;
+      default: {
+        const cat = /^category:(\w+)$/.exec(tok);
+        if (cat && CATEGORY_IDS[cat[1]]) add(CATEGORY_IDS[cat[1]], !neg);
+      }
+    }
+  }
+  return filters;
+}
+
+/** True when a thread's (union) live labels satisfy every derived predicate. */
+export function threadMatchesFilters(labelIds: string[], filters: LabelFilter[]): boolean {
+  return filters.every((f) => labelIds.includes(f.labelId) === f.present);
+}
+
+/** Upper bound on candidate threads scanned when re-verifying labels (one list page). */
+const FILTER_SCAN_CAP = 100;
+
 /** Thin wrapper over the native Gmail API. Every call is live — no cache. */
 export class Gmail {
   private api: gmail_v1.Gmail;
@@ -161,9 +233,16 @@ export class Gmail {
   }
 
   async search(query: string, maxResults = 25): Promise<ThreadSummary[]> {
-    const list = await this.api.users.threads.list({ userId: "me", q: query, maxResults });
+    // Re-verify read-state/category predicates against live labels (the index is
+    // loose for `is:unread` & co). When filtering, the index may return false
+    // positives, so scan a full page of candidates and stop once enough genuinely
+    // match — keeping `maxResults` meaningful instead of silently short.
+    const filters = deriveLabelFilters(query);
+    const scanCap = filters.length ? FILTER_SCAN_CAP : maxResults;
+    const list = await this.api.users.threads.list({ userId: "me", q: query, maxResults: scanCap });
     const out: ThreadSummary[] = [];
     for (const t of list.data.threads ?? []) {
+      if (out.length >= maxResults) break;
       // 'full' (not 'metadata') so the MIME parts are present — otherwise attachment
       // detection always returns false (metadata format omits payload.parts).
       const meta = await this.api.users.threads.get({
@@ -172,6 +251,8 @@ export class Gmail {
         format: "full",
       });
       const msgs = meta.data.messages ?? [];
+      const labelIds = [...new Set(msgs.flatMap((m) => m.labelIds ?? []))];
+      if (!threadMatchesFilters(labelIds, filters)) continue; // drop index false positives
       const headers = msgs[0]?.payload?.headers ?? [];
       const h = (n: string) =>
         headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
@@ -181,7 +262,7 @@ export class Gmail {
         from: h("From"),
         subject: h("Subject"),
         date: h("Date"),
-        labelIds: [...new Set(msgs.flatMap((m) => m.labelIds ?? []))],
+        labelIds,
         snippet: t.snippet ?? msgs[0]?.snippet ?? "",
         hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),
       });
