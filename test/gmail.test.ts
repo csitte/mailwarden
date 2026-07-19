@@ -1,5 +1,8 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import type { gmail_v1 } from "googleapis";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import {
   collectAttachments,
   collectBodies,
@@ -8,6 +11,7 @@ import {
   looksLikeLabelId,
   deriveLabelFilters,
   threadMatchesFilters,
+  parseMessage,
   Gmail,
 } from "../src/gmail.js";
 
@@ -427,5 +431,369 @@ describe("modifyLabels — Bug 3: name → id resolution", () => {
 
     await gmail.modifyLabels("th-1", ["INBOX"], ["UNREAD"]);
     expect(listCalled).toBe(false);
+  });
+});
+
+describe("referencedCids — edge cases", () => {
+  it("merges cids from multiple bodies and stops at delimiters", () => {
+    expect(referencedCids('<img src="cid:a"> tail', "see (cid:b) and cid:c]")).toEqual(
+      new Set(["a", "b", "c"]),
+    );
+  });
+
+  it("matches the cid: prefix case-insensitively and lowercases the id", () => {
+    expect(referencedCids("CID:Upper")).toEqual(new Set(["upper"]));
+  });
+
+  it("returns an empty set for bodies without references", () => {
+    expect(referencedCids("", "no references here")).toEqual(new Set());
+  });
+});
+
+describe("isRealAttachment — precedence & preconditions", () => {
+  it("explicit Content-Disposition: attachment wins even over a referenced Content-ID", () => {
+    const p: gmail_v1.Schema$MessagePart = {
+      filename: "f.pdf",
+      headers: [
+        { name: "Content-Disposition", value: "attachment; filename=f.pdf" },
+        { name: "Content-ID", value: "<x>" },
+      ],
+      body: { attachmentId: "a", size: 1 },
+    };
+    expect(isRealAttachment(p, new Set(["x"]))).toBe(true);
+  });
+
+  it("matches Content-ID against referenced cids case-insensitively", () => {
+    const p: gmail_v1.Schema$MessagePart = {
+      filename: "logo.png",
+      headers: [{ name: "Content-ID", value: "<Logo1>" }],
+      body: { attachmentId: "a", size: 1 },
+    };
+    expect(isRealAttachment(p, referencedCids('<img src="cid:logo1">'))).toBe(false);
+  });
+
+  it("requires a filename and an attachmentId", () => {
+    expect(isRealAttachment({ filename: "", body: { attachmentId: "a" } })).toBe(false);
+    expect(isRealAttachment({ filename: "f.pdf", body: {} })).toBe(false);
+    expect(isRealAttachment({ filename: "f.pdf" })).toBe(false);
+  });
+});
+
+describe("collectBodies — nested multiparts", () => {
+  it("concatenates text parts across nesting levels", () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "multipart/alternative",
+          parts: [
+            { mimeType: "text/plain", body: { data: b64url("first ") } },
+            { mimeType: "text/html", body: { data: b64url("<p>html</p>") } },
+          ],
+        },
+        { mimeType: "text/plain", body: { data: b64url("second") } },
+      ],
+    };
+    const { text, html } = collectBodies(payload);
+    expect(text).toBe("first second");
+    expect(html).toBe("<p>html</p>");
+  });
+});
+
+describe("parseMessage — full integration", () => {
+  const message: gmail_v1.Schema$Message = {
+    id: "msg-9",
+    threadId: "th-9",
+    labelIds: ["INBOX", "UNREAD"],
+    snippet: "snippet text",
+    payload: {
+      mimeType: "multipart/mixed",
+      headers: [
+        { name: "From", value: "Alice <alice@example.com>" },
+        { name: "To", value: "bob@example.com" },
+        { name: "subject", value: "Hello" }, // lowercase on purpose
+        { name: "Date", value: "Sat, 18 Jul 2026 10:00:00 +0200" },
+      ],
+      parts: [
+        { mimeType: "text/plain", body: { data: b64url("body text") } },
+        {
+          filename: "doc.pdf",
+          mimeType: "application/pdf",
+          headers: [{ name: "Content-Disposition", value: "attachment" }],
+          body: { attachmentId: "att-1", size: 42 },
+        },
+      ],
+    },
+  };
+
+  it("maps headers (case-insensitively), bodies, labels, and attachments", () => {
+    const parsed = parseMessage(message);
+    expect(parsed).toMatchObject({
+      id: "msg-9",
+      threadId: "th-9",
+      labelIds: ["INBOX", "UNREAD"],
+      from: "Alice <alice@example.com>",
+      to: "bob@example.com",
+      subject: "Hello",
+      date: "Sat, 18 Jul 2026 10:00:00 +0200",
+      snippet: "snippet text",
+      plaintextBody: "body text",
+      htmlBody: "",
+    });
+    expect(parsed.attachments).toHaveLength(1);
+    expect(parsed.attachments[0]).toMatchObject({ messageId: "msg-9", attachmentId: "att-1" });
+  });
+
+  it("defaults missing headers and bodies to empty strings", () => {
+    const parsed = parseMessage({ id: "m", threadId: "t", payload: {} });
+    expect(parsed).toMatchObject({ from: "", to: "", subject: "", date: "", plaintextBody: "", htmlBody: "" });
+    expect(parsed.attachments).toEqual([]);
+  });
+});
+
+describe("deriveLabelFilters — remaining operators", () => {
+  it("maps importance and folder operators (with negation)", () => {
+    expect(deriveLabelFilters("is:important")).toEqual([{ labelId: "IMPORTANT", present: true }]);
+    expect(deriveLabelFilters("-is:important")).toEqual([{ labelId: "IMPORTANT", present: false }]);
+    expect(deriveLabelFilters("is:unimportant")).toEqual([{ labelId: "IMPORTANT", present: false }]);
+    expect(deriveLabelFilters("in:trash")).toEqual([{ labelId: "TRASH", present: true }]);
+    expect(deriveLabelFilters("in:spam")).toEqual([{ labelId: "SPAM", present: true }]);
+    expect(deriveLabelFilters("-in:trash")).toEqual([{ labelId: "TRASH", present: false }]);
+  });
+
+  it("maps negated categories and ignores unknown ones", () => {
+    expect(deriveLabelFilters("-category:social")).toEqual([{ labelId: "CATEGORY_SOCIAL", present: false }]);
+    expect(deriveLabelFilters("category:nonsense")).toEqual([]);
+  });
+});
+
+describe("Gmail.search — pagination", () => {
+  it("follows nextPageToken until enough candidates are collected", async () => {
+    const listCalls: any[] = [];
+    const api: any = {
+      users: {
+        threads: {
+          list: async (req: any) => {
+            listCalls.push(req);
+            // First page returns fewer threads than requested but has more.
+            if (!req.pageToken) return { data: { threads: [{ id: "a" }, { id: "b" }], nextPageToken: "p2" } };
+            return { data: { threads: [{ id: "c" }] } };
+          },
+          get: async (req: any) => ({
+            data: { messages: [{ id: `m-${req.id}`, labelIds: ["UNREAD"], payload: { headers: [] } }] },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.search("from:x", 3);
+    expect(res.map((r) => r.threadId)).toEqual(["a", "b", "c"]);
+    expect(listCalls[1].pageToken).toBe("p2");
+    expect(listCalls[1].maxResults).toBe(1); // only what's still missing
+  });
+
+  it("skips later chunks when the first chunk already yields maxResults", async () => {
+    let getCount = 0;
+    const ids = Array.from({ length: 10 }, (_, i) => `t${i}`);
+    const api: any = {
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: ids.map((id) => ({ id })) } }),
+          get: async (req: any) => {
+            getCount++;
+            return { data: { messages: [{ id: `m-${req.id}`, labelIds: ["UNREAD"], payload: { headers: [] } }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.search("is:unread", 2);
+    expect(res).toHaveLength(2);
+    expect(getCount).toBe(8); // exactly one GET_CONCURRENCY chunk, second chunk skipped
+  });
+});
+
+describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
+  it("getThread parses every message and passes the requested format", async () => {
+    const getCalls: any[] = [];
+    const api: any = {
+      users: {
+        threads: {
+          get: async (req: any) => {
+            getCalls.push(req);
+            return {
+              data: {
+                messages: [
+                  {
+                    id: "m1",
+                    threadId: "th-1",
+                    payload: {
+                      headers: [{ name: "Subject", value: "s1" }],
+                      mimeType: "text/plain",
+                      body: { data: b64url("hi") },
+                    },
+                  },
+                  { id: "m2", threadId: "th-1", payload: { headers: [{ name: "Subject", value: "s2" }] } },
+                ],
+              },
+            };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+
+    const res = await gmail.getThread("th-1");
+    expect(getCalls[0].format).toBe("full");
+    expect(res.messages).toHaveLength(2);
+    expect(res.messages[0]).toMatchObject({ id: "m1", subject: "s1", plaintextBody: "hi" });
+
+    await gmail.getThread("th-1", false);
+    expect(getCalls[1].format).toBe("metadata");
+  });
+
+  it("getThreadSubject uses a metadata-only fetch and defaults to empty", async () => {
+    const getCalls: any[] = [];
+    const api: any = {
+      users: {
+        threads: {
+          get: async (req: any) => {
+            getCalls.push(req);
+            return {
+              data: { messages: [{ payload: { headers: [{ name: "Subject", value: "the subject" }] } }] },
+            };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    expect(await gmail.getThreadSubject("th-1")).toBe("the subject");
+    expect(getCalls[0].format).toBe("metadata");
+    expect(getCalls[0].metadataHeaders).toEqual(["Subject"]);
+
+    api.users.threads.get = async () => ({ data: {} });
+    expect(await gmail.getThreadSubject("th-2")).toBe("");
+  });
+
+  it("listThreadIdsByLabel paginates and filters by the exact labelIds param", async () => {
+    const listCalls: any[] = [];
+    const api: any = {
+      users: {
+        threads: {
+          list: async (req: any) => {
+            listCalls.push(req);
+            if (!req.pageToken) return { data: { threads: [{ id: "a" }, { id: "b" }], nextPageToken: "p2" } };
+            return { data: { threads: [{ id: "c" }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    expect(await gmail.listThreadIdsByLabel("Label_7")).toEqual(["a", "b", "c"]);
+    expect(listCalls[0].labelIds).toEqual(["Label_7"]);
+    expect(listCalls[1].pageToken).toBe("p2");
+  });
+});
+
+describe("Gmail.ensureLabel", () => {
+  function fakeApi() {
+    const created: any[] = [];
+    const api: any = {
+      users: {
+        labels: {
+          list: async () => ({ data: { labels: [{ id: "Label_9", name: "ToDo", type: "user" }] } }),
+          create: async (req: any) => {
+            created.push(req);
+            return { data: { id: "Label_NEW" } };
+          },
+        },
+      },
+    };
+    return { api, created };
+  }
+
+  it("returns the existing id on a case-insensitive name match (no create)", async () => {
+    const { api, created } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    expect(await gmail.ensureLabel("todo")).toBe("Label_9");
+    expect(created).toHaveLength(0);
+  });
+
+  it("creates a genuinely new label", async () => {
+    const { api, created } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    expect(await gmail.ensureLabel("Brand/New")).toBe("Label_NEW");
+    expect(created[0].requestBody.name).toBe("Brand/New");
+  });
+});
+
+describe("Gmail.trash / untrash / deleteLabel — API pass-through", () => {
+  it("forwards the thread/label id to the right endpoint", async () => {
+    const calls: Record<string, any> = {};
+    const api: any = {
+      users: {
+        threads: {
+          trash: async (req: any) => (calls.trash = req),
+          untrash: async (req: any) => (calls.untrash = req),
+        },
+        labels: {
+          delete: async (req: any) => (calls.delete = req),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await gmail.trash("th-1");
+    await gmail.untrash("th-2");
+    await gmail.deleteLabel("Label_3");
+    expect(calls.trash).toMatchObject({ userId: "me", id: "th-1" });
+    expect(calls.untrash).toMatchObject({ userId: "me", id: "th-2" });
+    expect(calls.delete).toMatchObject({ userId: "me", id: "Label_3" });
+  });
+});
+
+describe("Gmail.downloadAttachment", () => {
+  const apiWith = (data: string | null) =>
+    ({
+      users: { messages: { attachments: { get: async () => ({ data: { data } }) } } },
+    }) as unknown as gmail_v1.Gmail;
+
+  let tmp: string;
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    if (tmp) await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  it("decodes base64url and creates missing destination directories", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    const gmail = new Gmail(apiWith(b64url("PDFDATA")));
+    const dest = path.join(tmp, "sub", "dir", "file.pdf"); // sub/dir does not exist yet
+    const saved = await gmail.downloadAttachment("m1", "a1", dest);
+    expect(saved).toBe(path.resolve(dest));
+    expect(await fs.readFile(saved, "utf8")).toBe("PDFDATA");
+  });
+
+  it("resolves a relative destPath inside MAILWARDEN_DOWNLOAD_DIR", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
+    const gmail = new Gmail(apiWith(b64url("X")));
+    const saved = await gmail.downloadAttachment("m1", "a1", "inbox/file.bin");
+    expect(saved).toBe(path.resolve(tmp, "inbox", "file.bin"));
+    expect(await fs.readFile(saved, "utf8")).toBe("X");
+  });
+
+  it("rejects a destPath escaping MAILWARDEN_DOWNLOAD_DIR", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
+    const gmail = new Gmail(apiWith(b64url("X")));
+    await expect(gmail.downloadAttachment("m1", "a1", "../evil.txt")).rejects.toThrow(/escapes/);
+    await expect(
+      gmail.downloadAttachment("m1", "a1", path.join(os.tmpdir(), "evil.txt")),
+    ).rejects.toThrow(/escapes/);
+  });
+
+  it("throws when the attachment has no data", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    const gmail = new Gmail(apiWith(null));
+    await expect(gmail.downloadAttachment("m1", "a1", path.join(tmp, "f"))).rejects.toThrow(/no data/);
   });
 });

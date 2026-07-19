@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isDue, isValidIsoDate, todayIso, sweepSnoozed, snooze } from "../src/snooze.js";
+import { isDue, isValidIsoDate, todayIso, sweepSnoozed, snooze, unsnooze, listSnoozed } from "../src/snooze.js";
 import { Gmail } from "../src/gmail.js";
 
 describe("todayIso — local calendar date, not UTC", () => {
@@ -59,6 +59,90 @@ describe("snooze — input validation", () => {
   });
 });
 
+describe("snooze — happy path", () => {
+  it("ensures parent + dated label, archives, and reports the due date", async () => {
+    const ensured: string[] = [];
+    const modified: any[] = [];
+    const fake: Partial<Gmail> = {
+      async ensureLabel(name: string) {
+        ensured.push(name);
+        return `id:${name}`;
+      },
+      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
+        modified.push({ threadId, add, remove });
+      },
+    };
+
+    const res = await snooze(fake as Gmail, "th-1", "2026-08-01");
+
+    expect(ensured).toEqual(["MCP/Snoozed", "MCP/Snoozed/2026-08-01"]);
+    expect(modified).toEqual([
+      { threadId: "th-1", add: ["id:MCP/Snoozed", "id:MCP/Snoozed/2026-08-01"], remove: ["INBOX"] },
+    ]);
+    expect(res).toEqual({ threadId: "th-1", snoozedUntil: "2026-08-01" });
+  });
+});
+
+describe("unsnooze", () => {
+  it("returns the thread to the inbox and strips ALL snooze labels — but does not force UNREAD", async () => {
+    const modified: any[] = [];
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [
+          { id: "Label_parent", name: "MCP/Snoozed", type: "user" },
+          { id: "Label_a", name: "MCP/Snoozed/2026-08-01", type: "user" },
+          { id: "Label_b", name: "MCP/Snoozed/2026-09-15", type: "user" },
+          { id: "Label_todo", name: "ToDo", type: "user" },
+        ];
+      },
+      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
+        modified.push({ threadId, add, remove });
+      },
+    };
+
+    const res = await unsnooze(fake as Gmail, "th-1");
+
+    expect(modified).toEqual([
+      { threadId: "th-1", add: ["INBOX"], remove: ["Label_parent", "Label_a", "Label_b"] },
+    ]);
+    expect(res).toEqual({ threadId: "th-1", unsnoozed: true });
+  });
+});
+
+describe("listSnoozed", () => {
+  it("lists threads per dated label with subjects, sorted by due date; skips non-dated sub-labels", async () => {
+    const listedLabels: string[] = [];
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [
+          { id: "Label_parent", name: "MCP/Snoozed", type: "user" },
+          { id: "Label_b", name: "MCP/Snoozed/2026-09-15", type: "user" },
+          { id: "Label_a", name: "MCP/Snoozed/2026-08-01", type: "user" },
+          { id: "Label_archiv", name: "MCP/Snoozed/Archiv", type: "user" },
+          { id: "Label_todo", name: "ToDo", type: "user" },
+        ];
+      },
+      async listThreadIdsByLabel(labelId: string) {
+        listedLabels.push(labelId);
+        return labelId === "Label_a" ? ["t1"] : labelId === "Label_b" ? ["t2", "t3"] : [];
+      },
+      async getThreadSubject(threadId: string) {
+        return `subj-${threadId}`;
+      },
+    };
+
+    const res = await listSnoozed(fake as Gmail);
+
+    expect(res).toEqual([
+      { threadId: "t1", subject: "subj-t1", snoozedUntil: "2026-08-01" },
+      { threadId: "t2", subject: "subj-t2", snoozedUntil: "2026-09-15" },
+      { threadId: "t3", subject: "subj-t3", snoozedUntil: "2026-09-15" },
+    ]);
+    // parent, Archiv, and unrelated labels are never queried
+    expect(listedLabels.sort()).toEqual(["Label_a", "Label_b"]);
+  });
+});
+
 describe("sweepSnoozed", () => {
   /**
    * Fake Gmail that simulates a dated label. listThreadIdsByLabel returns the
@@ -111,5 +195,55 @@ describe("sweepSnoozed", () => {
     const { gmail } = makeFakeGmail(0);
     const res = await sweepSnoozed(gmail, new Date(2026, 5, 20));
     expect(res.wokenCount).toBe(0); // Label_archiv never swept
+  });
+
+  it("wakes threads into the inbox as unread, stripping dated + parent label", async () => {
+    const modified: any[] = [];
+    let remaining = ["th-0"];
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [
+          { id: "Label_parent", name: "MCP/Snoozed", type: "user" },
+          { id: "Label_due", name: "MCP/Snoozed/2026-06-01", type: "user" },
+        ];
+      },
+      async listThreadIdsByLabel() {
+        return [...remaining];
+      },
+      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
+        modified.push({ threadId, add, remove });
+        remaining = remaining.filter((t) => t !== threadId);
+      },
+      async deleteLabel() {},
+    };
+
+    await sweepSnoozed(fake as Gmail, new Date(2026, 5, 20));
+
+    expect(modified).toEqual([
+      { threadId: "th-0", add: ["INBOX", "UNREAD"], remove: ["Label_due", "Label_parent"] },
+    ]);
+  });
+
+  it("works when the parent label is missing (only the dated label is stripped)", async () => {
+    const modified: any[] = [];
+    let remaining = ["th-0"];
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [{ id: "Label_due", name: "MCP/Snoozed/2026-06-01", type: "user" }];
+      },
+      async listThreadIdsByLabel() {
+        return [...remaining];
+      },
+      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
+        modified.push({ threadId, add, remove });
+        remaining = remaining.filter((t) => t !== threadId);
+      },
+      async deleteLabel() {},
+    };
+
+    const res = await sweepSnoozed(fake as Gmail, new Date(2026, 5, 20));
+
+    expect(modified[0].remove).toEqual(["Label_due"]);
+    expect(res.wokenCount).toBe(1);
   });
 });
