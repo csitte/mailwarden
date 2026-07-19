@@ -5,6 +5,59 @@ All notable changes to **mailwarden** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **HTTP transport: fresh `McpServer` per request.** A single shared server was
+  `connect()`ed to a new transport on every POST; each connect replaces the
+  previous transport, cross-wiring concurrent requests. Stateless mode now
+  builds a per-request server (`makeServer()`), as the SDK intends.
+- **Snooze sweep uses the local calendar date, not UTC.** East of Greenwich a
+  sweep shortly after local midnight still saw yesterday's date and woke
+  today's snoozes hours late.
+- **Sweep can no longer lose snoozes.** A dated label is only deleted after a
+  listing proves it empty; previously the label was deleted even when the
+  drain loop hit its iteration cap, leaving archived threads without their
+  snooze label — never to resurface.
+- **Sweep and `list_snoozed` filter by exact `labelIds`** (new
+  `listThreadIdsByLabel`, fully paginated) instead of a `label:"…"` search
+  query — the search index can lag behind just-applied label changes, and the
+  old path fetched full thread bodies it never needed. `list_snoozed` is no
+  longer capped at 100 threads per date.
+- **Non-UTF-8 bodies decode correctly.** `collectBodies` now honors the
+  part's `Content-Type` charset (ISO-8859-1 / windows-1252 mail was mojibake);
+  unknown charset labels fall back to UTF-8.
+- **`snooze` rejects impossible dates.** `2026-99-99` passed the format regex
+  and produced a label that would not become due for months; dates are now
+  validated as real calendar dates and must not lie in the past.
+- **Sweep never deletes non-dated sub-labels.** A manual label like
+  `MCP/Snoozed/Archiv` was matchable by the dueness check; only strict
+  `YYYY-MM-DD` suffixes are swept.
+- **Label names resolve case-insensitively** in `modify_labels`/`ensureLabel`,
+  matching Gmail's case-insensitive uniqueness — `todo` no longer triggers a
+  doomed create when `ToDo` exists.
+- **Quoted queries disable the search post-filter.** A literal `is:unread`
+  inside a quoted phrase was parsed as a predicate and wrongly dropped hits.
+- **`search` follows `pageToken`s** when collecting candidates — a single list
+  page may return fewer threads than requested even when more exist.
+- The MCP handshake reports the real package version (was hardcoded `0.1.1`).
+- `--auth` fails with a clear message when `credentials.json` is missing or
+  malformed (was a bare `TypeError`).
+
+### Changed
+- `search` fetches thread details in parallel chunks of 8 (was strictly
+  sequential — a filtered search could take many seconds).
+- `download_attachment` creates the destination directory, and honors a new
+  `MAILWARDEN_DOWNLOAD_DIR` env var that confines writes to that directory —
+  strongly recommended for HTTP-hosted deployments, where an unconfined
+  `destPath` amounts to an arbitrary file write on the server.
+- HTTP bearer-token check uses a constant-time comparison.
+- `MAILWARDEN_AUTO_SWEEP=1` sweeps once at startup (first tick used to be an
+  hour away); the timer no longer keeps a closing process alive (`unref`).
+- `token.json` is written with mode `0600` (contains a refresh token).
+- Tool registration migrated from the deprecated `server.tool()` to
+  `server.registerTool()` (SDK ≥ 1.12 API); test suite grown to 46 tests.
+
 ## [0.1.3] - 2026-07-19
 
 ### Fixed
@@ -86,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.1.3...HEAD
 [0.1.3]: https://github.com/csitte/mailwarden/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/csitte/mailwarden/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/csitte/mailwarden/compare/v0.1.0...v0.1.1

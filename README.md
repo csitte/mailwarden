@@ -73,13 +73,14 @@ claude mcp add --transport http mailwarden https://your-host/mcp
 |---|---|
 | `MAILWARDEN_DIR` | config dir (default `~/.mailwarden`) |
 | `MAILWARDEN_CREDENTIALS` | path to `credentials.json` |
-| `MAILWARDEN_AUTO_SWEEP` | `1` → hourly snooze sweep while running |
+| `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running |
+| `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
 | `PORT` | HTTP port (default 8787) |
 | `MAILWARDEN_TOKEN` | optional bearer token for the HTTP endpoint |
 
 ## Status
 
-`0.1.3` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (35 tests). The HTTP transport is a thin wrapper to verify against your installed `@modelcontextprotocol/sdk` version. See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+`0.1.3` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (46 tests). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

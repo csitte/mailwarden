@@ -164,6 +164,25 @@ describe("collectBodies — Bug 4: base64url decode", () => {
     };
     expect(collectBodies(payload).text).toBe(original);
   });
+
+  it("decodes a non-UTF-8 part via its Content-Type charset (no mojibake)", () => {
+    const original = "Grüße für März";
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "text/plain",
+      headers: [{ name: "Content-Type", value: 'text/plain; charset="ISO-8859-1"' }],
+      body: { data: Buffer.from(original, "latin1").toString("base64url") },
+    };
+    expect(collectBodies(payload).text).toBe(original);
+  });
+
+  it("falls back to UTF-8 for an unknown charset label", () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "text/plain",
+      headers: [{ name: "Content-Type", value: "text/plain; charset=x-no-such-charset" }],
+      body: { data: b64url("plain body") },
+    };
+    expect(collectBodies(payload).text).toBe("plain body");
+  });
 });
 
 describe("looksLikeLabelId", () => {
@@ -217,6 +236,11 @@ describe("deriveLabelFilters — Bug 5: re-verify is:unread & co against live la
     expect(deriveLabelFilters("is:unread OR is:starred")).toEqual([]);
     expect(deriveLabelFilters("{is:unread is:starred}")).toEqual([]);
     expect(deriveLabelFilters("(is:unread from:x)")).toEqual([]);
+  });
+
+  it("disables filtering for quoted queries (a literal is:unread inside a phrase is not a predicate)", () => {
+    expect(deriveLabelFilters('subject:"bitte is:unread prüfen"')).toEqual([]);
+    expect(deriveLabelFilters('"exact phrase" is:unread')).toEqual([]);
   });
 });
 
@@ -292,16 +316,20 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     expect(stats().listMaxResults).toBe(100); // FILTER_SCAN_CAP, not 25
   });
 
-  it("stops fetching once maxResults genuine matches are found (early break)", async () => {
+  it("stops fetching once maxResults genuine matches are found (early break, chunk granularity)", async () => {
+    // gets run in parallel chunks of GET_CONCURRENCY (8) — the early break can
+    // overshoot by at most one chunk, so 3 candidates are all fetched at once,
+    // but only the first 2 are returned. With 9+ candidates the second chunk
+    // would be skipped.
     const { api, stats } = fakeSearchApi({
       a: ["UNREAD"],
       b: ["UNREAD"],
-      c: ["UNREAD"], // should never be fetched once 2 are collected
+      c: ["UNREAD"],
     });
     const gmail = new Gmail(api as gmail_v1.Gmail);
     const res = await gmail.search("is:unread", 2);
     expect(res.map((r) => r.threadId)).toEqual(["a", "b"]);
-    expect(stats().getCount).toBe(2);
+    expect(stats().getCount).toBeLessThanOrEqual(8); // one chunk, not the full page
   });
 
   it("leaves an unfiltered query untouched (lists exactly maxResults)", async () => {
@@ -375,6 +403,17 @@ describe("modifyLabels — Bug 3: name → id resolution", () => {
 
     expect(calls.modify[0].requestBody.removeLabelIds).toEqual([]);
     expect(calls.create).toHaveLength(0);
+  });
+
+  it("resolves names case-insensitively (Gmail label names are unique case-insensitively)", async () => {
+    const { api, calls } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+
+    await gmail.modifyLabels("th-1", ["todo"], ["SCANBOT/ABGELEGT"]);
+
+    expect(calls.modify[0].requestBody.addLabelIds).toEqual(["Label_21"]);
+    expect(calls.modify[0].requestBody.removeLabelIds).toEqual(["Label_7"]);
+    expect(calls.create).toHaveLength(0); // no bogus create that the API would reject as a conflict
   });
 
   it("skips listLabels() when only ids are passed (no name lookup needed)", async () => {

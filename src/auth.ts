@@ -22,8 +22,20 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
 }
 
 async function persistToken(client: OAuth2Client): Promise<void> {
-  const keys = JSON.parse(await fs.readFile(CRED_PATH, "utf8"));
+  let keys: { installed?: { client_id?: string; client_secret?: string }; web?: { client_id?: string; client_secret?: string } };
+  try {
+    keys = JSON.parse(await fs.readFile(CRED_PATH, "utf8"));
+  } catch {
+    throw new Error(
+      `Cannot read OAuth credentials at ${CRED_PATH} — download the OAuth client JSON from the Google Cloud Console and place it there (see README).`,
+    );
+  }
   const key = keys.installed ?? keys.web;
+  if (!key?.client_id || !key.client_secret) {
+    throw new Error(
+      `Unexpected format in ${CRED_PATH} — expected an "installed" or "web" OAuth client with client_id and client_secret.`,
+    );
+  }
   await fs.mkdir(CONFIG_DIR, { recursive: true });
   await fs.writeFile(
     TOKEN_PATH,
@@ -37,6 +49,7 @@ async function persistToken(client: OAuth2Client): Promise<void> {
       null,
       2,
     ),
+    { mode: 0o600 }, // holds a refresh token + client secret; no-op on Windows
   );
 }
 

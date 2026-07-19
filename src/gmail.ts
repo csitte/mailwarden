@@ -1,6 +1,7 @@
 import { google, gmail_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import fs from "node:fs/promises";
+import path from "node:path";
 
 export interface ThreadSummary {
   threadId: string;
@@ -113,14 +114,32 @@ export function isRealAttachment(
   return true;
 }
 
+/** Charset of a part, from the `charset=` parameter of its Content-Type header. */
+function partCharset(p: gmail_v1.Schema$MessagePart): string {
+  const ct = partHeader(p, "Content-Type");
+  const m = ct ? /charset\s*=\s*"?([\w.:-]+)"?/i.exec(ct) : null;
+  return m?.[1] ?? "utf-8";
+}
+
 /** Decode + concatenate the text/plain and text/html bodies of a message payload. */
 export function collectBodies(payload?: gmail_v1.Schema$MessagePart): { text: string; html: string } {
   let text = "";
   let html = "";
-  const decode = (d?: string | null) => (d ? Buffer.from(d, "base64url").toString("utf8") : "");
+  // `body.data` holds the part's raw bytes in its declared charset — decoding
+  // everything as UTF-8 turns ISO-8859-1 / windows-1252 mail into mojibake.
+  const decode = (p: gmail_v1.Schema$MessagePart): string => {
+    const d = p.body?.data;
+    if (!d) return "";
+    const buf = Buffer.from(d, "base64url");
+    try {
+      return new TextDecoder(partCharset(p)).decode(buf);
+    } catch {
+      return buf.toString("utf8"); // unknown charset label → best-effort UTF-8
+    }
+  };
   walkParts(payload, (p) => {
-    if (p.mimeType === "text/plain") text += decode(p.body?.data);
-    else if (p.mimeType === "text/html") html += decode(p.body?.data);
+    if (p.mimeType === "text/plain") text += decode(p);
+    else if (p.mimeType === "text/html") html += decode(p);
   });
   return { text, html };
 }
@@ -211,13 +230,15 @@ export interface LabelFilter {
  *
  * Only unambiguous predicates are translated. Anything else (free text,
  * `label:NAME`, `from:`, `newer_than:`, …) yields no filter for that token, and
- * an `OR` / parenthesised / braced query disables filtering entirely — so the
- * raw index result always passes through unchanged. We only ever ADD precision,
- * never drop a thread the user's boolean logic meant to keep.
+ * an `OR` / parenthesised / braced / quoted query disables filtering entirely —
+ * so the raw index result always passes through unchanged. We only ever ADD
+ * precision, never drop a thread the user's boolean logic meant to keep.
  */
 export function deriveLabelFilters(query: string): LabelFilter[] {
   // Boolean grouping makes a flat AND post-filter unsafe → don't filter at all.
-  if (/\bOR\b|[(){}]/.test(query)) return [];
+  // Quotes too: the whitespace tokenizer below would read a literal `is:unread`
+  // inside a quoted phrase as a predicate and wrongly drop read hits.
+  if (/\bOR\b|["(){}]/.test(query)) return [];
 
   const filters: LabelFilter[] = [];
   const add = (labelId: string, present: boolean) => filters.push({ labelId, present });
@@ -250,8 +271,11 @@ export function threadMatchesFilters(labelIds: string[], filters: LabelFilter[])
   return filters.every((f) => labelIds.includes(f.labelId) === f.present);
 }
 
-/** Upper bound on candidate threads scanned when re-verifying labels (one list page). */
+/** Upper bound on candidate threads scanned when re-verifying labels. */
 const FILTER_SCAN_CAP = 100;
+
+/** Max concurrent threads.get calls while resolving search candidates. */
+const GET_CONCURRENCY = 8;
 
 /** Thin wrapper over the native Gmail API. Every call is live — no cache. */
 export class Gmail {
@@ -274,35 +298,86 @@ export class Gmail {
     // match — keeping `maxResults` meaningful instead of silently short.
     const filters = deriveLabelFilters(query);
     const scanCap = filters.length ? FILTER_SCAN_CAP : maxResults;
-    const list = await this.api.users.threads.list({ userId: "me", q: query, maxResults: scanCap });
-    const out: ThreadSummary[] = [];
-    for (const t of list.data.threads ?? []) {
-      if (out.length >= maxResults) break;
-      // 'full' (not 'metadata') so the MIME parts are present — otherwise attachment
-      // detection always returns false (metadata format omits payload.parts).
-      const meta = await this.api.users.threads.get({
+
+    // A single list page may return fewer threads than requested even when more
+    // exist — follow pageTokens until the scan cap is reached or pages run out.
+    const candidates: gmail_v1.Schema$Thread[] = [];
+    let pageToken: string | undefined;
+    do {
+      const list = await this.api.users.threads.list({
         userId: "me",
-        id: t.id!,
-        format: "full",
+        q: query,
+        maxResults: scanCap - candidates.length,
+        ...(pageToken ? { pageToken } : {}),
       });
-      const msgs = meta.data.messages ?? [];
-      const labelIds = [...new Set(msgs.flatMap((m) => m.labelIds ?? []))];
-      if (!threadMatchesFilters(labelIds, filters)) continue; // drop index false positives
-      const headers = msgs[0]?.payload?.headers ?? [];
-      const h = (n: string) =>
-        headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
-      out.push({
-        threadId: t.id!,
-        messageCount: msgs.length,
-        from: h("From"),
-        subject: h("Subject"),
-        date: h("Date"),
-        labelIds,
-        snippet: t.snippet ?? msgs[0]?.snippet ?? "",
-        hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),
-      });
+      candidates.push(...(list.data.threads ?? []));
+      pageToken = list.data.nextPageToken ?? undefined;
+    } while (pageToken && candidates.length < scanCap);
+
+    // 'full' (not 'metadata') so the MIME parts are present — otherwise attachment
+    // detection always returns false (metadata format omits payload.parts). The
+    // gets run in small parallel chunks; the early break past maxResults can
+    // overshoot by at most one chunk.
+    const out: ThreadSummary[] = [];
+    for (let i = 0; i < candidates.length && out.length < maxResults; i += GET_CONCURRENCY) {
+      const chunk = candidates.slice(i, i + GET_CONCURRENCY);
+      const metas = await Promise.all(
+        chunk.map((t) => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" })),
+      );
+      for (let j = 0; j < chunk.length && out.length < maxResults; j++) {
+        const t = chunk[j];
+        const msgs = metas[j].data.messages ?? [];
+        const labelIds = [...new Set(msgs.flatMap((m) => m.labelIds ?? []))];
+        if (!threadMatchesFilters(labelIds, filters)) continue; // drop index false positives
+        const headers = msgs[0]?.payload?.headers ?? [];
+        const h = (n: string) =>
+          headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+        out.push({
+          threadId: t.id!,
+          messageCount: msgs.length,
+          from: h("From"),
+          subject: h("Subject"),
+          date: h("Date"),
+          labelIds,
+          snippet: t.snippet ?? msgs[0]?.snippet ?? "",
+          hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),
+        });
+      }
     }
     return out;
+  }
+
+  /**
+   * All thread ids currently carrying a label. Filters via the exact `labelIds`
+   * parameter — not the search index, which can lag behind recent label changes —
+   * and needs only cheap list pages, no per-thread fetch.
+   */
+  async listThreadIdsByLabel(labelId: string): Promise<string[]> {
+    const ids: string[] = [];
+    let pageToken: string | undefined;
+    do {
+      const res = await this.api.users.threads.list({
+        userId: "me",
+        labelIds: [labelId],
+        maxResults: 100,
+        ...(pageToken ? { pageToken } : {}),
+      });
+      for (const t of res.data.threads ?? []) ids.push(t.id!);
+      pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken);
+    return ids;
+  }
+
+  /** Subject of a thread's first message, via a metadata-only fetch. */
+  async getThreadSubject(threadId: string): Promise<string> {
+    const res = await this.api.users.threads.get({
+      userId: "me",
+      id: threadId,
+      format: "metadata",
+      metadataHeaders: ["Subject"],
+    });
+    const headers = res.data.messages?.[0]?.payload?.headers ?? [];
+    return headers.find((h) => h.name?.toLowerCase() === "subject")?.value ?? "";
   }
 
   async getThread(threadId: string, full = true): Promise<{ threadId: string; messages: ParsedMessage[] }> {
@@ -323,22 +398,25 @@ export class Gmail {
    */
   async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []): Promise<void> {
     const needsLookup = [...add, ...remove].some((s) => !looksLikeLabelId(s));
+    // Keyed lowercase: Gmail label names are unique case-insensitively, and a
+    // case-sensitive miss would send `add` into ensureLabel, whose create the
+    // API then rejects as a name conflict.
     const byName = new Map<string, string>();
     if (needsLookup) {
-      for (const l of await this.listLabels()) byName.set(l.name, l.id);
+      for (const l of await this.listLabels()) byName.set(l.name.toLowerCase(), l.id);
     }
 
     const addLabelIds: string[] = [];
     for (const s of add) {
       if (looksLikeLabelId(s)) addLabelIds.push(s);
-      else addLabelIds.push(byName.get(s) ?? (await this.ensureLabel(s)));
+      else addLabelIds.push(byName.get(s.toLowerCase()) ?? (await this.ensureLabel(s)));
     }
 
     const removeLabelIds: string[] = [];
     for (const s of remove) {
       if (looksLikeLabelId(s)) removeLabelIds.push(s);
       else {
-        const id = byName.get(s);
+        const id = byName.get(s.toLowerCase());
         if (id) removeLabelIds.push(id); // unknown name → nothing to remove, skip
       }
     }
@@ -365,7 +443,9 @@ export class Gmail {
 
   /** Returns the id of an existing label by name, creating it (and any parent path) if missing. */
   async ensureLabel(name: string): Promise<string> {
-    const existing = (await this.listLabels()).find((l) => l.name === name);
+    const existing = (await this.listLabels()).find(
+      (l) => l.name.toLowerCase() === name.toLowerCase(),
+    );
     if (existing) return existing.id;
     const res = await this.api.users.labels.create({
       userId: "me",
@@ -379,10 +459,23 @@ export class Gmail {
   }
 
   async downloadAttachment(messageId: string, attachmentId: string, destPath: string): Promise<string> {
+    // destPath is MCP-client-controlled. With MAILWARDEN_DOWNLOAD_DIR set,
+    // relative paths resolve inside it and the result must stay inside it —
+    // without the fence, an HTTP-hosted deployment would hand every client an
+    // arbitrary file write on the server.
+    const root = process.env.MAILWARDEN_DOWNLOAD_DIR;
+    const dest = root ? path.resolve(root, destPath) : path.resolve(destPath);
+    if (root) {
+      const fence = path.resolve(root);
+      if (dest !== fence && !dest.startsWith(fence + path.sep)) {
+        throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR (${fence}).`);
+      }
+    }
     const res = await this.api.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId });
     if (!res.data.data) throw new Error("Attachment has no data.");
-    await fs.writeFile(destPath, Buffer.from(res.data.data, "base64url"));
-    return destPath;
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    await fs.writeFile(dest, Buffer.from(res.data.data, "base64url"));
+    return dest;
   }
 }
 
