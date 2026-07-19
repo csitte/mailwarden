@@ -5,7 +5,7 @@ All notable changes to **mailwarden** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.4] - 2026-07-19
 
 ### Fixed
 - **HTTP transport: fresh `McpServer` per request.** A single shared server was
@@ -139,7 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.1.3...HEAD
+[0.1.4]: https://github.com/csitte/mailwarden/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/csitte/mailwarden/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/csitte/mailwarden/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/csitte/mailwarden/compare/v0.1.0...v0.1.1
