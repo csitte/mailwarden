@@ -7,7 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-07-19
+
 ### Added
+- **Published to npm** — install via `npx -y mailwarden`, no clone/build needed.
+- `mcpName` field + `server.json` for listing in the official MCP registry.
+- `repository`, `homepage`, and `bugs` metadata so the npm and registry pages
+  link back to the source.
+- `prepublishOnly` script (`build && test`) so a stale `dist/` can never ship.
+- README now leads with an `npx` quick-start; Claude Desktop JSON snippet and a
+  "from source" section added.
+
+### Added (test suite)
 - **Test suite expanded from 46 to 82 tests** — now covering `parseMessage`,
   `getThread`, `getThreadSubject`, `listThreadIdsByLabel`, `ensureLabel`,
   `trash`/`untrash`/`deleteLabel`, `search` pagination + chunked early-break,

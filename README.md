@@ -1,5 +1,9 @@
 # mailwarden
 
+[![npm](https://img.shields.io/npm/v/mailwarden)](https://www.npmjs.com/package/mailwarden)
+[![license](https://img.shields.io/npm/l/mailwarden)](LICENSE)
+[![Node](https://img.shields.io/node/v/mailwarden)](package.json)
+
 A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox control for AI assistants, with the feature nobody else ships: **snooze**.
 
 Every operation hits the **live Gmail API** (no cached snapshot), so it reliably sees *all* your mail — search, read, label, archive, trash, download attachments, and snooze threads until a date.
@@ -33,39 +37,53 @@ Hosted Gmail connectors run on a synced index that can silently miss messages. `
 - via cron: `mailwarden --sweep`,
 - or automatically: set `MAILWARDEN_AUTO_SWEEP=1` (hourly sweep while the server runs).
 
+## Quick start
+
+```bash
+claude mcp add mailwarden -- npx -y mailwarden
+```
+
+That's the whole install — `npx` fetches and runs the published package, no clone or build step. You only need Google OAuth credentials once (below).
+
 ## Setup
 
 1. **Google Cloud:** create a project → enable the **Gmail API** → configure the OAuth consent screen → create an **OAuth client ID** of type *Desktop app* → download it as `credentials.json`.
 2. Put `credentials.json` in `~/.mailwarden/` (or set `MAILWARDEN_CREDENTIALS=/path/to/credentials.json`).
-3. Install & authorize once:
+3. Authorize once — opens a browser, stores a refresh token in `~/.mailwarden/token.json`:
    ```bash
-   npm install && npm run build
-   mailwarden --auth        # opens a browser, stores a refresh token in ~/.mailwarden/token.json
+   npx -y mailwarden --auth
    ```
    Scope requested: `https://www.googleapis.com/auth/gmail.modify`.
 
-## Run
-
-- **Local (stdio)** — for Claude Code / Claude Desktop:
-  ```bash
-  mailwarden
-  ```
-- **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
-  ```bash
-  mailwarden --http       # listens on :8787/mcp ; set PORT, optional MAILWARDEN_TOKEN bearer gate
-  ```
-
 ## Connect
 
-**Claude Code:**
+**Claude Code** (local stdio):
 ```bash
-# local stdio
-claude mcp add mailwarden -- mailwarden
-# or remote
-claude mcp add --transport http mailwarden https://your-host/mcp
+claude mcp add mailwarden -- npx -y mailwarden
 ```
 
-**claude.ai (web):** Settings → Connectors → *Add custom connector* → your `https://your-host/mcp` URL.
+**Claude Desktop** — add to `claude_desktop_config.json`:
+```json
+{
+  "mcpServers": {
+    "mailwarden": { "command": "npx", "args": ["-y", "mailwarden"] }
+  }
+}
+```
+
+**Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
+```bash
+npx -y mailwarden --http     # listens on :8787/mcp ; set PORT, optional MAILWARDEN_TOKEN bearer gate
+```
+Then in claude.ai: Settings → Connectors → *Add custom connector* → your `https://your-host/mcp` URL. In Claude Code: `claude mcp add --transport http mailwarden https://your-host/mcp`.
+
+## From source
+
+```bash
+git clone https://github.com/csitte/mailwarden && cd mailwarden
+npm install && npm run build
+node dist/index.js --auth
+```
 
 ## Config (env)
 
@@ -80,7 +98,7 @@ claude mcp add --transport http mailwarden https://your-host/mcp
 
 ## Status
 
-`0.1.4` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (82 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+`0.1.5` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (82 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

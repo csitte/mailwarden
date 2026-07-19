@@ -1,0 +1,42 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-07-09/server.json",
+  "name": "io.github.csitte/mailwarden",
+  "description": "A reliable, native Gmail MCP server with full mailbox control — search, labels, archive, trash, attachments, and snooze.",
+  "repository": {
+    "url": "https://github.com/csitte/mailwarden",
+    "source": "github"
+  },
+  "version": "0.1.5",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "mailwarden",
+      "version": "0.1.5",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MAILWARDEN_DIR",
+          "description": "Config directory (default ~/.mailwarden), holds credentials.json and token.json",
+          "isRequired": false
+        },
+        {
+          "name": "MAILWARDEN_CREDENTIALS",
+          "description": "Path to the Google OAuth credentials.json (Desktop app client)",
+          "isRequired": false
+        },
+        {
+          "name": "MAILWARDEN_AUTO_SWEEP",
+          "description": "Set to 1 to sweep due snoozes at startup and hourly while running",
+          "isRequired": false
+        },
+        {
+          "name": "MAILWARDEN_DOWNLOAD_DIR",
+          "description": "Restrict download_attachment writes to this directory (recommended for HTTP hosting)",
+          "isRequired": false
+        }
+      ]
+    }
+  ]
+}

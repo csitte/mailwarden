@@ -1,12 +1,21 @@
 {
   "name": "mailwarden",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "A reliable, native Gmail MCP server with full mailbox control — search, labels, archive, trash, attachments, and snooze.",
+  "mcpName": "io.github.csitte/mailwarden",
   "type": "module",
   "bin": {
     "mailwarden": "dist/index.js"
   },
   "main": "dist/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/csitte/mailwarden.git"
+  },
+  "homepage": "https://github.com/csitte/mailwarden#readme",
+  "bugs": {
+    "url": "https://github.com/csitte/mailwarden/issues"
+  },
   "files": [
     "dist",
     "README.md",
@@ -14,6 +23,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "npm run build && npm test",
     "test": "vitest run",
     "coverage": "vitest run --coverage",
     "start": "node dist/index.js",
