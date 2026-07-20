@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-07-20
+
+### Fixed
+- **`mailwarden --auth` now always runs the browser consent flow.** Previously
+  `getAuth` short-circuited on any stored `token.json` *before* checking whether
+  it was an interactive re-auth, so once a refresh token had expired (Google
+  expires them every 7 days while the OAuth consent screen is in "Testing",
+  surfacing as `invalid_grant`) running `--auth` returned the dead token, never
+  opened a browser, and still printed a success message. Re-auth is no longer a
+  silent no-op. If Google completes consent without returning a refresh token,
+  `--auth` now fails with a clear message instead of reporting false success.
+
 ## [0.1.5] - 2026-07-19
 
 ### Added
@@ -164,7 +176,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/csitte/mailwarden/compare/v0.1.5...v0.1.6
+[0.1.5]: https://github.com/csitte/mailwarden/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/csitte/mailwarden/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/csitte/mailwarden/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/csitte/mailwarden/compare/v0.1.1...v0.1.2

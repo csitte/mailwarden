@@ -102,14 +102,41 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     expect(stored.client_id).toBe("wcid");
   });
 
-  it("does not persist anything when the flow yields no refresh token", async () => {
+  it("throws (and persists nothing) when the flow yields no refresh token", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     mocks.authenticate.mockResolvedValue({ credentials: {} });
 
     const { getAuth } = await freshAuth(tmp);
-    await getAuth(true);
+    await expect(getAuth(true)).rejects.toThrow(/no refresh token/);
 
     await expect(fs.access(path.join(tmp, "token.json"))).rejects.toThrow();
+  });
+
+  it("runs the consent flow even when a stale token.json already exists (re-auth is not a no-op)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
+    // A dead token from a previous grant is sitting on disk.
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify({
+        type: "authorized_user",
+        client_id: "cid",
+        client_secret: "cs",
+        refresh_token: "stale-rt",
+      }),
+    );
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+
+    const { getAuth } = await freshAuth(tmp);
+    await getAuth(true);
+
+    // The consent flow must have actually run and replaced the stale token.
+    expect(mocks.authenticate).toHaveBeenCalledOnce();
+    const stored = JSON.parse(await fs.readFile(path.join(tmp, "token.json"), "utf8"));
+    expect(stored.refresh_token).toBe("fresh-rt");
   });
 
   it("fails clearly when credentials.json is missing", async () => {

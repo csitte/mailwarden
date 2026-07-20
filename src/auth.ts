@@ -59,16 +59,27 @@ async function persistToken(client: OAuth2Client): Promise<void> {
  * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it.
  */
 export async function getAuth(interactive = false): Promise<OAuth2Client> {
-  const saved = await loadSavedToken();
-  if (saved) return saved;
-
   if (!interactive) {
+    // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
+    const saved = await loadSavedToken();
+    if (saved) return saved;
     throw new Error(
       "mailwarden is not authorized yet. Run `mailwarden --auth` once to grant Gmail access.",
     );
   }
 
+  // `mailwarden --auth`: always run the browser consent flow. We deliberately do NOT return a
+  // previously saved token here — a stale/expired token.json (e.g. the 7-day refresh-token expiry
+  // of a "Testing" OAuth consent screen, which surfaces as invalid_grant) would otherwise make
+  // re-auth a silent no-op that never opens the browser and never replaces the dead token.
   const client = (await authenticate({ scopes: SCOPES, keyfilePath: CRED_PATH })) as OAuth2Client;
-  if (client.credentials.refresh_token) await persistToken(client);
+  if (!client.credentials.refresh_token) {
+    throw new Error(
+      "Consent completed but Google returned no refresh token — the old token was left untouched. " +
+        "Revoke mailwarden's access at https://myaccount.google.com/permissions (or delete token.json), " +
+        "then run `mailwarden --auth` again.",
+    );
+  }
+  await persistToken(client);
   return client;
 }

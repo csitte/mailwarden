@@ -98,7 +98,7 @@ node dist/index.js --auth
 
 ## Status
 
-`0.1.5` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (82 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+`0.1.6` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (83 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
