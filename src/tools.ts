@@ -10,13 +10,55 @@ async function client(): Promise<Gmail> {
   return new Gmail(await getAuth(false));
 }
 
-/** Every result is fenced as untrusted content — mail bodies are attacker-supplied text. */
-const ok = (obj: unknown) => ({
+/**
+ * Every result carries BOTH representations: `structuredContent` (validated
+ * against the tool's outputSchema, machine-readable) and a text block with the
+ * same JSON fenced as untrusted content — mail bodies are attacker-supplied.
+ */
+const ok = (obj: object) => ({
   content: [{ type: "text" as const, text: fenceOutput(JSON.stringify(obj, null, 2)) }],
+  structuredContent: obj as Record<string, unknown>,
 });
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
+
+// ---- Output schemas (structured content is validated against these) ----
+
+const attachmentSchema = z.object({
+  messageId: z.string(),
+  attachmentId: z.string(),
+  filename: z.string(),
+  mimeType: z.string(),
+  size: z.number(),
+});
+
+const threadSummarySchema = z.object({
+  threadId: z.string(),
+  messageCount: z.number(),
+  from: z.string(),
+  subject: z.string(),
+  date: z.string(),
+  labelIds: z.array(z.string()),
+  snippet: z.string(),
+  hasAttachments: z.boolean(),
+});
+
+const parsedMessageSchema = z.object({
+  id: z.string(),
+  threadId: z.string(),
+  labelIds: z.array(z.string()),
+  from: z.string(),
+  to: z.string(),
+  subject: z.string(),
+  date: z.string(),
+  snippet: z.string(),
+  plaintextBody: z.string(),
+  htmlBody: z.string(),
+  attachments: z.array(attachmentSchema),
+});
+
+const okOutput = { ok: z.boolean() };
 
 export function registerTools(server: McpServer): void {
   // ---- Read / find ----
@@ -34,6 +76,10 @@ export function registerTools(server: McpServer): void {
         maxResults: z.number().int().min(1).max(100).default(25),
         pageToken: z.string().optional(),
       },
+      outputSchema: {
+        threads: z.array(threadSummarySchema),
+        nextPageToken: z.string().optional(),
+      },
       annotations: { title: "Search Gmail", ...readOnly },
     },
     async ({ query, maxResults, pageToken }) =>
@@ -49,6 +95,7 @@ export function registerTools(server: McpServer): void {
         "DO NOT USE: with a message ID — this takes thread IDs. " +
         "SIDE EFFECTS: none (does not mark as read).",
       inputSchema: { threadId: z.string(), full: z.boolean().default(true) },
+      outputSchema: { threadId: z.string(), messages: z.array(parsedMessageSchema) },
       annotations: { title: "Get thread", ...readOnly },
     },
     async ({ threadId, full }) => ok(await (await client()).getThread(threadId, full)),
@@ -61,10 +108,32 @@ export function registerTools(server: McpServer): void {
         "List all Gmail labels (system + user). " +
         "USE WHEN: you need label IDs/names before modify_labels, or to inspect the mailbox structure. " +
         "SIDE EFFECTS: none.",
+      outputSchema: {
+        labels: z.array(z.object({ id: z.string(), name: z.string(), type: z.string().nullish() })),
+      },
       annotations: { title: "List labels", ...readOnly },
     },
-    async () => ok(await (await client()).listLabels()),
+    async () => ok({ labels: await (await client()).listLabels() }),
   );
+
+  server.registerTool(
+    "list_snoozed",
+    {
+      description:
+        "List all snoozed threads with their due dates. SIDE EFFECTS: none.",
+      outputSchema: {
+        snoozed: z.array(
+          z.object({ threadId: z.string(), subject: z.string(), snoozedUntil: z.string() }),
+        ),
+      },
+      annotations: { title: "List snoozed", ...readOnly },
+    },
+    async () => ok({ snoozed: await listSnoozed(await client()) }),
+  );
+
+  // With MAILWARDEN_READONLY=1 only the read tools above exist — nothing that
+  // can change the mailbox or write files is even advertised to clients.
+  if (process.env.MAILWARDEN_READONLY === "1") return;
 
   // ---- Mailbox actions ----
   server.registerTool(
@@ -80,11 +149,43 @@ export function registerTools(server: McpServer): void {
         add: z.array(z.string()).default([]),
         remove: z.array(z.string()).default([]),
       },
+      outputSchema: okOutput,
       annotations: { title: "Modify labels", ...write },
     },
     async ({ threadId, add, remove }) => {
       await (await client()).modifyLabels(threadId, add, remove);
       return ok({ ok: true });
+    },
+  );
+
+  server.registerTool(
+    "bulk_modify",
+    {
+      description:
+        "Bulk-apply label changes to every message matching a Gmail query, batched at 1000 messages per API request. " +
+        "Returns matched/modified counts, affected thread IDs, and per-chunk failures (partial success is reported, not hidden). " +
+        "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read. " +
+        "DO NOT USE: for a single thread (use modify_labels or the dedicated tools). " +
+        "SIDE EFFECTS: modifies up to maxMessages messages in one call; label changes are reversible by the inverse call.",
+      inputSchema: {
+        query: z.string(),
+        add: z.array(z.string()).default([]),
+        remove: z.array(z.string()).default([]),
+        maxMessages: z.number().int().min(1).max(10000).default(1000),
+      },
+      outputSchema: {
+        matchedMessages: z.number(),
+        modifiedMessages: z.number(),
+        modifiedThreads: z.array(z.string()),
+        failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
+      },
+      annotations: { title: "Bulk modify by query", ...write },
+    },
+    async ({ query, add, remove, maxMessages }) => {
+      const gmail = await client();
+      const refs = await gmail.listMessageRefs({ query, max: maxMessages });
+      const res = await gmail.batchModifyMessages(refs, add, remove);
+      return ok({ matchedMessages: refs.length, ...res });
     },
   );
 
@@ -97,6 +198,7 @@ export function registerTools(server: McpServer): void {
         "DO NOT USE: to delete (use trash) or to defer to a date (use snooze). " +
         "SIDE EFFECTS: thread leaves the inbox; reversible via modify_labels add INBOX.",
       inputSchema: { threadId: z.string() },
+      outputSchema: okOutput,
       annotations: { title: "Archive thread", ...write },
     },
     async ({ threadId }) => {
@@ -111,6 +213,7 @@ export function registerTools(server: McpServer): void {
       description:
         "Mark a thread as read. SIDE EFFECTS: removes UNREAD; reversible via mark_unread.",
       inputSchema: { threadId: z.string() },
+      outputSchema: okOutput,
       annotations: { title: "Mark read", ...write },
     },
     async ({ threadId }) => {
@@ -125,6 +228,7 @@ export function registerTools(server: McpServer): void {
       description:
         "Mark a thread as unread. SIDE EFFECTS: adds UNREAD; reversible via mark_read.",
       inputSchema: { threadId: z.string() },
+      outputSchema: okOutput,
       annotations: { title: "Mark unread", ...write },
     },
     async ({ threadId }) => {
@@ -142,6 +246,7 @@ export function registerTools(server: McpServer): void {
         "DO NOT USE: for inbox cleanup of mail worth keeping (use archive). " +
         "SIDE EFFECTS: thread moves to Trash; recoverable via untrash for ~30 days, then Gmail deletes it permanently.",
       inputSchema: { threadId: z.string() },
+      outputSchema: okOutput,
       annotations: { title: "Trash thread", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
     async ({ threadId }) => {
@@ -157,6 +262,7 @@ export function registerTools(server: McpServer): void {
         "Restore a thread from Trash. " +
         "SIDE EFFECTS: removes the TRASH label; user labels are preserved, but INBOX is NOT re-added — use modify_labels (add INBOX) to return it to the inbox.",
       inputSchema: { threadId: z.string() },
+      outputSchema: okOutput,
       annotations: { title: "Untrash thread", ...write },
     },
     async ({ threadId }) => {
@@ -173,6 +279,7 @@ export function registerTools(server: McpServer): void {
         "USE WHEN: the user wants an attachment saved to disk (IDs come from get_thread's attachment metadata). " +
         "SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix (file-1.pdf). The response's 'saved' field is the path actually used. Mailbox unchanged.",
       inputSchema: { messageId: z.string(), attachmentId: z.string(), destPath: z.string() },
+      outputSchema: { saved: z.string() },
       annotations: { title: "Download attachment", ...write },
     },
     async ({ messageId, attachmentId, destPath }) =>
@@ -196,6 +303,7 @@ export function registerTools(server: McpServer): void {
           .refine(isValidIsoDate, "not a real calendar date")
           .refine((s) => s >= todayIso(), "snooze date is in the past"),
       },
+      outputSchema: { threadId: z.string(), snoozedUntil: z.string() },
       annotations: { title: "Snooze thread", ...write },
     },
     async ({ threadId, until }) => ok(await snooze(await client(), threadId, until)),
@@ -208,28 +316,26 @@ export function registerTools(server: McpServer): void {
         "Cancel a snooze: return the thread to the inbox now. " +
         "SIDE EFFECTS: removes the snooze label, restores INBOX.",
       inputSchema: { threadId: z.string() },
+      outputSchema: { threadId: z.string(), unsnoozed: z.boolean() },
       annotations: { title: "Unsnooze thread", ...write },
     },
     async ({ threadId }) => ok(await unsnooze(await client(), threadId)),
   );
 
   server.registerTool(
-    "list_snoozed",
-    {
-      description:
-        "List all snoozed threads with their due dates. SIDE EFFECTS: none.",
-      annotations: { title: "List snoozed", ...readOnly },
-    },
-    async () => ok(await listSnoozed(await client())),
-  );
-
-  server.registerTool(
     "sweep_snoozed",
     {
       description:
-        "Resurface all snoozed threads whose date is due (<= today). Run on demand, via cron, or the daemon timer. " +
+        "Resurface all snoozed threads whose date is due (<= today), batched at 1000 messages per API request. " +
         "USE WHEN: the user asks to process due snoozes, or as a scheduled maintenance call. " +
-        "SIDE EFFECTS: due threads return to the inbox marked unread; safe to run repeatedly.",
+        "SIDE EFFECTS: due threads return to the inbox marked unread; safe to run repeatedly. failedCount/errors report messages a batch could not wake (their label is kept for the next sweep).",
+      outputSchema: {
+        date: z.string(),
+        wokenCount: z.number(),
+        woken: z.array(z.string()),
+        failedCount: z.number(),
+        errors: z.array(z.string()),
+      },
       annotations: { title: "Sweep snoozed", ...write },
     },
     async () => ok(await sweepSnoozed(await client())),

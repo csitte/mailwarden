@@ -900,6 +900,131 @@ describe("Gmail.trash / untrash / deleteLabel — API pass-through", () => {
   });
 });
 
+describe("Gmail.listMessageRefs / batchModifyMessages", () => {
+  it("paginates messages.list and stops at the cap", async () => {
+    const listCalls: any[] = [];
+    const api: any = {
+      users: {
+        messages: {
+          list: async (req: any) => {
+            listCalls.push(req);
+            const start = req.pageToken ? Number(req.pageToken) : 0;
+            const ids = Array.from({ length: Math.min(500, req.maxResults) }, (_, i) => ({
+              id: `m-${start + i}`,
+              threadId: `t-${start + i}`,
+            }));
+            return { data: { messages: ids, nextPageToken: String(start + ids.length) } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const refs = await gmail.listMessageRefs({ query: "in:inbox", max: 750 });
+    expect(refs).toHaveLength(750);
+    expect(listCalls).toHaveLength(2);
+    expect(listCalls[0].q).toBe("in:inbox");
+    expect(listCalls[0].maxResults).toBe(500);
+    expect(listCalls[1].maxResults).toBe(250); // only what's still missing
+    expect(listCalls[1].pageToken).toBe("500");
+  });
+
+  it("passes labelIds filtering through", async () => {
+    const listCalls: any[] = [];
+    const api: any = {
+      users: {
+        messages: {
+          list: async (req: any) => {
+            listCalls.push(req);
+            return { data: { messages: [{ id: "m1", threadId: "t1" }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const refs = await gmail.listMessageRefs({ labelIds: ["Label_7"] });
+    expect(refs).toEqual([{ id: "m1", threadId: "t1" }]);
+    expect(listCalls[0].labelIds).toEqual(["Label_7"]);
+    expect(listCalls[0].q).toBeUndefined();
+  });
+
+  it("chunks batchModify at 1000 ids and dedupes thread ids", async () => {
+    const batchCalls: any[] = [];
+    const api: any = {
+      users: {
+        messages: {
+          batchModify: async (req: any) => {
+            batchCalls.push(req.requestBody);
+            return {};
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    // 1500 messages spread over 750 threads (2 messages per thread)
+    const refs = Array.from({ length: 1500 }, (_, i) => ({
+      id: `m-${i}`,
+      threadId: `t-${Math.floor(i / 2)}`,
+    }));
+    const res = await gmail.batchModifyMessages(refs, ["INBOX"], ["Label_due"]);
+
+    expect(batchCalls).toHaveLength(2);
+    expect(batchCalls[0].ids).toHaveLength(1000);
+    expect(batchCalls[1].ids).toHaveLength(500);
+    expect(batchCalls[0].addLabelIds).toEqual(["INBOX"]);
+    expect(batchCalls[0].removeLabelIds).toEqual(["Label_due"]);
+    expect(res.modifiedMessages).toBe(1500);
+    expect(res.modifiedThreads).toHaveLength(750);
+    expect(res.failed).toHaveLength(0);
+  });
+
+  it("reports a failed chunk and still processes the remaining chunks", async () => {
+    let call = 0;
+    const api: any = {
+      users: {
+        messages: {
+          batchModify: async () => {
+            call++;
+            if (call === 1) throw Object.assign(new Error("quota"), { status: 403 });
+            return {};
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const refs = Array.from({ length: 1500 }, (_, i) => ({ id: `m-${i}`, threadId: `t-${i}` }));
+    const res = await gmail.batchModifyMessages(refs, ["INBOX"], []);
+
+    expect(res.failed).toHaveLength(1);
+    expect(res.failed[0].messageIds).toHaveLength(1000);
+    expect(res.failed[0].error).toBe("quota");
+    expect(res.modifiedMessages).toBe(500); // second chunk still went through
+    expect(res.modifiedThreads).toHaveLength(500);
+  });
+
+  it("resolves label names for batch calls (same rules as modifyLabels)", async () => {
+    const batchCalls: any[] = [];
+    const api: any = {
+      users: {
+        labels: {
+          list: async () => ({
+            data: { labels: [{ id: "Label_todo", name: "ToDo", type: "user" }] },
+          }),
+        },
+        messages: {
+          batchModify: async (req: any) => {
+            batchCalls.push(req.requestBody);
+            return {};
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await gmail.batchModifyMessages([{ id: "m1", threadId: "t1" }], ["ToDo"], ["DoesNotExist"]);
+    expect(batchCalls[0].addLabelIds).toEqual(["Label_todo"]);
+    expect(batchCalls[0].removeLabelIds).toEqual([]); // unknown name in remove → skipped
+  });
+});
+
 describe("Gmail.downloadAttachment", () => {
   const apiWith = (data: string | null) =>
     ({

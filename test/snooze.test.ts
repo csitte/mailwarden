@@ -145,13 +145,15 @@ describe("listSnoozed", () => {
 
 describe("sweepSnoozed", () => {
   /**
-   * Fake Gmail that simulates a dated label. listThreadIdsByLabel returns the
-   * threads still carrying it; modifyLabels pops one off (unless `sticky`, which
-   * simulates a label that never drains).
+   * Fake Gmail that simulates a dated label on the message level.
+   * listMessageRefs returns the messages still carrying it; batchModifyMessages
+   * clears them (unless `sticky`, which simulates a label that never drains, or
+   * `failChunks`, which reports every chunk as failed).
    */
-  function makeFakeGmail(total: number, opts: { sticky?: boolean } = {}) {
-    let remaining = Array.from({ length: total }, (_, i) => `th-${i}`);
+  function makeFakeGmail(total: number, opts: { sticky?: boolean; failChunks?: boolean } = {}) {
+    let remaining = Array.from({ length: total }, (_, i) => ({ id: `m-${i}`, threadId: `th-${i}` }));
     let deleted = false;
+    const batchCalls: any[] = [];
 
     const fake: Partial<Gmail> = {
       async listLabels() {
@@ -161,26 +163,49 @@ describe("sweepSnoozed", () => {
           { id: "Label_archiv", name: "MCP/Snoozed/Archiv", type: "user" },
         ];
       },
-      async listThreadIdsByLabel(labelId: string) {
-        return labelId === "Label_due" ? [...remaining] : [];
+      async listMessageRefs({ labelIds, max }: any = {}) {
+        return labelIds?.includes("Label_due") ? remaining.slice(0, max) : [];
       },
-      async modifyLabels(threadId: string) {
-        if (!opts.sticky) remaining = remaining.filter((t) => t !== threadId);
+      async batchModifyMessages(refs: any[], add: string[] = [], remove: string[] = []) {
+        batchCalls.push({ refs: [...refs], add, remove });
+        if (opts.failChunks) {
+          return {
+            modifiedMessages: 0,
+            modifiedThreads: [],
+            failed: [{ messageIds: refs.map((r) => r.id), error: "boom" }],
+          };
+        }
+        if (!opts.sticky) {
+          const ids = new Set(refs.map((r) => r.id));
+          remaining = remaining.filter((r) => !ids.has(r.id));
+        }
+        return {
+          modifiedMessages: refs.length,
+          modifiedThreads: [...new Set(refs.map((r) => r.threadId))],
+          failed: [],
+        };
       },
       async deleteLabel() {
         deleted = true;
       },
     };
-    return { gmail: fake as Gmail, getDeleted: () => deleted, getRemaining: () => remaining };
+    return {
+      gmail: fake as Gmail,
+      getDeleted: () => deleted,
+      getRemaining: () => remaining,
+      batchCalls,
+    };
   }
 
-  it("wakes ALL 250 threads and deletes the drained label", async () => {
-    const { gmail, getDeleted, getRemaining } = makeFakeGmail(250);
+  it("wakes ALL 250 threads in one batch and deletes the drained label", async () => {
+    const { gmail, getDeleted, getRemaining, batchCalls } = makeFakeGmail(250);
     const res = await sweepSnoozed(gmail, new Date(2026, 5, 20));
 
     expect(res.wokenCount).toBe(250);
+    expect(res.failedCount).toBe(0);
     expect(getRemaining()).toHaveLength(0);
     expect(getDeleted()).toBe(true);
+    expect(batchCalls).toHaveLength(1); // one batch call, not 250 modifies
   });
 
   it("does NOT delete a label it could not drain (no lost snoozes)", async () => {
@@ -191,59 +216,61 @@ describe("sweepSnoozed", () => {
     expect(res.wokenCount).toBe(3); // woken is a Set — no duplicates across rounds
   });
 
+  it("reports failed chunks, keeps the label, and stops retrying it this sweep", async () => {
+    const { gmail, getDeleted, batchCalls } = makeFakeGmail(5, { failChunks: true });
+    const res = await sweepSnoozed(gmail, new Date(2026, 5, 20));
+
+    expect(res.wokenCount).toBe(0);
+    expect(res.failedCount).toBe(5);
+    expect(res.errors).toEqual(["boom"]);
+    expect(getDeleted()).toBe(false); // messages still carry the label
+    expect(batchCalls).toHaveLength(1); // no repeat hammering within one sweep
+  });
+
   it("ignores non-dated sub-labels entirely", async () => {
     const { gmail } = makeFakeGmail(0);
     const res = await sweepSnoozed(gmail, new Date(2026, 5, 20));
     expect(res.wokenCount).toBe(0); // Label_archiv never swept
   });
 
-  it("wakes threads into the inbox as unread, stripping dated + parent label", async () => {
-    const modified: any[] = [];
-    let remaining = ["th-0"];
-    const fake: Partial<Gmail> = {
-      async listLabels() {
-        return [
-          { id: "Label_parent", name: "MCP/Snoozed", type: "user" },
-          { id: "Label_due", name: "MCP/Snoozed/2026-06-01", type: "user" },
-        ];
-      },
-      async listThreadIdsByLabel() {
-        return [...remaining];
-      },
-      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
-        modified.push({ threadId, add, remove });
-        remaining = remaining.filter((t) => t !== threadId);
-      },
-      async deleteLabel() {},
-    };
+  it("wakes messages into the inbox as unread, stripping dated + parent label", async () => {
+    const { gmail, batchCalls } = makeFakeGmail(1);
+    await sweepSnoozed(gmail, new Date(2026, 5, 20));
 
-    await sweepSnoozed(fake as Gmail, new Date(2026, 5, 20));
-
-    expect(modified).toEqual([
-      { threadId: "th-0", add: ["INBOX", "UNREAD"], remove: ["Label_due", "Label_parent"] },
+    expect(batchCalls).toEqual([
+      {
+        refs: [{ id: "m-0", threadId: "th-0" }],
+        add: ["INBOX", "UNREAD"],
+        remove: ["Label_due", "Label_parent"],
+      },
     ]);
   });
 
   it("works when the parent label is missing (only the dated label is stripped)", async () => {
-    const modified: any[] = [];
-    let remaining = ["th-0"];
+    const batchCalls: any[] = [];
+    let remaining = [{ id: "m-0", threadId: "th-0" }];
     const fake: Partial<Gmail> = {
       async listLabels() {
         return [{ id: "Label_due", name: "MCP/Snoozed/2026-06-01", type: "user" }];
       },
-      async listThreadIdsByLabel() {
+      async listMessageRefs() {
         return [...remaining];
       },
-      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
-        modified.push({ threadId, add, remove });
-        remaining = remaining.filter((t) => t !== threadId);
+      async batchModifyMessages(refs: any[], add: string[] = [], remove: string[] = []) {
+        batchCalls.push({ add, remove });
+        remaining = [];
+        return {
+          modifiedMessages: refs.length,
+          modifiedThreads: [...new Set(refs.map((r) => r.threadId))],
+          failed: [],
+        };
       },
       async deleteLabel() {},
     };
 
     const res = await sweepSnoozed(fake as Gmail, new Date(2026, 5, 20));
 
-    expect(modified[0].remove).toEqual(["Label_due"]);
+    expect(batchCalls[0].remove).toEqual(["Label_due"]);
     expect(res.wokenCount).toBe(1);
   });
 });

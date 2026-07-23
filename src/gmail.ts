@@ -42,6 +42,19 @@ export interface LabelInfo {
   type?: string | null;
 }
 
+/** Minimal handle on a message: its id plus the thread it belongs to. */
+export interface MessageRef {
+  id: string;
+  threadId: string;
+}
+
+/** Outcome of a chunked batch-modify — partial success is reported, not hidden. */
+export interface BatchModifyResult {
+  modifiedMessages: number;
+  modifiedThreads: string[];
+  failed: { messageIds: string[]; error: string }[];
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers (exported & API-free so they're unit-testable without a mock).
 // The Gmail class methods are thin wrappers around these.
@@ -501,6 +514,21 @@ export class Gmail {
    * string is present.
    */
   async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []): Promise<void> {
+    const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
+    await this.req(() =>
+      this.api.users.threads.modify({
+        userId: "me",
+        id: threadId,
+        requestBody: { addLabelIds, removeLabelIds },
+      }),
+    );
+  }
+
+  /** Resolve label ids/names for modify calls (names created in `add`, skipped in `remove`). */
+  private async resolveLabelIds(
+    add: string[],
+    remove: string[],
+  ): Promise<{ addLabelIds: string[]; removeLabelIds: string[] }> {
     const needsLookup = [...add, ...remove].some((s) => !looksLikeLabelId(s));
     // Keyed lowercase: Gmail label names are unique case-insensitively, and a
     // case-sensitive miss would send `add` into ensureLabel, whose create the
@@ -524,14 +552,72 @@ export class Gmail {
         if (id) removeLabelIds.push(id); // unknown name → nothing to remove, skip
       }
     }
+    return { addLabelIds, removeLabelIds };
+  }
 
-    await this.req(() =>
-      this.api.users.threads.modify({
-        userId: "me",
-        id: threadId,
-        requestBody: { addLabelIds, removeLabelIds },
-      }),
-    );
+  /**
+   * Message refs matching a query and/or label filter, paginated up to `max`.
+   * Cheap: one list page covers up to 500 messages, no per-message fetch.
+   */
+  async listMessageRefs(
+    opts: { query?: string; labelIds?: string[]; max?: number } = {},
+  ): Promise<MessageRef[]> {
+    const max = opts.max ?? 1000;
+    const refs: MessageRef[] = [];
+    let pageToken: string | undefined;
+    do {
+      const token = pageToken;
+      const res = await this.req(() =>
+        this.api.users.messages.list({
+          userId: "me",
+          ...(opts.query ? { q: opts.query } : {}),
+          ...(opts.labelIds?.length ? { labelIds: opts.labelIds } : {}),
+          maxResults: Math.min(500, max - refs.length),
+          ...(token ? { pageToken: token } : {}),
+        }),
+      );
+      for (const m of res.data.messages ?? []) refs.push({ id: m.id!, threadId: m.threadId! });
+      pageToken = res.data.nextPageToken ?? undefined;
+    } while (pageToken && refs.length < max);
+    return refs;
+  }
+
+  /** Max ids per messages.batchModify request (Gmail API limit). */
+  static readonly BATCH_MODIFY_CHUNK = 1000;
+
+  /**
+   * Batch label changes via `messages.batchModify` — one request per 1000
+   * messages instead of one modify per thread. A failed chunk is reported in
+   * `failed` and does NOT abort the remaining chunks (partial success).
+   */
+  async batchModifyMessages(
+    refs: MessageRef[],
+    add: string[] = [],
+    remove: string[] = [],
+  ): Promise<BatchModifyResult> {
+    const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
+    const modifiedThreads = new Set<string>();
+    let modifiedMessages = 0;
+    const failed: BatchModifyResult["failed"] = [];
+    for (let i = 0; i < refs.length; i += Gmail.BATCH_MODIFY_CHUNK) {
+      const chunk = refs.slice(i, i + Gmail.BATCH_MODIFY_CHUNK);
+      try {
+        await this.req(() =>
+          this.api.users.messages.batchModify({
+            userId: "me",
+            requestBody: { ids: chunk.map((r) => r.id), addLabelIds, removeLabelIds },
+          }),
+        );
+        modifiedMessages += chunk.length;
+        for (const r of chunk) modifiedThreads.add(r.threadId);
+      } catch (err) {
+        failed.push({
+          messageIds: chunk.map((r) => r.id),
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return { modifiedMessages, modifiedThreads: [...modifiedThreads], failed };
   }
 
   async trash(threadId: string): Promise<void> {

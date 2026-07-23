@@ -29,7 +29,8 @@ async function main(): Promise<void> {
   // Cron-friendly: resurface due snoozes and exit.
   if (args.includes("--sweep")) {
     const res = await sweepSnoozed(new Gmail(await getAuth(false)));
-    console.error(`✓ sweep: ${res.wokenCount} thread(s) resurfaced.`);
+    const failNote = res.failedCount ? ` (${res.failedCount} message(s) failed — label kept)` : "";
+    console.error(`✓ sweep: ${res.wokenCount} thread(s) resurfaced.${failNote}`);
     return;
   }
 

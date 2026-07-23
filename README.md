@@ -28,13 +28,17 @@ More correctness the raw API doesn't hand you:
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
 | `modify_labels` | Add/remove labels (archive = remove `INBOX`, read = remove `UNREAD`) |
+| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
 | **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`) |
 | **`unsnooze`** | Cancel a snooze, return to inbox now |
 | **`list_snoozed`** | All snoozed threads + due dates |
-| **`sweep_snoozed`** | Resurface threads whose snooze is due (run on demand, via cron, or the daemon) |
+| **`sweep_snoozed`** | Resurface threads whose snooze is due (run on demand, via cron, or the daemon); batched, with partial-failure reporting |
+
+All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
+alongside the same JSON as fenced text — clients never have to parse prose.
 
 ### How snooze works (no Gmail API snooze exists — we build it)
 
@@ -50,6 +54,9 @@ More correctness the raw API doesn't hand you:
   `--http`, optionally gated by a `MAILWARDEN_TOKEN` bearer token.
 - **No send tools — by design.** mailwarden cannot compose, reply, or forward. A prompt-injected
   instruction inside an email has no exfiltration path through this server.
+- **Read-only mode.** Set `MAILWARDEN_READONLY=1` and only the read tools (`search`, `get_thread`,
+  `list_labels`, `list_snoozed`) are registered — nothing that can change the mailbox or write
+  files is even advertised to clients. Recommended for shared/HTTP deployments that only triage.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
   directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
 - **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
@@ -114,12 +121,13 @@ node dist/index.js --auth
 | `MAILWARDEN_CREDENTIALS` | path to `credentials.json` |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
+| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed) |
 | `PORT` | HTTP port (default 8787) |
 | `MAILWARDEN_TOKEN` | optional bearer token for the HTTP endpoint |
 
 ## Status
 
-`0.1.6` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (103 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+`0.1.7` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (115 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

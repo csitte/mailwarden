@@ -81,6 +81,9 @@ export async function listSnoozed(gmail: Gmail) {
   return out.sort((a, b) => a.snoozedUntil.localeCompare(b.snoozedUntil));
 }
 
+/** Messages listed per sweep round — the drain loop covers anything beyond it. */
+const SWEEP_LIST_CAP = 5000;
+
 export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
   const cutoff = todayIso(today);
   const labels = await gmail.listLabels();
@@ -88,26 +91,34 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
   const dueLabels = labels.filter((l) => isDue(l.name, cutoff));
 
   const woken = new Set<string>();
+  const errors: string[] = [];
+  let failedCount = 0;
   for (const label of dueLabels) {
     const remove = [label.id, ...(parent ? [parent.id] : [])];
-    // listThreadIdsByLabel filters by the exact labelIds param (live, not the
-    // lag-prone search index) and paginates fully, so one round normally drains
-    // the label; re-list to confirm, bounded by MAX_SWEEP_ITERATIONS.
+    // listMessageRefs filters by the exact labelIds param (live, not the
+    // lag-prone search index); batchModify wakes up to 1000 messages per
+    // request instead of one modify per thread. Re-list to confirm the label
+    // drained, bounded by MAX_SWEEP_ITERATIONS.
     let drained = false;
     for (let i = 0; i < MAX_SWEEP_ITERATIONS && !drained; i++) {
-      const batch = await gmail.listThreadIdsByLabel(label.id);
-      if (batch.length === 0) {
+      const refs = await gmail.listMessageRefs({ labelIds: [label.id], max: SWEEP_LIST_CAP });
+      if (refs.length === 0) {
         drained = true;
         break;
       }
-      for (const threadId of batch) {
-        // UNREAD is deliberate: a resurfaced thread is marked unread so it
-        // stands out in the inbox again, like Gmail's own snooze highlight.
-        await gmail.modifyLabels(threadId, ["INBOX", "UNREAD"], remove);
-        woken.add(threadId);
+      // UNREAD is deliberate: a resurfaced thread is marked unread so it
+      // stands out in the inbox again, like Gmail's own snooze highlight.
+      const res = await gmail.batchModifyMessages(refs, ["INBOX", "UNREAD"], remove);
+      for (const t of res.modifiedThreads) woken.add(t);
+      if (res.failed.length > 0) {
+        // A failing chunk won't drain — stop this label; it stays for the next
+        // sweep instead of burning the iteration budget on repeat failures.
+        failedCount += res.failed.reduce((n, f) => n + f.messageIds.length, 0);
+        errors.push(...res.failed.map((f) => f.error));
+        break;
       }
     }
-    // Only delete a label proven empty — a label deleted while threads still
+    // Only delete a label proven empty — a label deleted while messages still
     // carry it would silently lose those snoozes (archived, never resurfaced).
     if (drained) {
       try {
@@ -117,5 +128,5 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
       }
     }
   }
-  return { date: cutoff, wokenCount: woken.size, woken: [...woken] };
+  return { date: cutoff, wokenCount: woken.size, woken: [...woken], failedCount, errors };
 }

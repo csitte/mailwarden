@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`bulk_modify` tool:** batch label changes for every message matching a Gmail
+  query via `messages.batchModify` — 1000 messages per API request instead of
+  one modify per thread, with per-chunk partial-success reporting
+  (`matchedMessages` / `modifiedMessages` / `modifiedThreads` / `failed`).
+- **Structured outputs:** every tool declares an `outputSchema` and returns
+  validated `structuredContent` alongside the fenced JSON text. Array results
+  are now wrapped in objects: `list_labels` → `{ labels }`, `list_snoozed` →
+  `{ snoozed }`.
+- **Read-only mode:** `MAILWARDEN_READONLY=1` registers only the read tools
+  (`search`, `get_thread`, `list_labels`, `list_snoozed`).
+
+### Changed
+- **`sweep_snoozed` is batched:** wakes due messages via `messages.batchModify`
+  (listed per label with `messages.list`) instead of one `threads.modify` per
+  thread — a 250-thread sweep is now a handful of API calls. The result gains
+  `failedCount`/`errors`; a label whose batch fails is kept for the next sweep
+  (snoozes are never lost), and `--sweep` logs failures.
+
 ## [0.1.7] - 2026-07-23
 
 ### Added
