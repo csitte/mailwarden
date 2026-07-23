@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2026-07-23
+
 ### Added
 - **`bulk_modify` tool:** batch label changes for every message matching a Gmail
   query via `messages.batchModify` — 1000 messages per API request instead of
