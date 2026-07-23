@@ -1,14 +1,20 @@
-name: Publish to npm
+name: Publish to npm + MCP registry
 
 # Fires when you push a version tag (e.g. `git tag v0.1.6 && git push --tags`).
 # Uses npm Trusted Publishing (OIDC) — no NPM_TOKEN secret, no 2FA prompt.
 # One-time setup on npmjs.com: package Settings → Trusted Publisher →
 #   GitHub Actions, repo `csitte/mailwarden`, workflow `publish.yml`.
+#
+# The MCP registry entry is published in the same run via `mcp-publisher login
+# github-oidc` — authenticated by this workflow's OIDC token for the
+# io.github.csitte namespace, so no expiring local JWT is involved.
+# `workflow_dispatch` re-publishes only the registry entry (npm is skipped).
 
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 jobs:
   publish:
@@ -38,5 +44,15 @@ jobs:
         run: npm test
 
       # No NODE_AUTH_TOKEN — OIDC exchanges a short-lived credential.
-      - name: Publish
+      - name: Publish to npm
+        if: github.event_name == 'push'
         run: npm publish --provenance --access public
+
+      - name: Install mcp-publisher
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" | tar xz mcp-publisher
+
+      - name: Publish to MCP registry
+        run: |
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
