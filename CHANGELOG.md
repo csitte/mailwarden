@@ -11,7 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`bulk_modify` tool:** batch label changes for every message matching a Gmail
   query via `messages.batchModify` — 1000 messages per API request instead of
   one modify per thread, with per-chunk partial-success reporting
-  (`matchedMessages` / `modifiedMessages` / `modifiedThreads` / `failed`).
+  (`matchedMessages` / `modifiedMessages` / `modifiedThreadCount` /
+  `modifiedThreads`, capped at 500 ids / `failed`). Rejects a call with neither
+  `add` nor `remove` before spending any API quota; the description states that
+  the query hits Gmail's index without search's live re-verification.
 - **Structured outputs:** every tool declares an `outputSchema` and returns
   validated `structuredContent` alongside the fenced JSON text. Array results
   are now wrapped in objects: `list_labels` → `{ labels }`, `list_snoozed` →

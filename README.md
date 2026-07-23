@@ -4,21 +4,32 @@
 [![license](https://img.shields.io/npm/l/mailwarden)](LICENSE)
 [![Node](https://img.shields.io/node/v/mailwarden)](package.json)
 
-A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox control for AI assistants, with the feature nobody else ships: **snooze**.
+A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox triage for AI assistants, with the feature nobody else ships: **snooze**.
 
-Every operation hits the **live Gmail API** (no cached snapshot), so it reliably sees *all* your mail — search, read, label, archive, trash, download attachments, and snooze threads until a date.
+## Highlights
+
+- **Snooze — the feature nobody else ships.** Archive a thread now, have it resurface in the inbox
+  on a date. Built on dated labels + a sweep, so it works from any client and survives restarts.
+- **Search you can trust.** Gmail's own search index silently drops `is:unread` in some operator
+  combinations — `search` re-verifies every hit against its live labels and discards the index's
+  false positives. Paginated via `pageToken`/`nextPageToken`.
+- **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
+  1000 messages per API request — with per-chunk partial-success reporting instead of
+  all-or-nothing. The snooze sweep uses the same batch path.
+- **Structured outputs.** Every tool declares an `outputSchema` and returns validated
+  `structuredContent` alongside fenced JSON text — no parsing guesswork for clients.
+- **Small attack surface.** No send tools (no exfiltration path for prompt-injected mail),
+  optional read-only mode, no telemetry, no open ports by default, symlink-safe download fencing,
+  injection-fenced output. Details under [Security & privacy](#security--privacy).
+- **Correct with real-world mail.** RFC 2047 headers decoded (`=?UTF-8?B?…?=` → readable text),
+  bodies decoded in their *declared* charset (no mojibake for ISO-8859-1/Shift_JIS mail),
+  429/5xx retried with exponential backoff.
 
 ## Why
 
-Connectors that sync or cache your mailbox can lag behind it — and even Gmail's own search index is sometimes loose (see below). `mailwarden` talks straight to the live Gmail API and re-verifies what the index returns, so what you see is what's actually there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
+Connectors that sync or cache your mailbox can lag behind it — and even Gmail's own search index is sometimes loose (see below). `mailwarden` talks straight to the live Gmail API (no cached snapshot) and re-verifies what the index returns, so what you see is what's actually there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
 
 `search` goes one step further than the raw API: Gmail's `threads.list` index is sometimes *loose* for read-state operators — `is:unread` is silently dropped in some operator combinations (e.g. `category:updates is:unread -in:inbox` returns read mail too). Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
-
-More correctness the raw API doesn't hand you:
-
-- **Readable headers.** RFC 2047 encoded-words (`=?UTF-8?B?…?=` subjects and sender names) are decoded to plain text instead of arriving as base64 gibberish.
-- **Correct charsets.** Bodies are decoded in their *declared* charset — ISO-8859-1 or Shift_JIS mail doesn't turn into mojibake the way it does with the usual hardcoded-UTF-8 parsers.
-- **Rate-limit resilience.** Every API call retries 429s and transient 5xx errors with exponential backoff, and parallel fetches are concurrency-capped.
 
 ## Tools
 
@@ -28,7 +39,7 @@ More correctness the raw API doesn't hand you:
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
 | `modify_labels` | Add/remove labels (archive = remove `INBOX`, read = remove `UNREAD`) |
-| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk |
+| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total) |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
@@ -127,7 +138,7 @@ node dist/index.js --auth
 
 ## Status
 
-`0.1.7` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (115 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+`0.1.7` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (116 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

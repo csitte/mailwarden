@@ -102,8 +102,24 @@ describe("tool results — structured content + fenced text", () => {
     expect(res.structuredContent).toEqual({
       matchedMessages: 3,
       modifiedMessages: 3,
+      modifiedThreadCount: 2,
       modifiedThreads: ["t1", "t2"],
       failed: [],
     });
+  });
+
+  it("bulk_modify rejects a call with neither add nor remove (no wasted API pass)", async () => {
+    const listCalls: any[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: { messages: { list: async (req: any) => (listCalls.push(req), { data: {} }) } },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "in:inbox" },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/nothing to do/);
+    expect(listCalls).toHaveLength(0); // rejected before any API call
   });
 });
