@@ -10,7 +10,7 @@ Every operation hits the **live Gmail API** (no cached snapshot), so it reliably
 
 ## Why
 
-Hosted Gmail connectors run on a synced index that can silently miss messages. `mailwarden` talks straight to the Gmail API, so what you see is what's there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
+Connectors that sync or cache your mailbox can lag behind it — and even Gmail's own search index is sometimes loose (see below). `mailwarden` talks straight to the live Gmail API and re-verifies what the index returns, so what you see is what's actually there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
 
 `search` goes one step further than the raw API: Gmail's `threads.list` index is sometimes *loose* for read-state operators — `is:unread` is silently dropped in some operator combinations (e.g. `category:updates is:unread -in:inbox` returns read mail too). Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
 
