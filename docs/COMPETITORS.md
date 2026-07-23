@@ -103,16 +103,24 @@ of search predicates against real labels (all four pass `q` through raw); harden
 (stdio + HTTP with bearer); production consent flow avoiding the 7-day token trap; no telemetry, no
 unsolicited listening port.
 
-**Adopted from this analysis:** MCP tool annotations + `USE WHEN / DO NOT USE / SIDE EFFECTS`
-descriptions (klodr pattern).
+**Adopted from this analysis (implemented in 0.1.7):**
+- MCP tool annotations + `USE WHEN / DO NOT USE / SIDE EFFECTS` descriptions (klodr pattern).
+- Search pagination (`pageToken`/`nextPageToken`).
+- RFC 2047 header decoding (charset-aware body decoding already existed).
+- 429/5xx retry with exponential backoff on every API call.
+- Download-fence hardening: realpath canonicalization, post-mkdir symlink re-check, `wx` writes
+  with collision suffixing instead of overwrites (klodr's `utl.ts` pattern).
+- `<untrusted-tool-output>` fencing + hidden/BiDi character stripping on all tool output.
+- README "Security & privacy" section stating the posture (no telemetry, no default ports,
+  no send tools).
+- `google-auth-library` declared as a direct dependency (phantom-dep build failure under pnpm).
 
-**Candidate improvements, in rough priority:**
-1. Onboarding friction (d-mato's lesson): guided `--auth` wizard / better setup docs — without the
+**Remaining candidates, in rough priority:**
+1. `batchModify` for bulk label ops with partial-success reporting (targeted for 0.1.8).
+2. Onboarding friction (d-mato's lesson): guided `--auth` wizard / better setup docs — without the
    bundled-secret mistake (PKCE, bring-your-own client).
-2. Search pagination (`nextPageToken`) and `batchModify` for bulk label ops with partial-success
-   reporting — the exact spots where d-mato and klodr are weak.
-3. RFC 2047 header decoding + charset handling in body extraction.
-4. Path-jail hardening of the download fence (realpath + post-mkdir re-check) and
-   `<untrusted-tool-output>` fencing, both after klodr's `utl.ts`/`sanitize.ts`.
-5. Send/drafts remain a deliberate non-goal: "no send = no exfiltration surface" is a defensible,
+3. Structured outputs (`outputSchema`/`structuredContent`) instead of JSON-in-text.
+4. Read-only mode (register only read tools, e.g. `MAILWARDEN_READONLY=1`) for HTTP hosting.
+5. Multi-account (tavoyne's `account`-enum pattern) — only if a real need shows up.
+6. Send/drafts remain a deliberate non-goal: "no send = no exfiltration surface" is a defensible,
    marketable position (d-mato and tavoyne run it successfully).

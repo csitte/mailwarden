@@ -14,6 +14,12 @@ Hosted Gmail connectors run on a synced index that can silently miss messages. `
 
 `search` goes one step further than the raw API: Gmail's `threads.list` index is sometimes *loose* for read-state operators — `is:unread` is silently dropped in some operator combinations (e.g. `category:updates is:unread -in:inbox` returns read mail too). Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
 
+More correctness the raw API doesn't hand you:
+
+- **Readable headers.** RFC 2047 encoded-words (`=?UTF-8?B?…?=` subjects and sender names) are decoded to plain text instead of arriving as base64 gibberish.
+- **Correct charsets.** Bodies are decoded in their *declared* charset — ISO-8859-1 or Shift_JIS mail doesn't turn into mojibake the way it does with the usual hardcoded-UTF-8 parsers.
+- **Rate-limit resilience.** Every API call retries 429s and transient 5xx errors with exponential backoff, and parallel fetches are concurrency-capped.
+
 ## Tools
 
 | Tool | What it does |
