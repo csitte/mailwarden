@@ -49,8 +49,9 @@ jobs:
         run: npm publish --provenance --access public
 
       - name: Install mcp-publisher
+        # Release assets are named with Go arch conventions (amd64, not x86_64).
         run: |
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" | tar xz mcp-publisher
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_linux_amd64.tar.gz" | tar xz mcp-publisher
 
       - name: Publish to MCP registry
         run: |
