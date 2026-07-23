@@ -734,6 +734,32 @@ describe("withBackoff", () => {
     expect(result).toBe(1);
     expect(calls).toBe(2);
   });
+
+  it("recognizes a string status like code: '429' but not 'ECONNRESET'", async () => {
+    let calls = 0;
+    const result = await withBackoff(
+      async () => {
+        calls++;
+        if (calls === 1) throw Object.assign(new Error("x"), { code: "429" });
+        return 1;
+      },
+      { sleep: async () => {} },
+    );
+    expect(result).toBe(1);
+    expect(calls).toBe(2);
+
+    let calls2 = 0;
+    await expect(
+      withBackoff(
+        async () => {
+          calls2++;
+          throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow("reset");
+    expect(calls2).toBe(1);
+  });
 });
 
 describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
@@ -915,6 +941,26 @@ describe("Gmail.downloadAttachment", () => {
     expect(await fs.readFile(dest, "utf8")).toBe("OLD"); // original untouched
     expect(await fs.readFile(saved, "utf8")).toBe("NEW");
   });
+
+  it.skipIf(process.platform === "win32")(
+    "accepts an absolute destPath under a symlinked fence root (e.g. macOS /tmp)",
+    async () => {
+      const target = await fs.mkdtemp(path.join(os.tmpdir(), "mw-real-"));
+      tmp = target;
+      const link = path.join(os.tmpdir(), `mw-link-${Date.now()}`);
+      await fs.symlink(target, link, "dir");
+      try {
+        vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", link); // root as configured is a symlink
+        const gmail = new Gmail(apiWith(b64url("X")));
+        // absolute path spelled via the symlinked root, not the canonical one
+        const saved = await gmail.downloadAttachment("m1", "a1", path.join(link, "file.bin"));
+        expect(saved).toBe(path.join(await fs.realpath(target), "file.bin"));
+        expect(await fs.readFile(saved, "utf8")).toBe("X");
+      } finally {
+        await fs.rm(link, { force: true });
+      }
+    },
+  );
 
   it.skipIf(process.platform === "win32")(
     "rejects a symlinked subdirectory pointing outside the fence",

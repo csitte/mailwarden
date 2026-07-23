@@ -93,6 +93,8 @@ function statusOf(err: unknown): number | undefined {
   const e = err as { status?: unknown; code?: unknown; response?: { status?: unknown } };
   for (const s of [e?.status, e?.code, e?.response?.status]) {
     if (typeof s === "number") return s;
+    // googleapis error shapes vary by version — the status also appears as "429".
+    if (typeof s === "string" && /^\d{3}$/.test(s)) return Number(s);
   }
   return undefined;
 }
@@ -574,12 +576,19 @@ export class Gmail {
     if (root) {
       await fs.mkdir(root, { recursive: true });
       // realpath-canonicalize the fence so `..`/symlinks in the ROOT itself
-      // can't shift the boundary, then check containment lexically…
+      // can't shift the boundary. Containment is checked as a relative path —
+      // against the root as configured AND its canonical form, so an absolute
+      // destPath under either spelling passes (e.g. /tmp/dl/x when /tmp is a
+      // symlink to /private/tmp) while anything outside both is rejected.
+      const givenRoot = path.resolve(root);
       const fence = await fs.realpath(root);
-      dest = path.resolve(fence, destPath);
-      if (dest !== fence && !dest.startsWith(fence + path.sep)) {
+      const escapes = (rel: string) => rel === "" || rel.startsWith("..") || path.isAbsolute(rel);
+      let rel = path.relative(givenRoot, path.resolve(givenRoot, destPath));
+      if (escapes(rel)) rel = path.relative(fence, path.resolve(fence, destPath));
+      if (escapes(rel)) {
         throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR (${fence}).`);
       }
+      dest = path.join(fence, rel);
       await fs.mkdir(path.dirname(dest), { recursive: true });
       // …and again against the REAL parent directory: a symlinked subdirectory
       // inside the fence pointing outside would pass the lexical check above.
