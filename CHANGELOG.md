@@ -46,8 +46,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **RFC 2047 header decoding** — non-ASCII Subject/From/To
   (`=?UTF-8?B?...?=`) now arrive as readable text.
 - **429/5xx retry with exponential backoff** on every Gmail API call.
-- `docs/COMPETITORS.md` — source-level analysis of the four main Gmail MCP
-  competitors.
+- `docs/ROADMAP.md` — planned work and non-goals.
 
 ### Changed
 - **`download_attachment` never overwrites:** an existing file gets a numeric
