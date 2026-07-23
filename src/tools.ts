@@ -3,13 +3,17 @@ import { z } from "zod";
 import { Gmail } from "./gmail.js";
 import { getAuth } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed, isValidIsoDate, todayIso } from "./snooze.js";
+import { fenceOutput } from "./sanitize.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
 async function client(): Promise<Gmail> {
   return new Gmail(await getAuth(false));
 }
 
-const ok = (obj: unknown) => ({ content: [{ type: "text" as const, text: JSON.stringify(obj, null, 2) }] });
+/** Every result is fenced as untrusted content — mail bodies are attacker-supplied text. */
+const ok = (obj: unknown) => ({
+  content: [{ type: "text" as const, text: fenceOutput(JSON.stringify(obj, null, 2)) }],
+});
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
@@ -21,13 +25,19 @@ export function registerTools(server: McpServer): void {
     {
       description:
         "Search Gmail with native query syntax (e.g. 'in:inbox from:foo@bar.com newer_than:7d'). Returns thread summaries; read-state/category predicates are re-verified against each hit's live labels. " +
+        "Paginated: when more results exist, the response carries a nextPageToken — pass it back via pageToken to fetch the next page. " +
         "USE WHEN: locating threads by sender, subject, date, label, or read state. " +
         "DO NOT USE: to fetch a thread you already have the ID of (use get_thread). " +
         "SIDE EFFECTS: none.",
-      inputSchema: { query: z.string(), maxResults: z.number().int().min(1).max(100).default(25) },
+      inputSchema: {
+        query: z.string(),
+        maxResults: z.number().int().min(1).max(100).default(25),
+        pageToken: z.string().optional(),
+      },
       annotations: { title: "Search Gmail", ...readOnly },
     },
-    async ({ query, maxResults }) => ok(await (await client()).search(query, maxResults)),
+    async ({ query, maxResults, pageToken }) =>
+      ok(await (await client()).search(query, maxResults, pageToken)),
   );
 
   server.registerTool(
@@ -161,7 +171,7 @@ export function registerTools(server: McpServer): void {
       description:
         "Download an attachment to a local file path. If MAILWARDEN_DOWNLOAD_DIR is set, destPath is resolved inside (and restricted to) that directory. " +
         "USE WHEN: the user wants an attachment saved to disk (IDs come from get_thread's attachment metadata). " +
-        "SIDE EFFECTS: writes a local file (overwrites an existing file at destPath); mailbox unchanged.",
+        "SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix (file-1.pdf). The response's 'saved' field is the path actually used. Mailbox unchanged.",
       inputSchema: { messageId: z.string(), attachmentId: z.string(), destPath: z.string() },
       annotations: { title: "Download attachment", ...write },
     },

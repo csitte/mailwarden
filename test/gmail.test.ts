@@ -12,6 +12,8 @@ import {
   deriveLabelFilters,
   threadMatchesFilters,
   parseMessage,
+  decodeRfc2047,
+  withBackoff,
   Gmail,
 } from "../src/gmail.js";
 
@@ -310,7 +312,7 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     });
     const gmail = new Gmail(api as gmail_v1.Gmail);
     const res = await gmail.search("category:updates is:unread -in:inbox", 25);
-    expect(res.map((r) => r.threadId)).toEqual(["a", "c"]);
+    expect(res.threads.map((r) => r.threadId)).toEqual(["a", "c"]);
   });
 
   it("over-scans candidates (full page) when filtering so maxResults stays meaningful", async () => {
@@ -332,7 +334,7 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     });
     const gmail = new Gmail(api as gmail_v1.Gmail);
     const res = await gmail.search("is:unread", 2);
-    expect(res.map((r) => r.threadId)).toEqual(["a", "b"]);
+    expect(res.threads.map((r) => r.threadId)).toEqual(["a", "b"]);
     expect(stats().getCount).toBeLessThanOrEqual(8); // one chunk, not the full page
   });
 
@@ -587,7 +589,8 @@ describe("Gmail.search — pagination", () => {
     };
     const gmail = new Gmail(api as gmail_v1.Gmail);
     const res = await gmail.search("from:x", 3);
-    expect(res.map((r) => r.threadId)).toEqual(["a", "b", "c"]);
+    expect(res.threads.map((r) => r.threadId)).toEqual(["a", "b", "c"]);
+    expect(res.nextPageToken).toBeUndefined(); // last page had no further token
     expect(listCalls[1].pageToken).toBe("p2");
     expect(listCalls[1].maxResults).toBe(1); // only what's still missing
   });
@@ -608,8 +611,128 @@ describe("Gmail.search — pagination", () => {
     };
     const gmail = new Gmail(api as gmail_v1.Gmail);
     const res = await gmail.search("is:unread", 2);
-    expect(res).toHaveLength(2);
+    expect(res.threads).toHaveLength(2);
     expect(getCount).toBe(8); // exactly one GET_CONCURRENCY chunk, second chunk skipped
+  });
+
+  it("passes a caller pageToken through and surfaces the nextPageToken", async () => {
+    const listCalls: any[] = [];
+    const api: any = {
+      users: {
+        threads: {
+          list: async (req: any) => {
+            listCalls.push(req);
+            return { data: { threads: [{ id: "d" }], nextPageToken: "p9" } };
+          },
+          get: async (req: any) => ({
+            data: { messages: [{ id: `m-${req.id}`, labelIds: [], payload: { headers: [] } }] },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.search("from:x", 1, "p8");
+    expect(listCalls[0].pageToken).toBe("p8");
+    expect(res.threads.map((r) => r.threadId)).toEqual(["d"]);
+    expect(res.nextPageToken).toBe("p9");
+  });
+});
+
+describe("decodeRfc2047", () => {
+  it("decodes B-encoded UTF-8 words", () => {
+    expect(decodeRfc2047("=?UTF-8?B?w6RiYw==?=")).toBe("äbc");
+  });
+
+  it("decodes Q-encoded words incl. underscore-as-space and =XX bytes", () => {
+    expect(decodeRfc2047("=?ISO-8859-1?Q?Gr=FC=DFe_aus_M=FCnchen?=")).toBe("Grüße aus München");
+  });
+
+  it("collapses whitespace between adjacent encoded-words (RFC 2047 §6.2)", () => {
+    expect(decodeRfc2047("=?UTF-8?B?SGFsbG8g?=\r\n =?UTF-8?B?V2VsdA==?=")).toBe("Hallo Welt");
+  });
+
+  it("decodes encoded words embedded in plain header text", () => {
+    expect(decodeRfc2047('"=?UTF-8?Q?M=C3=BCller?=" <m@x.de>')).toBe('"Müller" <m@x.de>');
+  });
+
+  it("leaves undecodable or plain values untouched", () => {
+    expect(decodeRfc2047("=?X-UNKNOWN-99?B?////?=")).toBe("=?X-UNKNOWN-99?B?////?=");
+    expect(decodeRfc2047("plain subject")).toBe("plain subject");
+  });
+
+  it("is applied to parsed message headers", () => {
+    const msg = parseMessage({
+      id: "m1",
+      threadId: "t1",
+      payload: { headers: [{ name: "Subject", value: "=?UTF-8?B?w5xiZXJ3ZWlzdW5n?=" }] },
+    });
+    expect(msg.subject).toBe("Überweisung");
+  });
+});
+
+describe("withBackoff", () => {
+  const httpErr = (status: number) => Object.assign(new Error(`http ${status}`), { status });
+
+  it("retries 429 with growing delays, then succeeds", async () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    const result = await withBackoff(
+      async () => {
+        calls++;
+        if (calls < 3) throw httpErr(429);
+        return "ok";
+      },
+      { sleep: async (ms) => void sleeps.push(ms) },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+    expect(sleeps).toHaveLength(2);
+    expect(sleeps[1]).toBeGreaterThan(sleeps[0]); // exponential
+  });
+
+  it("gives up after the retry budget and rethrows", async () => {
+    let calls = 0;
+    await expect(
+      withBackoff(
+        async () => {
+          calls++;
+          throw httpErr(503);
+        },
+        { retries: 2, sleep: async () => {} },
+      ),
+    ).rejects.toThrow("http 503");
+    expect(calls).toBe(3); // initial + 2 retries
+  });
+
+  it("does not retry non-retryable errors (4xx, no status)", async () => {
+    let calls = 0;
+    await expect(
+      withBackoff(
+        async () => {
+          calls++;
+          throw httpErr(404);
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow("http 404");
+    expect(calls).toBe(1);
+
+    await expect(withBackoff(async () => Promise.reject(new Error("plain")), { sleep: async () => {} }))
+      .rejects.toThrow("plain");
+  });
+
+  it("recognizes the status on err.code (googleapis variance)", async () => {
+    let calls = 0;
+    const result = await withBackoff(
+      async () => {
+        calls++;
+        if (calls === 1) throw Object.assign(new Error("x"), { code: 500 });
+        return 1;
+      },
+      { sleep: async () => {} },
+    );
+    expect(result).toBe(1);
+    expect(calls).toBe(2);
   });
 });
 
@@ -777,9 +900,39 @@ describe("Gmail.downloadAttachment", () => {
     vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
     const gmail = new Gmail(apiWith(b64url("X")));
     const saved = await gmail.downloadAttachment("m1", "a1", "inbox/file.bin");
-    expect(saved).toBe(path.resolve(tmp, "inbox", "file.bin"));
+    // fence paths are realpath-canonicalized (e.g. /var → /private/var on macOS)
+    expect(saved).toBe(path.join(await fs.realpath(tmp), "inbox", "file.bin"));
     expect(await fs.readFile(saved, "utf8")).toBe("X");
   });
+
+  it("never overwrites: an existing file gets a numeric suffix", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    const gmail = new Gmail(apiWith(b64url("NEW")));
+    const dest = path.join(tmp, "report.pdf");
+    await fs.writeFile(dest, "OLD");
+    const saved = await gmail.downloadAttachment("m1", "a1", dest);
+    expect(saved).toBe(path.join(tmp, "report-1.pdf"));
+    expect(await fs.readFile(dest, "utf8")).toBe("OLD"); // original untouched
+    expect(await fs.readFile(saved, "utf8")).toBe("NEW");
+  });
+
+  it.skipIf(process.platform === "win32")(
+    "rejects a symlinked subdirectory pointing outside the fence",
+    async () => {
+      tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+      const outside = await fs.mkdtemp(path.join(os.tmpdir(), "mw-out-"));
+      try {
+        vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
+        await fs.symlink(outside, path.join(tmp, "leak"), "dir");
+        const gmail = new Gmail(apiWith(b64url("X")));
+        await expect(gmail.downloadAttachment("m1", "a1", "leak/evil.bin")).rejects.toThrow(
+          /symlink/,
+        );
+      } finally {
+        await fs.rm(outside, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("rejects a destPath escaping MAILWARDEN_DOWNLOAD_DIR", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));

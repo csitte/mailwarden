@@ -47,6 +47,79 @@ export interface LabelInfo {
 // The Gmail class methods are thin wrappers around these.
 // ---------------------------------------------------------------------------
 
+/** Decode the byte payload of one RFC 2047 encoded-word (B = base64, Q = quoted-printable-ish). */
+function encodedWordBytes(encoding: string, data: string): Uint8Array {
+  if (/b/i.test(encoding)) return Buffer.from(data, "base64");
+  // Q encoding: `_` is space, `=XX` is a hex byte, everything else is literal ASCII.
+  const out: number[] = [];
+  for (let i = 0; i < data.length; i++) {
+    const c = data[i];
+    if (c === "_") out.push(0x20);
+    else if (c === "=" && /^[0-9a-f]{2}$/i.test(data.slice(i + 1, i + 3))) {
+      out.push(parseInt(data.slice(i + 1, i + 3), 16));
+      i += 2;
+    } else out.push(data.charCodeAt(i));
+  }
+  return Uint8Array.from(out);
+}
+
+/**
+ * Decode RFC 2047 encoded-words in a header value: `=?charset?B|Q?data?=`.
+ * Non-ASCII Subject/From/To headers arrive from the Gmail API in this raw form —
+ * without decoding, the model sees `=?UTF-8?B?...?=` gibberish instead of text.
+ * An undecodable word (unknown charset, malformed data) is left as-is.
+ */
+export function decodeRfc2047(value: string): string {
+  if (!value.includes("=?")) return value;
+  // Whitespace between two adjacent encoded-words is ignored (RFC 2047 §6.2).
+  const joined = value.replace(/(\?=)[ \t\r\n]+(=\?)/g, "$1$2");
+  // `charset*lang` (RFC 2231 language suffix) is allowed — strip the suffix.
+  return joined.replace(
+    /=\?([^?*\s]+)(?:\*[^?\s]*)?\?([BbQq])\?([^?\s]*)\?=/g,
+    (whole, charset: string, enc: string, data: string) => {
+      try {
+        return new TextDecoder(charset).decode(encodedWordBytes(enc, data));
+      } catch {
+        return whole;
+      }
+    },
+  );
+}
+
+/** HTTP statuses worth retrying: rate limits and transient server errors. */
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+
+function statusOf(err: unknown): number | undefined {
+  const e = err as { status?: unknown; code?: unknown; response?: { status?: unknown } };
+  for (const s of [e?.status, e?.code, e?.response?.status]) {
+    if (typeof s === "number") return s;
+  }
+  return undefined;
+}
+
+/**
+ * Run `fn`, retrying 429/5xx responses with exponential backoff + jitter.
+ * Anything else (4xx, network errors, non-HTTP failures) is thrown immediately.
+ * `sleep` is injectable so tests don't have to wait real time.
+ */
+export async function withBackoff<T>(
+  fn: () => Promise<T>,
+  opts: { retries?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+): Promise<T> {
+  const retries = opts.retries ?? 3;
+  const baseMs = opts.baseMs ?? 400;
+  const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = statusOf(err);
+      if (attempt >= retries || status === undefined || !RETRYABLE_STATUS.has(status)) throw err;
+      await sleep(baseMs * 2 ** attempt + Math.random() * 100);
+    }
+  }
+}
+
 /** Read a part header value (case-insensitive name match). */
 function partHeader(p: gmail_v1.Schema$MessagePart, name: string): string | undefined {
   return p.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
@@ -166,7 +239,8 @@ export function collectAttachments(m: gmail_v1.Schema$Message): Attachment[] {
 /** Parse a raw Gmail message into the flat ParsedMessage shape. */
 export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
   const headers = m.payload?.headers ?? [];
-  const h = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+  const h = (n: string) =>
+    decodeRfc2047(headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "");
   const { text, html } = collectBodies(m.payload ?? undefined);
   return {
     id: m.id!,
@@ -277,6 +351,12 @@ const FILTER_SCAN_CAP = 100;
 /** Max concurrent threads.get calls while resolving search candidates. */
 const GET_CONCURRENCY = 8;
 
+export interface SearchResult {
+  threads: ThreadSummary[];
+  /** Present when more results exist — pass back to `search` to fetch the next page. */
+  nextPageToken?: string;
+}
+
 /** Thin wrapper over the native Gmail API. Every call is live — no cache. */
 export class Gmail {
   private api: gmail_v1.Gmail;
@@ -291,7 +371,12 @@ export class Gmail {
       : google.gmail({ version: "v1", auth: authOrApi });
   }
 
-  async search(query: string, maxResults = 25): Promise<ThreadSummary[]> {
+  /** Every API call goes through here: 429/5xx are retried with backoff. */
+  private req<T>(fn: () => Promise<T>): Promise<T> {
+    return withBackoff(fn);
+  }
+
+  async search(query: string, maxResults = 25, pageToken?: string): Promise<SearchResult> {
     // Re-verify read-state/category predicates against live labels (the index is
     // loose for `is:unread` & co). When filtering, the index may return false
     // positives, so scan a full page of candidates and stop once enough genuinely
@@ -302,17 +387,20 @@ export class Gmail {
     // A single list page may return fewer threads than requested even when more
     // exist — follow pageTokens until the scan cap is reached or pages run out.
     const candidates: gmail_v1.Schema$Thread[] = [];
-    let pageToken: string | undefined;
+    let nextToken: string | undefined = pageToken;
     do {
-      const list = await this.api.users.threads.list({
-        userId: "me",
-        q: query,
-        maxResults: scanCap - candidates.length,
-        ...(pageToken ? { pageToken } : {}),
-      });
+      const token = nextToken;
+      const list = await this.req(() =>
+        this.api.users.threads.list({
+          userId: "me",
+          q: query,
+          maxResults: scanCap - candidates.length,
+          ...(token ? { pageToken: token } : {}),
+        }),
+      );
       candidates.push(...(list.data.threads ?? []));
-      pageToken = list.data.nextPageToken ?? undefined;
-    } while (pageToken && candidates.length < scanCap);
+      nextToken = list.data.nextPageToken ?? undefined;
+    } while (nextToken && candidates.length < scanCap);
 
     // 'full' (not 'metadata') so the MIME parts are present — otherwise attachment
     // detection always returns false (metadata format omits payload.parts). The
@@ -322,7 +410,9 @@ export class Gmail {
     for (let i = 0; i < candidates.length && out.length < maxResults; i += GET_CONCURRENCY) {
       const chunk = candidates.slice(i, i + GET_CONCURRENCY);
       const metas = await Promise.all(
-        chunk.map((t) => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" })),
+        chunk.map((t) =>
+          this.req(() => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" })),
+        ),
       );
       for (let j = 0; j < chunk.length && out.length < maxResults; j++) {
         const t = chunk[j];
@@ -331,7 +421,7 @@ export class Gmail {
         if (!threadMatchesFilters(labelIds, filters)) continue; // drop index false positives
         const headers = msgs[0]?.payload?.headers ?? [];
         const h = (n: string) =>
-          headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+          decodeRfc2047(headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "");
         out.push({
           threadId: t.id!,
           messageCount: msgs.length,
@@ -344,7 +434,12 @@ export class Gmail {
         });
       }
     }
-    return out;
+    // The token resumes AFTER the last list page fetched. Exact for unfiltered
+    // queries (scanCap == maxResults, every candidate is consumed). With active
+    // filters the scan window (FILTER_SCAN_CAP) may hold more true matches than
+    // maxResults — resuming then skips those between-window threads. Documented
+    // approximation; narrow the query or raise maxResults for exhaustive sweeps.
+    return { threads: out, ...(nextToken ? { nextPageToken: nextToken } : {}) };
   }
 
   /**
@@ -356,12 +451,15 @@ export class Gmail {
     const ids: string[] = [];
     let pageToken: string | undefined;
     do {
-      const res = await this.api.users.threads.list({
-        userId: "me",
-        labelIds: [labelId],
-        maxResults: 100,
-        ...(pageToken ? { pageToken } : {}),
-      });
+      const token = pageToken;
+      const res = await this.req(() =>
+        this.api.users.threads.list({
+          userId: "me",
+          labelIds: [labelId],
+          maxResults: 100,
+          ...(token ? { pageToken: token } : {}),
+        }),
+      );
       for (const t of res.data.threads ?? []) ids.push(t.id!);
       pageToken = res.data.nextPageToken ?? undefined;
     } while (pageToken);
@@ -370,22 +468,26 @@ export class Gmail {
 
   /** Subject of a thread's first message, via a metadata-only fetch. */
   async getThreadSubject(threadId: string): Promise<string> {
-    const res = await this.api.users.threads.get({
-      userId: "me",
-      id: threadId,
-      format: "metadata",
-      metadataHeaders: ["Subject"],
-    });
+    const res = await this.req(() =>
+      this.api.users.threads.get({
+        userId: "me",
+        id: threadId,
+        format: "metadata",
+        metadataHeaders: ["Subject"],
+      }),
+    );
     const headers = res.data.messages?.[0]?.payload?.headers ?? [];
-    return headers.find((h) => h.name?.toLowerCase() === "subject")?.value ?? "";
+    return decodeRfc2047(headers.find((h) => h.name?.toLowerCase() === "subject")?.value ?? "");
   }
 
   async getThread(threadId: string, full = true): Promise<{ threadId: string; messages: ParsedMessage[] }> {
-    const res = await this.api.users.threads.get({
-      userId: "me",
-      id: threadId,
-      format: full ? "full" : "metadata",
-    });
+    const res = await this.req(() =>
+      this.api.users.threads.get({
+        userId: "me",
+        id: threadId,
+        format: full ? "full" : "metadata",
+      }),
+    );
     return { threadId, messages: (res.data.messages ?? []).map((m) => parseMessage(m)) };
   }
 
@@ -421,23 +523,25 @@ export class Gmail {
       }
     }
 
-    await this.api.users.threads.modify({
-      userId: "me",
-      id: threadId,
-      requestBody: { addLabelIds, removeLabelIds },
-    });
+    await this.req(() =>
+      this.api.users.threads.modify({
+        userId: "me",
+        id: threadId,
+        requestBody: { addLabelIds, removeLabelIds },
+      }),
+    );
   }
 
   async trash(threadId: string): Promise<void> {
-    await this.api.users.threads.trash({ userId: "me", id: threadId });
+    await this.req(() => this.api.users.threads.trash({ userId: "me", id: threadId }));
   }
 
   async untrash(threadId: string): Promise<void> {
-    await this.api.users.threads.untrash({ userId: "me", id: threadId });
+    await this.req(() => this.api.users.threads.untrash({ userId: "me", id: threadId }));
   }
 
   async listLabels(): Promise<LabelInfo[]> {
-    const res = await this.api.users.labels.list({ userId: "me" });
+    const res = await this.req(() => this.api.users.labels.list({ userId: "me" }));
     return (res.data.labels ?? []).map((l) => ({ id: l.id!, name: l.name!, type: l.type }));
   }
 
@@ -447,15 +551,17 @@ export class Gmail {
       (l) => l.name.toLowerCase() === name.toLowerCase(),
     );
     if (existing) return existing.id;
-    const res = await this.api.users.labels.create({
-      userId: "me",
-      requestBody: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
-    });
+    const res = await this.req(() =>
+      this.api.users.labels.create({
+        userId: "me",
+        requestBody: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
+      }),
+    );
     return res.data.id!;
   }
 
   async deleteLabel(id: string): Promise<void> {
-    await this.api.users.labels.delete({ userId: "me", id });
+    await this.req(() => this.api.users.labels.delete({ userId: "me", id }));
   }
 
   async downloadAttachment(messageId: string, attachmentId: string, destPath: string): Promise<string> {
@@ -464,19 +570,55 @@ export class Gmail {
     // without the fence, an HTTP-hosted deployment would hand every client an
     // arbitrary file write on the server.
     const root = process.env.MAILWARDEN_DOWNLOAD_DIR;
-    const dest = root ? path.resolve(root, destPath) : path.resolve(destPath);
+    let dest: string;
     if (root) {
-      const fence = path.resolve(root);
+      await fs.mkdir(root, { recursive: true });
+      // realpath-canonicalize the fence so `..`/symlinks in the ROOT itself
+      // can't shift the boundary, then check containment lexically…
+      const fence = await fs.realpath(root);
+      dest = path.resolve(fence, destPath);
       if (dest !== fence && !dest.startsWith(fence + path.sep)) {
         throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR (${fence}).`);
       }
+      await fs.mkdir(path.dirname(dest), { recursive: true });
+      // …and again against the REAL parent directory: a symlinked subdirectory
+      // inside the fence pointing outside would pass the lexical check above.
+      const realDir = await fs.realpath(path.dirname(dest));
+      if (realDir !== fence && !realDir.startsWith(fence + path.sep)) {
+        throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR via a symlink (${fence}).`);
+      }
+      dest = path.join(realDir, path.basename(dest));
+    } else {
+      dest = path.resolve(destPath);
+      await fs.mkdir(path.dirname(dest), { recursive: true });
     }
-    const res = await this.api.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId });
+    const res = await this.req(() =>
+      this.api.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId }),
+    );
     if (!res.data.data) throw new Error("Attachment has no data.");
-    await fs.mkdir(path.dirname(dest), { recursive: true });
-    await fs.writeFile(dest, Buffer.from(res.data.data, "base64url"));
-    return dest;
+    return writeUnique(dest, Buffer.from(res.data.data, "base64url"));
   }
+}
+
+/**
+ * Write `buf` to `dest` without ever overwriting: `wx` fails on any existing
+ * file (or symlink — so a planted link can't redirect the write either), and a
+ * collision falls back to `name-1.ext`, `name-2.ext`, … Returns the path used.
+ */
+async function writeUnique(dest: string, buf: Buffer): Promise<string> {
+  const dir = path.dirname(dest);
+  const ext = path.extname(dest);
+  const stem = path.basename(dest, ext);
+  for (let i = 0; i < 100; i++) {
+    const candidate = i === 0 ? dest : path.join(dir, `${stem}-${i}${ext}`);
+    try {
+      await fs.writeFile(candidate, buf, { flag: "wx" });
+      return candidate;
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+  throw new Error(`No free filename for ${dest} after 100 attempts.`);
 }
 
 /** Heuristic: a ready-made gmail_v1.Gmail exposes a `users` resource; an OAuth2Client doesn't. */

@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`search` is paginated:** pass `pageToken`, get `nextPageToken` back when more
+  results exist. The result shape changed from a bare array to
+  `{ threads, nextPageToken? }`.
+- **MCP tool annotations** (`title`, `readOnlyHint`, `destructiveHint`,
+  `idempotentHint`, `openWorldHint`) and structured `USE WHEN / DO NOT USE /
+  SIDE EFFECTS` descriptions on all 14 tools.
+- **Prompt-injection fencing:** every tool result is wrapped in
+  `<untrusted-tool-output>` markers (breakout-neutralized) and stripped of
+  invisible/BiDi-override characters (`src/sanitize.ts`).
+- **RFC 2047 header decoding** — non-ASCII Subject/From/To
+  (`=?UTF-8?B?...?=`) now arrive as readable text.
+- **429/5xx retry with exponential backoff** on every Gmail API call.
+- `docs/COMPETITORS.md` — source-level analysis of the four main Gmail MCP
+  competitors.
+
+### Changed
+- **`download_attachment` never overwrites:** an existing file gets a numeric
+  suffix (`file-1.pdf`); the response reports the path actually used. The
+  `MAILWARDEN_DOWNLOAD_DIR` fence is realpath-canonicalized and re-checked
+  after directory creation, so a symlinked subdirectory can no longer escape it.
+
+### Fixed
+- `google-auth-library` is now a declared dependency (it is imported directly;
+  strict installers like pnpm failed the build on the phantom dependency).
+
 ## [0.1.6] - 2026-07-20
 
 ### Fixed

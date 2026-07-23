@@ -18,13 +18,13 @@ Hosted Gmail connectors run on a synced index that can silently miss messages. `
 
 | Tool | What it does |
 |---|---|
-| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels |
+| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken` |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
 | `modify_labels` | Add/remove labels (archive = remove `INBOX`, read = remove `UNREAD`) |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
-| `download_attachment` | Save an attachment to a local path |
+| `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
 | **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`) |
 | **`unsnooze`** | Cancel a snooze, return to inbox now |
 | **`list_snoozed`** | All snoozed threads + due dates |
@@ -36,6 +36,21 @@ Hosted Gmail connectors run on a synced index that can silently miss messages. `
 - on demand (`sweep_snoozed` tool),
 - via cron: `mailwarden --sweep`,
 - or automatically: set `MAILWARDEN_AUTO_SWEEP=1` (hourly sweep while the server runs).
+
+## Security & privacy
+
+- **No telemetry.** Nothing phones home — no analytics, no crash reporting, no tracking.
+- **No open ports by default.** stdio only; an HTTP listener exists solely behind an explicit
+  `--http`, optionally gated by a `MAILWARDEN_TOKEN` bearer token.
+- **No send tools — by design.** mailwarden cannot compose, reply, or forward. A prompt-injected
+  instruction inside an email has no exfiltration path through this server.
+- **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
+  directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
+- **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
+  and stripped of invisible/BiDi-override characters, so clients can tell quoted mail content from
+  instructions.
+- **Live API, no copy.** No mailbox mirror or search index is stored anywhere. The only local state
+  is your OAuth token in `~/.mailwarden/`.
 
 ## Quick start
 
@@ -98,7 +113,7 @@ node dist/index.js --auth
 
 ## Status
 
-`0.1.6` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (83 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+`0.1.6` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (103 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
