@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2026-07-23
+
 ### Added
 - **`search` is paginated:** pass `pageToken`, get `nextPageToken` back when more
   results exist. The result shape changed from a bare array to
