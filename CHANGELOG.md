@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.9] - 2026-07-24
+
+### Security
+- **Cleared all `npm audit` advisories in the dependency tree** (`npm audit` now
+  reports 0 vulnerabilities). None were on mailwarden's runtime path — all were
+  transitive (chiefly via `@modelcontextprotocol/sdk`'s `hono` stack, which the
+  server does not use; its HTTP mode runs on `express`) — but the tree is now
+  clean so security scanners and Dependabot stop flagging it:
+  - `@hono/node-server` forced to `^2.0.5` via `overrides` (fixes GHSA-frvp-7c67-39w9,
+    path traversal in `serve-static` on Windows; the SDK still pins `^1.19.x`, so
+    an override is the only way to lift it).
+  - `hono`, `fast-uri`, and `body-parser` bumped to patched versions within range.
+
 ## [0.1.8] - 2026-07-23
 
 ### Added
