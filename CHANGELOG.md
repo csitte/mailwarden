@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2026-07-25
+
+### Fixed
+- **`download_attachment` annotation corrected:** `idempotentHint` was `true` but
+  the tool never overwrites (a second call with the same args writes `file-1.pdf`),
+  which is non-idempotent. Now `idempotentHint: false`, matching the described
+  behavior. (Caught by Glama's tool-definition-quality evaluation.)
+
 ## [0.1.9] - 2026-07-24
 
 ### Security

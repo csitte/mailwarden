@@ -292,7 +292,9 @@ export function registerTools(server: McpServer): void {
         "SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix (file-1.pdf). The response's 'saved' field is the path actually used. Mailbox unchanged.",
       inputSchema: { messageId: z.string(), attachmentId: z.string(), destPath: z.string() },
       outputSchema: { saved: z.string() },
-      annotations: { title: "Download attachment", ...write },
+      // Not idempotent: a second call with the same args writes a new file
+      // (file-1.pdf) rather than reproducing the first result.
+      annotations: { title: "Download attachment", ...write, idempotentHint: false },
     },
     async ({ messageId, attachmentId, destPath }) =>
       ok({ saved: await (await client()).downloadAttachment(messageId, attachmentId, destPath) }),
