@@ -3,7 +3,7 @@
 What's planned, in rough priority. Informed by a survey of the Gmail MCP server landscape
 (July 2026); no promises, PRs welcome.
 
-## Done (0.1.7 / 0.1.8)
+## Done (0.1.7 – 0.1.10)
 
 - MCP tool annotations + structured `USE WHEN / DO NOT USE / SIDE EFFECTS` descriptions.
 - Paginated `search` (`pageToken`/`nextPageToken`).
@@ -14,11 +14,13 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
 - `bulk_modify` (query-based batch label ops, partial-success reporting); batched snooze sweep.
 - Structured outputs (`outputSchema` + validated `structuredContent`) on every tool.
 - Read-only mode (`MAILWARDEN_READONLY=1`).
+- Step-by-step [setup guide](SETUP.md) covering the Google Cloud / OAuth consent dance,
+  the "unverified app" screen, and the Testing-status 7-day token expiry.
 
 ## Next
 
-1. **Onboarding**: guided `--auth` experience and a step-by-step setup guide with screenshots —
-   the Google Cloud project + OAuth consent dance is the biggest friction point.
+1. **Onboarding, part 2**: a guided `--auth` experience (preflight checks with actionable
+   messages: credentials present and well-formed, consent-screen pitfalls called out).
 2. **Multi-account** support — only if real demand shows up.
 
 ## Non-goals

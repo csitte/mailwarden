@@ -86,7 +86,9 @@ That's the whole install — `npx` fetches and runs the published package, no cl
 
 ## Setup
 
-1. **Google Cloud:** create a project → enable the **Gmail API** → configure the OAuth consent screen → create an **OAuth client ID** of type *Desktop app* → download it as `credentials.json`.
+First time setting up a Google OAuth app? Follow the **[step-by-step setup guide](docs/SETUP.md)** — it walks through the Google Cloud Console with exact click paths, explains the "unverified app" screen, and covers the trap that makes tokens die after 7 days. The short version:
+
+1. **Google Cloud:** create a project → enable the **Gmail API** → configure the OAuth consent screen and **publish it to Production** (in *Testing* status, Google expires refresh tokens after 7 days) → create an **OAuth client ID** of type *Desktop app* → download it as `credentials.json`.
 2. Put `credentials.json` in `~/.mailwarden/` (or set `MAILWARDEN_CREDENTIALS=/path/to/credentials.json`).
 3. Authorize once — opens a browser, stores a refresh token in `~/.mailwarden/token.json`:
    ```bash
@@ -138,7 +140,7 @@ node dist/index.js --auth
 
 ## Status
 
-`0.1.7` — working. Core Gmail tools + snooze implemented against `googleapis` and used in daily mailbox automation. Covered by a vitest suite (116 tests, ~99 % statement coverage — `npm run coverage`). See the [changelog](CHANGELOG.md) / [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (116 tests, ~99 % statement coverage — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
