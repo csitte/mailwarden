@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **`--http` is secure-by-default.** The HTTP listener now binds to `127.0.0.1`
+  instead of every interface, and **refuses to start without a `MAILWARDEN_TOKEN`**
+  (set `MAILWARDEN_ALLOW_NO_TOKEN=1` to opt into an unauthenticated endpoint on a
+  trusted network). On a loopback bind it validates the `Host` header as a
+  DNS-rebinding defense. New env vars: `MAILWARDEN_HOST`, `MAILWARDEN_ALLOW_NO_TOKEN`,
+  `MAILWARDEN_ALLOWED_HOSTS`. The request body is now capped at 1 MB.
+  **Breaking for `--http` users who ran without a token** — set one, or opt out explicitly.
+
+### Fixed
+- **Dead/revoked refresh token now yields an actionable error.** An expired
+  `invalid_grant` (e.g. a "Testing" consent screen's 7-day expiry) surfaces as
+  "Run `mailwarden --auth` to re-authorize" instead of a cryptic OAuth failure.
+
+### Changed
+- **One OAuth token refresh per process, not per tool call.** The authenticated
+  client is cached for the process lifetime; previously every tool call rebuilt it
+  and forced a fresh token-endpoint round-trip before the actual Gmail request.
+- **`bulk_modify` reports truncation.** The result carries a `capped` flag, set
+  when more messages matched than `maxMessages` (only the first `maxMessages` are
+  processed) so callers can raise the cap or re-run instead of silently missing mail.
+
 ## [0.1.10] - 2026-07-25
 
 ### Fixed

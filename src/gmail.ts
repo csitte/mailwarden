@@ -99,6 +99,21 @@ export function decodeRfc2047(value: string): string {
   );
 }
 
+/**
+ * True when an error is Google's `invalid_grant` — the stored refresh token is
+ * expired or revoked (e.g. the 7-day expiry of a "Testing" OAuth consent screen).
+ * It surfaces only when a request actually tries to refresh, so it's detected
+ * here at the API layer rather than eagerly at token load (which would cost a
+ * network round-trip on every startup).
+ */
+export function isInvalidGrant(err: unknown): boolean {
+  const e = err as { response?: { data?: { error?: unknown } }; message?: unknown };
+  return (
+    e?.response?.data?.error === "invalid_grant" ||
+    (typeof e?.message === "string" && /invalid_grant/.test(e.message))
+  );
+}
+
 /** HTTP statuses worth retrying: rate limits and transient server errors. */
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
@@ -387,8 +402,19 @@ export class Gmail {
   }
 
   /** Every API call goes through here: 429/5xx are retried with backoff. */
-  private req<T>(fn: () => Promise<T>): Promise<T> {
-    return withBackoff(fn);
+  private async req<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await withBackoff(fn);
+    } catch (err) {
+      // Turn a dead/revoked refresh token into an actionable message instead of
+      // a cryptic OAuth error on the first Gmail call.
+      if (isInvalidGrant(err)) {
+        throw new Error(
+          "mailwarden's saved authorization has expired or been revoked. Run `mailwarden --auth` to re-authorize.",
+        );
+      }
+      throw err;
+    }
   }
 
   async search(query: string, maxResults = 25, pageToken?: string): Promise<SearchResult> {

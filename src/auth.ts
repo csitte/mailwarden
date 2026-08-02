@@ -54,15 +54,25 @@ async function persistToken(client: OAuth2Client): Promise<void> {
 }
 
 /**
+ * Process-lifetime cache of the runtime OAuth2 client. A fresh `fromJSON` client
+ * carries only the refresh token (no access token), so it must hit Google's token
+ * endpoint on its first request. Rebuilding it per tool call (as tools.ts once did)
+ * forced that refresh on every single call; caching it means one refresh per
+ * process, with google-auth-library transparently refreshing again on expiry.
+ */
+let cachedClient: OAuth2Client | null = null;
+
+/**
  * Returns an authenticated OAuth2 client.
  * - interactive=false (server runtime): loads the stored refresh token, else throws.
  * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it.
  */
 export async function getAuth(interactive = false): Promise<OAuth2Client> {
   if (!interactive) {
+    if (cachedClient) return cachedClient;
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
     const saved = await loadSavedToken();
-    if (saved) return saved;
+    if (saved) return (cachedClient = saved);
     throw new Error(
       "mailwarden is not authorized yet. Run `mailwarden --auth` once to grant Gmail access.",
     );
@@ -81,5 +91,6 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
     );
   }
   await persistToken(client);
+  cachedClient = null; // a later non-interactive load re-reads the freshly stored token
   return client;
 }

@@ -14,6 +14,7 @@ import {
   parseMessage,
   decodeRfc2047,
   withBackoff,
+  isInvalidGrant,
   Gmail,
 } from "../src/gmail.js";
 
@@ -759,6 +760,42 @@ describe("withBackoff", () => {
       ),
     ).rejects.toThrow("reset");
     expect(calls2).toBe(1);
+  });
+});
+
+describe("isInvalidGrant", () => {
+  it("detects the Google OAuth invalid_grant shape (response body and message)", () => {
+    expect(isInvalidGrant({ response: { data: { error: "invalid_grant" } } })).toBe(true);
+    expect(isInvalidGrant(new Error("invalid_grant: Token has been expired or revoked."))).toBe(true);
+  });
+  it("does not fire on unrelated errors", () => {
+    expect(isInvalidGrant(new Error("network down"))).toBe(false);
+    expect(isInvalidGrant({ response: { data: { error: "access_denied" } } })).toBe(false);
+    expect(isInvalidGrant(undefined)).toBe(false);
+  });
+});
+
+describe("Gmail.req — dead refresh token surfaces an actionable message", () => {
+  it("rewrites invalid_grant into a run-`--auth` hint", async () => {
+    const api: any = {
+      users: {
+        labels: {
+          list: async () => {
+            throw Object.assign(new Error("boom"), { response: { data: { error: "invalid_grant" } } });
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await expect(gmail.listLabels()).rejects.toThrow(/mailwarden --auth/);
+  });
+
+  it("passes a non-auth error through unchanged", async () => {
+    const api: any = {
+      users: { labels: { list: async () => { throw new Error("some other failure"); } } },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await expect(gmail.listLabels()).rejects.toThrow(/some other failure/);
   });
 });
 

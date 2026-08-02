@@ -164,6 +164,7 @@ export function registerTools(server: McpServer): void {
       description:
         "Bulk-apply label changes to every message matching a Gmail query, batched at 1000 messages per API request. " +
         "Returns matched/modified counts, affected thread IDs (capped at 500 — modifiedThreadCount has the true total), and per-chunk failures (partial success is reported, not hidden). " +
+        "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
         "Note: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs — for read-state-precise bulk ops, verify with search first. " +
         "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
@@ -179,6 +180,8 @@ export function registerTools(server: McpServer): void {
         modifiedMessages: z.number(),
         modifiedThreadCount: z.number(),
         modifiedThreads: z.array(z.string()),
+        // True when the match set was truncated at maxMessages — more remain unprocessed.
+        capped: z.boolean(),
         failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
       },
       annotations: { title: "Bulk modify by query", ...write },
@@ -196,6 +199,8 @@ export function registerTools(server: McpServer): void {
         modifiedThreadCount: res.modifiedThreads.length,
         // Cap the id list — a 10k-thread sweep must not flood the model context.
         modifiedThreads: res.modifiedThreads.slice(0, 500),
+        // listMessageRefs stops at maxMessages: a full page means more may match.
+        capped: refs.length >= maxMessages,
         failed: res.failed,
       });
     },

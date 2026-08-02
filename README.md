@@ -62,8 +62,11 @@ alongside the same JSON as fenced text — clients never have to parse prose.
 ## Security & privacy
 
 - **No telemetry.** Nothing phones home — no analytics, no crash reporting, no tracking.
-- **No open ports by default.** stdio only; an HTTP listener exists solely behind an explicit
-  `--http`, optionally gated by a `MAILWARDEN_TOKEN` bearer token.
+- **No open ports by default.** stdio only. The optional `--http` listener binds to `127.0.0.1`
+  (not the LAN) and **refuses to start without a `MAILWARDEN_TOKEN`** bearer token — set
+  `MAILWARDEN_ALLOW_NO_TOKEN=1` to override on a trusted, isolated network. On a loopback bind it
+  also validates the `Host` header (DNS-rebinding defense). For remote hosting, set `MAILWARDEN_HOST`
+  and front it with TLS.
 - **No send tools — by design.** mailwarden cannot compose, reply, or forward. A prompt-injected
   instruction inside an email has no exfiltration path through this server.
 - **Read-only mode.** Set `MAILWARDEN_READONLY=1` and only the read tools (`search`, `get_thread`,
@@ -115,7 +118,8 @@ claude mcp add mailwarden -- npx -y mailwarden
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
 ```bash
-npx -y mailwarden --http     # listens on :8787/mcp ; set PORT, optional MAILWARDEN_TOKEN bearer gate
+# Loopback + token required by default. For real hosting, bind outward and keep the token:
+MAILWARDEN_TOKEN=<secret> MAILWARDEN_HOST=0.0.0.0 npx -y mailwarden --http   # :8787/mcp
 ```
 Then in claude.ai: Settings → Connectors → *Add custom connector* → your `https://your-host/mcp` URL. In Claude Code: `claude mcp add --transport http mailwarden https://your-host/mcp`.
 
@@ -137,11 +141,14 @@ node dist/index.js --auth
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed) |
 | `PORT` | HTTP port (default 8787) |
-| `MAILWARDEN_TOKEN` | optional bearer token for the HTTP endpoint |
+| `MAILWARDEN_HOST` | HTTP bind address (default `127.0.0.1`; set e.g. `0.0.0.0` for remote hosting) |
+| `MAILWARDEN_TOKEN` | bearer token for the HTTP endpoint — **required** for `--http` unless overridden |
+| `MAILWARDEN_ALLOW_NO_TOKEN` | `1` → allow `--http` without a token (trusted/isolated networks only) |
+| `MAILWARDEN_ALLOWED_HOSTS` | extra comma-separated `host:port` values accepted by the loopback `Host` allowlist |
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (116 tests, ~99 % statement coverage — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (136 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

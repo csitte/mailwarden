@@ -49,6 +49,20 @@ describe("getAuth (non-interactive)", () => {
     expect(refreshToken).toBe("rt-123");
   });
 
+  it("caches the client across calls (one refresh per process, not per call)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify({ type: "authorized_user", client_id: "cid", client_secret: "cs", refresh_token: "rt-123" }),
+    );
+    const { getAuth } = await freshAuth(tmp);
+    const first = await getAuth(false);
+    // Deleting the token would make a fresh load throw — but the cache holds it.
+    await fs.rm(path.join(tmp, "token.json"));
+    const second = await getAuth(false);
+    expect(second).toBe(first); // same instance, no re-read from disk
+  });
+
   it("treats a corrupt token.json as not-authorized (throws instead of crashing)", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(path.join(tmp, "token.json"), "{ not json");

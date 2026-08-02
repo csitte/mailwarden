@@ -104,8 +104,37 @@ describe("tool results — structured content + fenced text", () => {
       modifiedMessages: 3,
       modifiedThreadCount: 2,
       modifiedThreads: ["t1", "t2"],
+      capped: false, // 3 matched, well under the default maxMessages
       failed: [],
     });
+  });
+
+  it("bulk_modify flags capped:true when the match set fills maxMessages", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: {
+          // Every list page is full and always offers another token → the cap,
+          // not exhaustion, stops the scan. maxMessages=2 keeps the fixture tiny.
+          list: async (req: any) => ({
+            data: {
+              messages: Array.from({ length: req.maxResults }, (_, i) => ({
+                id: `m${i}`,
+                threadId: `t${i}`,
+              })),
+              nextPageToken: "more",
+            },
+          }),
+          batchModify: async () => ({}),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "in:inbox", remove: ["INBOX"], maxMessages: 2 },
+    });
+    expect(res.structuredContent.matchedMessages).toBe(2);
+    expect(res.structuredContent.capped).toBe(true);
   });
 
   it("bulk_modify rejects a call with neither add nor remove (no wasted API pass)", async () => {
