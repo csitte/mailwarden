@@ -1,6 +1,6 @@
 {
   "name": "mailwarden",
-  "version": "0.1.10",
+  "version": "0.2.0",
   "description": "A reliable, native Gmail MCP server with full mailbox control — search, labels, archive, trash, attachments, and snooze.",
   "mcpName": "io.github.csitte/mailwarden",
   "type": "module",

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-02
+
 ### Security
 - **`--http` is secure-by-default.** The HTTP listener now binds to `127.0.0.1`
   instead of every interface, and **refuses to start without a `MAILWARDEN_TOKEN`**
