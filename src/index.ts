@@ -21,8 +21,19 @@ async function main(): Promise<void> {
 
   // One-time interactive OAuth consent.
   if (args.includes("--auth")) {
-    await getAuth(true);
-    console.error("✓ mailwarden authorized — refresh token stored.");
+    const client = await getAuth(true);
+    // Prove the credential works end-to-end before declaring success — catches a
+    // consent that completed but can't actually call Gmail (wrong scope, etc.).
+    try {
+      const { emailAddress } = await new Gmail(client).getProfile();
+      console.error(`✓ mailwarden authorized as ${emailAddress} — refresh token stored.`);
+    } catch (err) {
+      console.error(
+        "⚠ Token was stored, but a test call to Gmail failed:",
+        err instanceof Error ? err.message : err,
+      );
+      process.exitCode = 1;
+    }
     return;
   }
 

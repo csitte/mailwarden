@@ -913,6 +913,22 @@ describe("Gmail.ensureLabel", () => {
   });
 });
 
+describe("Gmail.getProfile", () => {
+  it("returns the authorized account's email address", async () => {
+    const api: any = {
+      users: { getProfile: async () => ({ data: { emailAddress: "me@example.com" } }) },
+    };
+    expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({
+      emailAddress: "me@example.com",
+    });
+  });
+
+  it("defaults to an empty string when the API omits it", async () => {
+    const api: any = { users: { getProfile: async () => ({ data: {} }) } };
+    expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({ emailAddress: "" });
+  });
+});
+
 describe("Gmail.trash / untrash / deleteLabel — API pass-through", () => {
   it("forwards the thread/label id to the right endpoint", async () => {
     const calls: Record<string, any> = {};

@@ -654,6 +654,12 @@ export class Gmail {
     await this.req(() => this.api.users.threads.untrash({ userId: "me", id: threadId }));
   }
 
+  /** The authorized account's email address — a cheap authenticated call for a post-auth smoke test. */
+  async getProfile(): Promise<{ emailAddress: string }> {
+    const res = await this.req(() => this.api.users.getProfile({ userId: "me" }));
+    return { emailAddress: res.data.emailAddress ?? "" };
+  }
+
   async listLabels(): Promise<LabelInfo[]> {
     const res = await this.req(() => this.api.users.labels.list({ userId: "me" }));
     return (res.data.labels ?? []).map((l) => ({ id: l.id!, name: l.name!, type: l.type }));

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { checkCredentials } from "../src/auth.js";
 
 // Stable mock instance that survives vi.resetModules() (the factory re-runs,
 // but keeps handing out this same vi.fn).
@@ -118,6 +119,10 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
 
   it("throws (and persists nothing) when the flow yields no refresh token", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
     mocks.authenticate.mockResolvedValue({ credentials: {} });
 
     const { getAuth } = await freshAuth(tmp);
@@ -153,20 +158,69 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     expect(stored.refresh_token).toBe("fresh-rt");
   });
 
-  it("fails clearly when credentials.json is missing", async () => {
+  it("preflights a missing credentials.json before opening the browser", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
 
     const { getAuth } = await freshAuth(tmp);
-    await expect(getAuth(true)).rejects.toThrow(/Cannot read OAuth credentials/);
+    await expect(getAuth(true)).rejects.toThrow(/No OAuth credentials found/);
+    expect(mocks.authenticate).not.toHaveBeenCalled(); // failed before the consent flow
   });
 
-  it("fails clearly when credentials.json has no installed/web client", async () => {
+  it("preflights a credentials.json with no installed/web client", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(path.join(tmp, "credentials.json"), JSON.stringify({ foo: 1 }));
     mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
 
     const { getAuth } = await freshAuth(tmp);
-    await expect(getAuth(true)).rejects.toThrow(/Unexpected format/);
+    await expect(getAuth(true)).rejects.toThrow(/no "installed" or "web" OAuth client/);
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+  });
+});
+
+describe("checkCredentials — --auth preflight (pure)", () => {
+  const P = "/cfg/credentials.json";
+
+  it("accepts a Desktop (installed) client", () => {
+    const raw = JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } });
+    expect(checkCredentials(raw, P)).toEqual({
+      ok: true,
+      kind: "installed",
+      client_id: "cid",
+      client_secret: "cs",
+    });
+  });
+
+  it("accepts a web client", () => {
+    const raw = JSON.stringify({ web: { client_id: "wcid", client_secret: "wcs" } });
+    expect(checkCredentials(raw, P)).toMatchObject({ ok: true, kind: "web", client_id: "wcid" });
+  });
+
+  it("reports a missing file (raw === null) with a Desktop-app hint", () => {
+    const r = checkCredentials(null, P);
+    expect(r.ok).toBe(false);
+    expect((r as { message: string }).message).toMatch(/No OAuth credentials found at \/cfg/);
+  });
+
+  it("reports invalid JSON", () => {
+    const r = checkCredentials("{ not json", P);
+    expect(r).toMatchObject({ ok: false });
+    expect((r as { message: string }).message).toMatch(/not valid JSON/);
+  });
+
+  it("reports a file with neither installed nor web (e.g. an API key)", () => {
+    const r = checkCredentials(JSON.stringify({ apiKey: "x" }), P);
+    expect((r as { message: string }).message).toMatch(/no "installed" or "web" OAuth client/);
+  });
+
+  it("reports a client missing client_id / client_secret", () => {
+    expect(
+      (checkCredentials(JSON.stringify({ installed: { client_id: "cid" } }), P) as { message: string })
+        .message,
+    ).toMatch(/missing client_id or client_secret/);
+    expect(
+      (checkCredentials(JSON.stringify({ web: { client_secret: "cs" } }), P) as { message: string })
+        .message,
+    ).toMatch(/missing client_id or client_secret/);
   });
 });

@@ -3,7 +3,12 @@
 What's planned, in rough priority. Informed by a survey of the Gmail MCP server landscape
 (July 2026); no promises, PRs welcome.
 
-## Done (0.1.7 – 0.1.10)
+## Done (0.1.7 – 0.2.0)
+
+- **`--http` hardening** (0.2.0): loopback bind + mandatory bearer token by default,
+  Host-header allowlist (DNS-rebinding defense), request-body cap.
+- **Guided `--auth`** (unreleased on `main`): credentials.json preflight with actionable messages
+  before the browser flow, plus a post-consent live smoke call confirming the account.
 
 - MCP tool annotations + structured `USE WHEN / DO NOT USE / SIDE EFFECTS` descriptions.
 - Paginated `search` (`pageToken`/`nextPageToken`).
@@ -19,9 +24,7 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
 
 ## Next
 
-1. **Onboarding, part 2**: a guided `--auth` experience (preflight checks with actionable
-   messages: credentials present and well-formed, consent-screen pitfalls called out).
-2. **Multi-account** support — only if real demand shows up.
+1. **Multi-account** support — only if real demand shows up.
 
 ## Non-goals
 
