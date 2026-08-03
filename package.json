@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepare": "npm run build",
     "version": "node scripts/sync-version.mjs && git add server.json",
     "prepublishOnly": "npm run build && npm test",
     "test": "vitest run",
