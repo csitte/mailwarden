@@ -15,7 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `list_filters` still surfaces any `forward` address on existing filters so it can be audited.
   `create_filter` also accepts `applyToExisting: true`, which — after creating the rule — builds a Gmail
   search from the criteria and runs a one-off bulk modify over mail already in the mailbox (up to
-  `maxMessages`, default 1000), returning the outcome under `applied`.
+  `maxMessages`, default 1000), returning the outcome under `applied`. Guardrails: it requires a positive
+  criterion (an exclusion-only rule would sweep almost the whole mailbox and is refused), plain values
+  are quoted so they can't break out of the query, a backlog failure is reported in `applied.error`
+  rather than raised (the filter still stands), and `create_filter`/`bulk_modify` are now marked
+  `destructiveHint` since they can bulk-trash. Empty `bulk_modify` queries are rejected.
   This adds the `gmail.settings.basic` OAuth scope — **existing users must re-run `mailwarden --auth`
   once**; until then filter calls return an actionable insufficient-scope message. Not registered in
   `MAILWARDEN_READONLY` mode.

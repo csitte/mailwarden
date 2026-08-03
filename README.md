@@ -78,11 +78,14 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
 - **Existing mail:** a filter only runs on messages arriving *after* it's created. Pass
   `applyToExisting: true` to also apply the same actions once to mail already in the mailbox —
   mailwarden builds a Gmail search from the criteria and runs a bulk modify (up to `maxMessages`,
-  default 1000; same loose-index caveat as `bulk_modify`). The outcome comes back under `applied`
-  (the `query` used, `matchedMessages`/`modifiedMessages`/`modifiedThreadCount` counts, `capped` when
-  the match set hit `maxMessages`, and per-chunk `failed`); it's `null` when `applyToExisting` was not set.
-  The filter is created first, so a partial or failed backlog pass is *reported* in `applied`, not raised —
-  the rule still stands.
+  default 1000; same loose-index caveat as `bulk_modify`, and the one-off pass excludes Spam/Trash).
+  This requires at least one *positive* criterion (`from`/`to`/`subject`/`query`/`hasAttachment:true`/`size`):
+  an exclusion-only rule (`negatedQuery` or `hasAttachment:false`) is refused for `applyToExisting`
+  because it would match almost the whole mailbox — create such a filter without the flag.
+  The outcome comes back under `applied` (the `query` used, `matchedMessages`/`modifiedMessages`/`modifiedThreadCount`
+  counts, `capped` when the match set hit `maxMessages`, per-chunk `failed`, and an `error` string if the whole
+  pass failed); it's `null` when `applyToExisting` was not set. The filter is created first, so a partial or
+  failed backlog pass is *reported* in `applied`, never raised — the rule still stands.
 - **No forwarding** — see [Security & privacy](#security--privacy).
 - Requires the `gmail.settings.basic` scope; re-run `--auth` once if you authorized an older version.
   Not available in read-only mode.
@@ -182,7 +185,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (164 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (168 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

@@ -976,7 +976,7 @@ describe("filterCriteria round-trip helpers", () => {
 describe("filterCriteriaToQuery", () => {
   it("maps criteria onto Gmail search operators", () => {
     expect(filterCriteriaToQuery({ from: "a@b.com", subject: "invoice" })).toBe(
-      "from:(a@b.com) subject:(invoice)",
+      'from:"a@b.com" subject:"invoice"',
     );
     expect(filterCriteriaToQuery({ query: "newer_than:7d", negatedQuery: "in:chats" })).toBe(
       "(newer_than:7d) -(in:chats)",
@@ -988,6 +988,14 @@ describe("filterCriteriaToQuery", () => {
     // size without its comparison isn't emitted (incomplete pair)
     expect(filterCriteriaToQuery({ size: 5_000_000 })).toBe("");
     expect(filterCriteriaToQuery({})).toBe("");
+  });
+
+  it("quotes plain values so a stray ')' or operator can't break out and broaden the match", () => {
+    expect(filterCriteriaToQuery({ subject: "x) OR from:(boss@corp.com" })).toBe(
+      'subject:"x) OR from:(boss@corp.com"',
+    );
+    // Gmail has no quote-escaping → internal double quotes are stripped
+    expect(filterCriteriaToQuery({ from: 'a"b@x.com' })).toBe('from:"ab@x.com"');
   });
 });
 

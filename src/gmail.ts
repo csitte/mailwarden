@@ -224,10 +224,15 @@ export function filterCriteriaFromApi(c: gmail_v1.Schema$FilterCriteria | undefi
  * passed through; the size comparison maps to Gmail's `larger:`/`smaller:` (bytes).
  */
 export function filterCriteriaToQuery(c: FilterCriteria): string {
+  // Plain values (from/to/subject) are double-quoted so a stray ')' or an operator
+  // in the value can't break out of the grouping and broaden the match. Gmail has
+  // no quote-escaping, so internal double quotes are stripped. `query`/`negatedQuery`
+  // are search syntax by contract and pass through as operator expressions.
+  const phrase = (v: string) => `"${v.replace(/"/g, "")}"`;
   const parts: string[] = [];
-  if (c.from) parts.push(`from:(${c.from})`);
-  if (c.to) parts.push(`to:(${c.to})`);
-  if (c.subject) parts.push(`subject:(${c.subject})`);
+  if (c.from) parts.push(`from:${phrase(c.from)}`);
+  if (c.to) parts.push(`to:${phrase(c.to)}`);
+  if (c.subject) parts.push(`subject:${phrase(c.subject)}`);
   if (c.query) parts.push(`(${c.query})`);
   if (c.negatedQuery) parts.push(`-(${c.negatedQuery})`);
   if (c.hasAttachment === true) parts.push("has:attachment");

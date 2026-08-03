@@ -287,17 +287,58 @@ describe("tool results — structured content + fenced text", () => {
     });
 
     expect(created).toHaveLength(1);
-    expect(listQuery).toBe("from:(news@x.com)"); // query derived from the criteria
+    expect(listQuery).toBe('from:"news@x.com"'); // query derived from the criteria (plain value quoted)
     expect(batched[0]).toEqual({ ids: ["m1", "m2"], addLabelIds: ["Label_5"], removeLabelIds: ["INBOX"] });
     expect(res.structuredContent.id).toBe("f-x");
     expect(res.structuredContent.applied).toMatchObject({
-      query: "from:(news@x.com)",
+      query: 'from:"news@x.com"',
       matchedMessages: 2,
       modifiedMessages: 2,
       modifiedThreadCount: 2,
       capped: false,
       failed: [],
     });
+  });
+
+  it("create_filter refuses applyToExisting for an exclusion-only rule (no whole-mailbox sweep)", async () => {
+    const created: any[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        settings: { filters: { create: async (r: any) => (created.push(r), { data: { id: "f-z" } }) } },
+        messages: { list: async () => ({ data: {} }) },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "create_filter",
+      // negatedQuery-only → derived query would be `-(...)`, matching ~everything
+      arguments: { negatedQuery: "unsubscribe", addLabels: ["TRASH"], applyToExisting: true },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/at least one positive criterion/);
+    expect(created).toHaveLength(0); // filter not created either — refused before side effects
+  });
+
+  it("create_filter reports a backlog failure in applied.error without raising (filter still created)", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        labels: { list: async () => ({ data: { labels: [] } }) },
+        settings: { filters: { create: async (r: any) => ({ data: { id: "f-e", ...r.requestBody } }) } },
+        messages: {
+          list: async () => {
+            throw new Error("transient list failure");
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "create_filter",
+      arguments: { from: "news@x.com", addLabels: ["INBOX"], applyToExisting: true },
+    });
+    expect(res.isError).toBeFalsy(); // filter was created — the backlog failure must not raise
+    expect(res.structuredContent.id).toBe("f-e");
+    expect(res.structuredContent.applied.error).toMatch(/transient list failure/);
   });
 
   it("create_filter leaves applied null when applyToExisting is not set", async () => {

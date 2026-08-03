@@ -89,6 +89,9 @@ const filterAppliedSchema = z.object({
   // True when more messages matched than maxMessages — the rest were left untouched.
   capped: z.boolean(),
   failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
+  // Set only if the whole backlog pass failed AFTER the filter was created — the
+  // filter still stands; retry the sweep via bulk_modify with the same query.
+  error: z.string().optional(),
 });
 
 const okOutput = { ok: z.boolean() };
@@ -237,7 +240,8 @@ export function registerTools(server: McpServer): void {
         capped: z.boolean(),
         failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
       },
-      annotations: { title: "Bulk modify by query", ...write },
+      // destructive: add:['TRASH'] over a broad query bulk-trashes existing mail.
+      annotations: { title: "Bulk modify by query", ...write, destructiveHint: true },
     },
     async ({ query, add, remove, maxMessages }) => {
       if (add.length === 0 && remove.length === 0) {
@@ -466,13 +470,15 @@ export function registerTools(server: McpServer): void {
       },
       // `applied` is null unless applyToExisting was set.
       outputSchema: { ...filterSummarySchema.shape, applied: filterAppliedSchema.nullable() },
-      annotations: { title: "Create filter", ...write, idempotentHint: false },
+      // destructive: with applyToExisting + addLabels:['TRASH'] this bulk-trashes existing mail.
+      annotations: { title: "Create filter", ...write, destructiveHint: true, idempotentHint: false },
     },
     async ({ addLabels, removeLabels, applyToExisting, maxMessages, ...criteria }) => {
       // `sizeComparison` and `excludeChats` only MODIFY an otherwise-matching
-      // filter — neither is a match condition on its own, so they don't count
-      // toward "has at least one criterion".
-      const { size, sizeComparison, excludeChats, hasAttachment, ...textFields } = criteria;
+      // filter, and `negatedQuery` only EXCLUDES — none is a positive match
+      // condition on its own. Split them out so each guard can reason precisely.
+      const { size, sizeComparison, excludeChats, hasAttachment, negatedQuery, ...positiveText } =
+        criteria;
       // size and its comparison are meaningful only as a pair — check first so a
       // lone `size` or lone `sizeComparison` gets this precise message.
       if ((size === undefined) !== (sizeComparison === undefined)) {
@@ -480,10 +486,16 @@ export function registerTools(server: McpServer): void {
           "create_filter: 'size' and 'sizeComparison' (smaller|larger) must be given together.",
         );
       }
-      const hasMatch =
+      const hasPositive =
         size !== undefined ||
-        hasAttachment !== undefined ||
-        Object.values(textFields).some((v) => typeof v === "string" && v !== "");
+        hasAttachment === true ||
+        Object.values(positiveText).some((v) => typeof v === "string" && v !== "");
+      // A filter itself may match "everything except X" (negatedQuery / hasAttachment:false
+      // only), so creation just needs *some* condition.
+      const hasMatch =
+        hasPositive ||
+        hasAttachment === false ||
+        (typeof negatedQuery === "string" && negatedQuery !== "");
       if (!hasMatch) {
         throw new Error(
           "create_filter needs at least one match criterion (from/to/subject/query/negatedQuery/hasAttachment/size).",
@@ -494,13 +506,22 @@ export function registerTools(server: McpServer): void {
           "create_filter needs at least one label action in addLabels or removeLabels.",
         );
       }
-      // Derive the backlog query BEFORE creating anything, and refuse an empty one.
-      // An empty query would make listMessageRefs omit `q` and match the ENTIRE
-      // mailbox — a catastrophic bulk modify. The criteria validation above already
-      // guarantees a non-empty query; this is a fail-safe against future regressions,
-      // placed before side effects so the pathological case creates nothing.
+      // Derive the backlog query BEFORE creating anything, so a refusal has no side
+      // effects. Two ways the backlog pass could run away over the whole mailbox:
+      //   (1) an empty query → listMessageRefs omits `q` and matches everything;
+      //   (2) an exclusion-only rule (negatedQuery / hasAttachment:false, no positive
+      //       term) → the derived query is `-(…)`, matching ~all mail.
+      // Refuse both for applyToExisting; the filter can still be created without it.
       let query: string | null = null;
       if (applyToExisting) {
+        if (!hasPositive) {
+          throw new Error(
+            "create_filter: applyToExisting needs at least one positive criterion " +
+              "(from/to/subject/query/hasAttachment:true/size). A rule that only excludes " +
+              "(negatedQuery/hasAttachment:false) would match almost the whole mailbox — " +
+              "create the filter without applyToExisting, or add a narrowing criterion.",
+          );
+        }
         query = filterCriteriaToQuery(criteria);
         if (!query) {
           throw new Error(
@@ -517,20 +538,34 @@ export function registerTools(server: McpServer): void {
         modifiedThreadCount: number;
         capped: boolean;
         failed: { messageIds: string[]; error: string }[];
+        error?: string;
       } | null = null;
-      // Best-effort backlog cleanup: the filter is already created, so a failure or
-      // partial success here is reported in `applied`, not raised — the rule stands.
+      // Best-effort backlog cleanup: the filter is already created, so ANY failure
+      // here (a failed list/label-resolve, or per-chunk modify errors) is reported
+      // in `applied` — never raised — so the caller learns the rule still stands.
       if (query) {
-        const refs = await gmail.listMessageRefs({ query, max: maxMessages });
-        const res = await gmail.batchModifyMessages(refs, addLabels, removeLabels);
-        applied = {
-          query,
-          matchedMessages: refs.length,
-          modifiedMessages: res.modifiedMessages,
-          modifiedThreadCount: res.modifiedThreads.length,
-          capped: refs.length >= maxMessages,
-          failed: res.failed,
-        };
+        try {
+          const refs = await gmail.listMessageRefs({ query, max: maxMessages });
+          const res = await gmail.batchModifyMessages(refs, addLabels, removeLabels);
+          applied = {
+            query,
+            matchedMessages: refs.length,
+            modifiedMessages: res.modifiedMessages,
+            modifiedThreadCount: res.modifiedThreads.length,
+            capped: refs.length >= maxMessages,
+            failed: res.failed,
+          };
+        } catch (err) {
+          applied = {
+            query,
+            matchedMessages: 0,
+            modifiedMessages: 0,
+            modifiedThreadCount: 0,
+            capped: false,
+            failed: [],
+            error: err instanceof Error ? err.message : String(err),
+          };
+        }
       }
       return ok({ ...filter, applied });
     },
