@@ -167,6 +167,18 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     expect(mocks.authenticate).not.toHaveBeenCalled(); // failed before the consent flow
   });
 
+  it("reports an unreadable credentials.json (exists but can't be read) distinctly from missing", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    // A directory at the credentials.json path → readFile fails with EISDIR
+    // (not ENOENT), portably exercising the non-missing read-error branch.
+    await fs.mkdir(path.join(tmp, "credentials.json"));
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+
+    const { getAuth } = await freshAuth(tmp);
+    await expect(getAuth(true)).rejects.toThrow(/exists but could not be read/);
+    expect(mocks.authenticate).not.toHaveBeenCalled();
+  });
+
   it("preflights a credentials.json with no installed/web client", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(path.join(tmp, "credentials.json"), JSON.stringify({ foo: 1 }));

@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Guided `--auth`.** Before opening the browser, `mailwarden --auth` now validates
   `credentials.json` and, on any problem, prints an actionable message (missing file,
-  invalid JSON, not an OAuth *client* file, missing `client_id`/`client_secret`) with a
-  pointer to `docs/SETUP.md` — instead of local-auth's cryptic `Cannot find module` /
+  unreadable file, invalid JSON, not an OAuth *client* file, missing `client_id`/`client_secret`)
+  with a pointer to `docs/SETUP.md` — instead of local-auth's cryptic `Cannot find module` /
   `Cannot read properties of undefined`. After consent it makes one live Gmail call and
   confirms the authorized account (`✓ mailwarden authorized as you@example.com`), so a
   credential that stored but can't actually call Gmail is caught immediately.

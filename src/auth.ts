@@ -118,8 +118,21 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
 
   // Preflight: validate the credentials file up front, so a missing/malformed
   // one yields an actionable message instead of local-auth's cryptic failure
-  // deep inside authenticate().
-  const raw = await fs.readFile(CRED_PATH, "utf8").catch(() => null);
+  // deep inside authenticate(). Only a genuinely absent file (ENOENT) becomes
+  // the "download it" path — any other read failure (permissions, it's a
+  // directory) is reported as itself, not mislabeled as missing.
+  let raw: string | null;
+  try {
+    raw = await fs.readFile(CRED_PATH, "utf8");
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      throw new Error(
+        `Cannot read ${CRED_PATH} — it exists but could not be read (${code}). Check file permissions. See docs/SETUP.md.`,
+      );
+    }
+    raw = null;
+  }
   const cred = checkCredentials(raw, CRED_PATH);
   if (!cred.ok) throw new Error(cred.message);
 
