@@ -48,8 +48,9 @@ still requires it — and one setting here matters more than all the others.
    organizations; with a plain Gmail account, External is your only option — and it's fine.)
 3. Fill in the minimum: app name (e.g. `mailwarden`), your email as user support email and
    developer contact. Everything else can stay empty.
-4. **Scopes:** you can skip this page. mailwarden requests its scope
-   (`https://www.googleapis.com/auth/gmail.modify`) at authorization time; it does not need
+4. **Scopes:** you can skip this page. mailwarden requests its scopes
+   (`gmail.modify` for read + label/archive/trash, and `gmail.settings.basic` for filter
+   management — neither grants a send capability) at authorization time; they do not need
    to be pre-declared here.
 5. If the console asks for **test users**, add your own Gmail address.
 6. **Now the important part — publish the app:** on the consent-screen overview, under
@@ -101,7 +102,7 @@ npx -y mailwarden --auth
 ```
 
 What happens: a browser window opens on Google's consent page, you pick your account,
-approve the `gmail.modify` scope, and the terminal prints a success line. mailwarden stores
+approve the `gmail.modify` and `gmail.settings.basic` scopes, and the terminal prints a success line. mailwarden stores
 the refresh token in `~/.mailwarden/token.json` (mode `0600`) — that's the only local state
 it keeps, and you never have to do this again on this machine.
 

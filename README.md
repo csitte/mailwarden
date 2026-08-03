@@ -39,7 +39,8 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken` |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
-| `modify_labels` | Add/remove labels (archive = remove `INBOX`, read = remove `UNREAD`) |
+| `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id |
+| `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
 | **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total) |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
@@ -48,6 +49,9 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 | **`unsnooze`** | Cancel a snooze, return to inbox now |
 | **`list_snoozed`** | All snoozed threads + due dates |
 | **`sweep_snoozed`** | Resurface threads whose snooze is due (run on demand, via cron, or the daemon); batched, with partial-failure reporting |
+| `list_filters` | All Gmail filters (criteria + label actions); surfaces any `forward` address on existing filters for auditing |
+| `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
+| `delete_filter` | Delete a filter by id |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
 alongside the same JSON as fenced text — clients never have to parse prose.
@@ -59,6 +63,30 @@ alongside the same JSON as fenced text — clients never have to parse prose.
 - via cron: `mailwarden --sweep`,
 - or automatically: set `MAILWARDEN_AUTO_SWEEP=1` (hourly sweep while the server runs).
 
+### Filters (persistent auto-triage rules)
+
+`create_filter` sets up a Gmail server-side rule: mail matching the criteria automatically gets the
+given label actions — the mailbox keeps triaging itself with no assistant in the loop.
+
+- **Criteria:** `from`, `to`, `subject`, `query` (full Gmail search syntax), `negatedQuery`,
+  `hasAttachment`, `excludeChats`, and `size` + `sizeComparison` (`smaller`/`larger`, given together).
+  At least one is required.
+- **Actions (label only):** `addLabels` / `removeLabels`, by name or id (an unknown name in
+  `addLabels` is auto-created, nested via `/`). Common recipes: skip the inbox → `removeLabels: ["INBOX"]`;
+  auto-mark-read → `removeLabels: ["UNREAD"]`; auto-trash → `addLabels: ["TRASH"]`;
+  star → `addLabels: ["STARRED"]`; never-spam → `removeLabels: ["SPAM"]`; file under a label → `addLabels: ["Receipts"]`.
+- **Existing mail:** a filter only runs on messages arriving *after* it's created. Pass
+  `applyToExisting: true` to also apply the same actions once to mail already in the mailbox —
+  mailwarden builds a Gmail search from the criteria and runs a bulk modify (up to `maxMessages`,
+  default 1000; same loose-index caveat as `bulk_modify`). The outcome comes back under `applied`
+  (the `query` used, `matchedMessages`/`modifiedMessages`/`modifiedThreadCount` counts, `capped` when
+  the match set hit `maxMessages`, and per-chunk `failed`); it's `null` when `applyToExisting` was not set.
+  The filter is created first, so a partial or failed backlog pass is *reported* in `applied`, not raised —
+  the rule still stands.
+- **No forwarding** — see [Security & privacy](#security--privacy).
+- Requires the `gmail.settings.basic` scope; re-run `--auth` once if you authorized an older version.
+  Not available in read-only mode.
+
 ## Security & privacy
 
 - **No telemetry.** Nothing phones home — no analytics, no crash reporting, no tracking.
@@ -68,10 +96,14 @@ alongside the same JSON as fenced text — clients never have to parse prose.
   also validates the `Host` header (DNS-rebinding defense). For remote hosting, set `MAILWARDEN_HOST`
   and front it with TLS.
 - **No send tools — by design.** mailwarden cannot compose, reply, or forward. A prompt-injected
-  instruction inside an email has no exfiltration path through this server.
+  instruction inside an email has no exfiltration path through this server. `create_filter` follows
+  the same rule: it can label, archive, trash, star or mark mail, but **never** creates a *forwarding*
+  filter (which would be an exfiltration path). `list_filters` still surfaces any forwarding filter
+  already on the account, so you can spot one.
 - **Read-only mode.** Set `MAILWARDEN_READONLY=1` and only the read tools (`search`, `get_thread`,
   `list_labels`, `list_snoozed`) are registered — nothing that can change the mailbox or write
-  files is even advertised to clients. Recommended for shared/HTTP deployments that only triage.
+  files is even advertised to clients (the filter tools, which need the broader `gmail.settings.basic`
+  scope, are excluded too). Recommended for shared/HTTP deployments that only triage.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
   directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
 - **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
@@ -98,7 +130,9 @@ First time setting up a Google OAuth app? Follow the **[step-by-step setup guide
    ```bash
    npx -y mailwarden --auth
    ```
-   Scope requested: `https://www.googleapis.com/auth/gmail.modify`.
+   Scopes requested: `gmail.modify` (read + label/archive/trash) and `gmail.settings.basic`
+   (filter management — grants no send capability). If you authorized a version before filters
+   existed, re-run `--auth` once to grant the added scope.
 
 ## Connect
 
@@ -148,7 +182,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (144 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (164 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

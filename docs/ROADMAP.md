@@ -17,6 +17,13 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
 - Hardened download fence (realpath-canonicalized, symlink-aware, never overwrites).
 - `<untrusted-tool-output>` fencing + hidden/BiDi character stripping on all output.
 - `bulk_modify` (query-based batch label ops, partial-success reporting); batched snooze sweep.
+- Label management: `modify_labels`/`bulk_modify` accept label **names** (unknown name in `add`
+  auto-created, nested via `/`) and a `create_label` tool for pre-creating labels.
+- Filter management: `list_filters`/`create_filter`/`delete_filter` for server-side auto-triage
+  rules. Label actions only — no forwarding filters (kept out to preserve the no-exfiltration
+  stance); `list_filters` surfaces existing forwards for auditing. `create_filter` can optionally
+  `applyToExisting` (build a search from the criteria + one-off bulk modify over the backlog).
+  Adds the `gmail.settings.basic` scope.
 - Structured outputs (`outputSchema` + validated `structuredContent`) on every tool.
 - Read-only mode (`MAILWARDEN_READONLY=1`).
 - Step-by-step [setup guide](SETUP.md) covering the Google Cloud / OAuth consent dance,

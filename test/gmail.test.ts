@@ -15,6 +15,10 @@ import {
   decodeRfc2047,
   withBackoff,
   isInvalidGrant,
+  isInsufficientScope,
+  filterCriteriaToApi,
+  filterCriteriaFromApi,
+  filterCriteriaToQuery,
   Gmail,
 } from "../src/gmail.js";
 
@@ -926,6 +930,140 @@ describe("Gmail.getProfile", () => {
   it("defaults to an empty string when the API omits it", async () => {
     const api: any = { users: { getProfile: async () => ({ data: {} }) } };
     expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({ emailAddress: "" });
+  });
+});
+
+describe("isInsufficientScope", () => {
+  it("is true only for a 403 that names a scope/permission problem", () => {
+    expect(
+      isInsufficientScope({
+        code: 403,
+        response: { data: { error: { errors: [{ reason: "insufficientPermissions" }] } } },
+      }),
+    ).toBe(true);
+    // googleapis also surfaces the reason array at the top level (version-dependent)
+    expect(isInsufficientScope({ code: 403, errors: [{ reason: "insufficientPermissions" }] })).toBe(true);
+    expect(isInsufficientScope({ status: 403, message: "Request had insufficient authentication scopes." })).toBe(true);
+  });
+
+  it("is false for other statuses or unrelated 403s", () => {
+    expect(isInsufficientScope({ status: 404, message: "insufficient scopes" })).toBe(false);
+    expect(isInsufficientScope({ status: 403, message: "quota exceeded" })).toBe(false);
+    // a bare PERMISSION_DENIED (no scope reason) is a genuine denial — e.g. an admin
+    // policy — which a re-auth would NOT fix, so it must NOT be treated as a scope shortfall
+    expect(
+      isInsufficientScope({ status: 403, response: { data: { error: { status: "PERMISSION_DENIED" } } } }),
+    ).toBe(false);
+    expect(isInsufficientScope(new Error("boom"))).toBe(false);
+  });
+});
+
+describe("filterCriteria round-trip helpers", () => {
+  it("omits empty fields and pairs size with a comparison", () => {
+    expect(filterCriteriaToApi({ from: "a@b.com", hasAttachment: false })).toEqual({
+      from: "a@b.com",
+      hasAttachment: false,
+    });
+    // size without an explicit comparison defaults to "larger" (the API requires one)
+    expect(filterCriteriaToApi({ size: 5_000_000 })).toEqual({ size: 5_000_000, sizeComparison: "larger" });
+    expect(filterCriteriaFromApi(undefined)).toEqual({});
+    expect(
+      filterCriteriaFromApi({ subject: "x", sizeComparison: "unspecified" as any, size: 10 }),
+    ).toEqual({ subject: "x", size: 10 }); // "unspecified" comparison dropped
+  });
+});
+
+describe("filterCriteriaToQuery", () => {
+  it("maps criteria onto Gmail search operators", () => {
+    expect(filterCriteriaToQuery({ from: "a@b.com", subject: "invoice" })).toBe(
+      "from:(a@b.com) subject:(invoice)",
+    );
+    expect(filterCriteriaToQuery({ query: "newer_than:7d", negatedQuery: "in:chats" })).toBe(
+      "(newer_than:7d) -(in:chats)",
+    );
+    expect(filterCriteriaToQuery({ hasAttachment: true })).toBe("has:attachment");
+    expect(filterCriteriaToQuery({ hasAttachment: false })).toBe("-has:attachment");
+    expect(filterCriteriaToQuery({ excludeChats: true })).toBe("-in:chats");
+    expect(filterCriteriaToQuery({ size: 5_000_000, sizeComparison: "larger" })).toBe("larger:5000000");
+    // size without its comparison isn't emitted (incomplete pair)
+    expect(filterCriteriaToQuery({ size: 5_000_000 })).toBe("");
+    expect(filterCriteriaToQuery({})).toBe("");
+  });
+});
+
+describe("Gmail filters — create/list/delete", () => {
+  it("createFilter resolves label names, sends label-only actions, and never forwards", async () => {
+    let body: any;
+    const api: any = {
+      users: {
+        labels: { list: async () => ({ data: { labels: [{ id: "Label_5", name: "News", type: "user" }] } }) },
+        settings: {
+          filters: {
+            create: async (req: any) => ((body = req.requestBody), { data: { id: "f9", ...req.requestBody } }),
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const out = await gmail.createFilter({ from: "n@x.com" }, { addLabels: ["News"], removeLabels: ["INBOX"] });
+
+    expect(body).toEqual({
+      criteria: { from: "n@x.com" },
+      action: { addLabelIds: ["Label_5"], removeLabelIds: ["INBOX"] },
+    });
+    expect(body.action).not.toHaveProperty("forward");
+    expect(out.id).toBe("f9");
+  });
+
+  it("createFilter rejects empty criteria and an empty-after-resolution action (no cryptic 400)", async () => {
+    const api: any = {
+      users: {
+        labels: { list: async () => ({ data: { labels: [] } }) },
+        settings: { filters: { create: async () => ({ data: { id: "x" } }) } },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    // no usable criteria (empty object, and a field filterCriteriaToApi would drop)
+    await expect(gmail.createFilter({}, { addLabels: ["INBOX"] })).rejects.toThrow(/no usable match criteria/);
+    // criteria fine, but the only remove-name doesn't exist → resolves to no action
+    await expect(
+      gmail.createFilter({ from: "a@b.com" }, { removeLabels: ["Ghost"] }),
+    ).rejects.toThrow(/no label action/);
+  });
+
+  it("listFilters returns [] when the account has no filters", async () => {
+    const api: any = {
+      users: { settings: { filters: { list: async () => ({ data: {} }) } } },
+    };
+    expect(await new Gmail(api as gmail_v1.Gmail).listFilters()).toEqual([]);
+  });
+
+  it("deleteFilter forwards the id to the settings endpoint", async () => {
+    let call: any;
+    const api: any = {
+      users: { settings: { filters: { delete: async (req: any) => ((call = req), {}) } } },
+    };
+    await new Gmail(api as gmail_v1.Gmail).deleteFilter("f1");
+    expect(call).toMatchObject({ userId: "me", id: "f1" });
+  });
+
+  it("maps a 403 insufficient-scope from a filter call to an actionable re-auth message", async () => {
+    const api: any = {
+      users: {
+        settings: {
+          filters: {
+            list: async () => {
+              // Shape Gmail returns when the token predates the settings scope.
+              throw { code: 403, errors: [{ reason: "insufficientPermissions" }], message: "Insufficient Permission" };
+            },
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    // Names the missing scope and the fix — not a raw 403.
+    await expect(gmail.listFilters()).rejects.toThrow(/gmail\.settings\.basic/);
+    await expect(gmail.listFilters()).rejects.toThrow(/mailwarden --auth/);
   });
 });
 

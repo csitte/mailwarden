@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { Gmail } from "./gmail.js";
+import { Gmail, filterCriteriaToQuery } from "./gmail.js";
 import { getAuth } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed, isValidIsoDate, todayIso } from "./snooze.js";
 import { fenceOutput } from "./sanitize.js";
@@ -58,6 +58,39 @@ const parsedMessageSchema = z.object({
   attachments: z.array(attachmentSchema),
 });
 
+const filterCriteriaSchema = z.object({
+  from: z.string().optional(),
+  to: z.string().optional(),
+  subject: z.string().optional(),
+  query: z.string().optional(),
+  negatedQuery: z.string().optional(),
+  hasAttachment: z.boolean().optional(),
+  excludeChats: z.boolean().optional(),
+  size: z.number().optional(),
+  sizeComparison: z.enum(["smaller", "larger"]).optional(),
+});
+
+const filterSummarySchema = z.object({
+  id: z.string(),
+  criteria: filterCriteriaSchema,
+  addLabelIds: z.array(z.string()),
+  removeLabelIds: z.array(z.string()),
+  // Present only when an existing filter forwards mail — surfaced for auditing;
+  // create_filter never sets it (a forwarding filter is an exfiltration path).
+  forward: z.string().optional(),
+});
+
+// Result of optionally applying a new filter's actions to already-arrived mail.
+const filterAppliedSchema = z.object({
+  query: z.string(),
+  matchedMessages: z.number(),
+  modifiedMessages: z.number(),
+  modifiedThreadCount: z.number(),
+  // True when more messages matched than maxMessages — the rest were left untouched.
+  capped: z.boolean(),
+  failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
+});
+
 const okOutput = { ok: z.boolean() };
 
 export function registerTools(server: McpServer): void {
@@ -106,7 +139,7 @@ export function registerTools(server: McpServer): void {
     {
       description:
         "List all Gmail labels (system + user). " +
-        "USE WHEN: you need label IDs/names before modify_labels, or to inspect the mailbox structure. " +
+        "USE WHEN: inspecting the mailbox structure, or to get exact label names/ids — though modify_labels/bulk_modify/create_label all accept a plain label name directly, so a lookup is rarely required. " +
         "SIDE EFFECTS: none.",
       outputSchema: {
         labels: z.array(z.object({ id: z.string(), name: z.string(), type: z.string().nullish() })),
@@ -137,13 +170,30 @@ export function registerTools(server: McpServer): void {
 
   // ---- Mailbox actions ----
   server.registerTool(
+    "create_label",
+    {
+      description:
+        "Create a user label and return its id. Idempotent: if the name already exists (case-insensitive), its existing id is returned and nothing is created. " +
+        "Nested labels: separate levels with '/' (e.g. 'Clients/Acme') — each missing parent level is created too. " +
+        "USE WHEN: you want a label's id up front, or to pre-create a label without applying it to anything. " +
+        "DO NOT USE: just to file mail under a new label — modify_labels/bulk_modify already auto-create an unknown name passed in `add`. " +
+        "SIDE EFFECTS: creates the label if missing; no mail is changed.",
+      inputSchema: { name: z.string().min(1) },
+      outputSchema: { id: z.string(), name: z.string() },
+      annotations: { title: "Create label", ...write },
+    },
+    async ({ name }) => ok({ id: await (await client()).ensureLabel(name), name }),
+  );
+
+  server.registerTool(
     "modify_labels",
     {
       description:
         "Add/remove labels on a thread. Archive = remove 'INBOX'; mark read = remove 'UNREAD'. " +
+        "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
         "USE WHEN: applying custom labels or label combinations in one call. " +
         "DO NOT USE: for plain archive/read/unread — the dedicated tools are clearer. " +
-        "SIDE EFFECTS: changes the thread's labels; reversible by the inverse call.",
+        "SIDE EFFECTS: changes the thread's labels (and may create a label named in `add`); reversible by the inverse call.",
       inputSchema: {
         threadId: z.string(),
         add: z.array(z.string()).default([]),
@@ -163,6 +213,7 @@ export function registerTools(server: McpServer): void {
     {
       description:
         "Bulk-apply label changes to every message matching a Gmail query, batched at 1000 messages per API request. " +
+        "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
         "Returns matched/modified counts, affected thread IDs (capped at 500 — modifiedThreadCount has the true total), and per-chunk failures (partial success is reported, not hidden). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
         "Note: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs — for read-state-precise bulk ops, verify with search first. " +
@@ -170,7 +221,9 @@ export function registerTools(server: McpServer): void {
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
         "SIDE EFFECTS: modifies up to maxMessages messages in one call; label changes are reversible by the inverse call.",
       inputSchema: {
-        query: z.string(),
+        // Non-empty: an empty query would match the ENTIRE mailbox (listMessageRefs
+        // omits `q`), turning a bulk op into a whole-mailbox modify.
+        query: z.string().trim().min(1),
         add: z.array(z.string()).default([]),
         remove: z.array(z.string()).default([]),
         maxMessages: z.number().int().min(1).max(10000).default(1000),
@@ -358,5 +411,145 @@ export function registerTools(server: McpServer): void {
       annotations: { title: "Sweep snoozed", ...write },
     },
     async () => ok(await sweepSnoozed(await client())),
+  );
+
+  // ---- Filters (server-side auto-triage rules) ----
+  // Not registered in MAILWARDEN_READONLY mode: filter management needs the
+  // broader gmail.settings.basic scope, which a read-only deployment shouldn't require.
+  server.registerTool(
+    "list_filters",
+    {
+      description:
+        "List all Gmail filters — the server-side rules that auto-apply label actions to incoming mail. " +
+        "Shows each filter's criteria and label actions, and (for auditing) any `forward` address an existing filter carries. " +
+        "USE WHEN: reviewing existing automation, or to get a filter's id before delete_filter. " +
+        "SIDE EFFECTS: none. Requires the gmail.settings.basic scope — re-run `mailwarden --auth` if you authorized an earlier version.",
+      outputSchema: { filters: z.array(filterSummarySchema) },
+      annotations: { title: "List filters", ...readOnly },
+    },
+    async () => ok({ filters: await (await client()).listFilters() }),
+  );
+
+  server.registerTool(
+    "create_filter",
+    {
+      description:
+        "Create a Gmail filter: matching incoming mail automatically gets the given label actions. " +
+        "Give at least one criterion and at least one action. Actions are label add/remove only " +
+        "(labels by name or id; an unknown name in addLabels is auto-created). Common recipes: " +
+        "skip the inbox → removeLabels ['INBOX']; auto-mark-read → removeLabels ['UNREAD']; " +
+        "auto-trash → addLabels ['TRASH']; star → addLabels ['STARRED']; file under a label → addLabels ['Receipts']. " +
+        "A filter only affects mail arriving AFTER it's created; set applyToExisting:true to ALSO apply the same " +
+        "actions once to mail already in the mailbox (builds a Gmail search from the criteria and runs a bulk modify — " +
+        "same loose-index caveat as bulk_modify; up to maxMessages, default 1000). " +
+        "USE WHEN: setting up a persistent auto-triage rule (e.g. 'always archive + label newsletters from x'), optionally cleaning up the existing backlog too. " +
+        "NOTE: forwarding filters are intentionally not supported — mailwarden creates no send/exfiltration path. " +
+        "SIDE EFFECTS: adds a server-side rule affecting future mail (reversible via delete_filter); with applyToExisting also modifies existing messages. Requires gmail.settings.basic.",
+      inputSchema: {
+        // Text criteria are trimmed and must be non-empty — an empty/whitespace
+        // value would otherwise be dropped when building the request and leave
+        // Gmail with empty criteria (a cryptic 400).
+        from: z.string().trim().min(1).optional(),
+        to: z.string().trim().min(1).optional(),
+        subject: z.string().trim().min(1).optional(),
+        query: z.string().trim().min(1).optional(),
+        negatedQuery: z.string().trim().min(1).optional(),
+        hasAttachment: z.boolean().optional(),
+        excludeChats: z.boolean().optional(),
+        size: z.number().int().positive().optional(),
+        sizeComparison: z.enum(["smaller", "larger"]).optional(),
+        addLabels: z.array(z.string()).default([]),
+        removeLabels: z.array(z.string()).default([]),
+        // Also apply the actions once to mail that already matches (default: future mail only).
+        applyToExisting: z.boolean().default(false),
+        maxMessages: z.number().int().min(1).max(10000).default(1000),
+      },
+      // `applied` is null unless applyToExisting was set.
+      outputSchema: { ...filterSummarySchema.shape, applied: filterAppliedSchema.nullable() },
+      annotations: { title: "Create filter", ...write, idempotentHint: false },
+    },
+    async ({ addLabels, removeLabels, applyToExisting, maxMessages, ...criteria }) => {
+      // `sizeComparison` and `excludeChats` only MODIFY an otherwise-matching
+      // filter — neither is a match condition on its own, so they don't count
+      // toward "has at least one criterion".
+      const { size, sizeComparison, excludeChats, hasAttachment, ...textFields } = criteria;
+      // size and its comparison are meaningful only as a pair — check first so a
+      // lone `size` or lone `sizeComparison` gets this precise message.
+      if ((size === undefined) !== (sizeComparison === undefined)) {
+        throw new Error(
+          "create_filter: 'size' and 'sizeComparison' (smaller|larger) must be given together.",
+        );
+      }
+      const hasMatch =
+        size !== undefined ||
+        hasAttachment !== undefined ||
+        Object.values(textFields).some((v) => typeof v === "string" && v !== "");
+      if (!hasMatch) {
+        throw new Error(
+          "create_filter needs at least one match criterion (from/to/subject/query/negatedQuery/hasAttachment/size).",
+        );
+      }
+      if (addLabels.length === 0 && removeLabels.length === 0) {
+        throw new Error(
+          "create_filter needs at least one label action in addLabels or removeLabels.",
+        );
+      }
+      // Derive the backlog query BEFORE creating anything, and refuse an empty one.
+      // An empty query would make listMessageRefs omit `q` and match the ENTIRE
+      // mailbox — a catastrophic bulk modify. The criteria validation above already
+      // guarantees a non-empty query; this is a fail-safe against future regressions,
+      // placed before side effects so the pathological case creates nothing.
+      let query: string | null = null;
+      if (applyToExisting) {
+        query = filterCriteriaToQuery(criteria);
+        if (!query) {
+          throw new Error(
+            "create_filter: applyToExisting could not derive a non-empty search query from the criteria.",
+          );
+        }
+      }
+      const gmail = await client();
+      const filter = await gmail.createFilter(criteria, { addLabels, removeLabels });
+      let applied: {
+        query: string;
+        matchedMessages: number;
+        modifiedMessages: number;
+        modifiedThreadCount: number;
+        capped: boolean;
+        failed: { messageIds: string[]; error: string }[];
+      } | null = null;
+      // Best-effort backlog cleanup: the filter is already created, so a failure or
+      // partial success here is reported in `applied`, not raised — the rule stands.
+      if (query) {
+        const refs = await gmail.listMessageRefs({ query, max: maxMessages });
+        const res = await gmail.batchModifyMessages(refs, addLabels, removeLabels);
+        applied = {
+          query,
+          matchedMessages: refs.length,
+          modifiedMessages: res.modifiedMessages,
+          modifiedThreadCount: res.modifiedThreads.length,
+          capped: refs.length >= maxMessages,
+          failed: res.failed,
+        };
+      }
+      return ok({ ...filter, applied });
+    },
+  );
+
+  server.registerTool(
+    "delete_filter",
+    {
+      description:
+        "Delete a Gmail filter by id (get ids from list_filters). " +
+        "USE WHEN: removing an auto-triage rule. " +
+        "SIDE EFFECTS: removes the server-side rule; future mail is no longer auto-processed by it. Requires gmail.settings.basic.",
+      inputSchema: { id: z.string() },
+      outputSchema: okOutput,
+      annotations: { title: "Delete filter", ...write, idempotentHint: false },
+    },
+    async ({ id }) => {
+      await (await client()).deleteFilter(id);
+      return ok({ ok: true });
+    },
   );
 }

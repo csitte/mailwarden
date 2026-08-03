@@ -5,8 +5,17 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
-/** Single scope covers read + write (labels, archive, trash, mark-read, attachments). */
-const SCOPES = ["https://www.googleapis.com/auth/gmail.modify"];
+/**
+ * `gmail.modify` covers read + write (labels, archive, trash, mark-read, attachments).
+ * `gmail.settings.basic` is needed for filter management (list/create/delete_filter);
+ * it grants no send capability. Existing users who authorized before this scope was
+ * added must re-run `--auth` once — filter calls until then surface an actionable
+ * insufficient-scope message (see gmail.ts).
+ */
+const SCOPES = [
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.settings.basic",
+];
 
 const CONFIG_DIR = process.env.MAILWARDEN_DIR ?? path.join(os.homedir(), ".mailwarden");
 const TOKEN_PATH = path.join(CONFIG_DIR, "token.json");

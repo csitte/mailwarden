@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Filter management.** New `list_filters`, `create_filter`, and `delete_filter` tools for
+  Gmail's server-side auto-triage rules. `create_filter` supports label actions only (criteria →
+  add/remove labels, by name or id — unknown names auto-created); it deliberately **cannot create a
+  forwarding filter**, which would be an exfiltration path, keeping the no-send guarantee intact.
+  `list_filters` still surfaces any `forward` address on existing filters so it can be audited.
+  `create_filter` also accepts `applyToExisting: true`, which — after creating the rule — builds a Gmail
+  search from the criteria and runs a one-off bulk modify over mail already in the mailbox (up to
+  `maxMessages`, default 1000), returning the outcome under `applied`.
+  This adds the `gmail.settings.basic` OAuth scope — **existing users must re-run `mailwarden --auth`
+  once**; until then filter calls return an actionable insufficient-scope message. Not registered in
+  `MAILWARDEN_READONLY` mode.
+- **Label management.** New `create_label` tool creates a user label (idempotent —
+  returns the existing id if the name is already taken) and supports nested labels via
+  `/` (each missing parent level is created too). `modify_labels` and `bulk_modify` now
+  advertise that `add`/`remove` accept a plain label **name** as well as an id — an
+  unknown name in `add` is created automatically, an unknown name in `remove` is ignored.
+  (The name-resolution itself already shipped; this exposes it and adds the explicit tool.)
+
 ## [0.3.0] - 2026-08-03
 
 ### Added

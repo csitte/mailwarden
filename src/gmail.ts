@@ -55,6 +55,33 @@ export interface BatchModifyResult {
   failed: { messageIds: string[]; error: string }[];
 }
 
+/** A Gmail filter's match conditions — the subset mailwarden accepts/surfaces. */
+export interface FilterCriteria {
+  from?: string;
+  to?: string;
+  subject?: string;
+  query?: string;
+  negatedQuery?: string;
+  hasAttachment?: boolean;
+  excludeChats?: boolean;
+  size?: number;
+  sizeComparison?: "smaller" | "larger";
+}
+
+/**
+ * A filter as returned by the API. `forward` is surfaced so existing forwarding
+ * filters can be audited — but mailwarden never *creates* one (see createFilter):
+ * a forwarding filter would hand prompt-injected mail an exfiltration path, the
+ * exact thing the no-send design closes.
+ */
+export interface FilterSummary {
+  id: string;
+  criteria: FilterCriteria;
+  addLabelIds: string[];
+  removeLabelIds: string[];
+  forward?: string;
+}
+
 // ---------------------------------------------------------------------------
 // Pure helpers (exported & API-free so they're unit-testable without a mock).
 // The Gmail class methods are thin wrappers around these.
@@ -125,6 +152,89 @@ function statusOf(err: unknown): number | undefined {
     if (typeof s === "string" && /^\d{3}$/.test(s)) return Number(s);
   }
   return undefined;
+}
+
+/**
+ * True when a 403 is specifically Google's "the access token lacks the required
+ * scope" — NOT a genuine permission denial (e.g. a Workspace admin policy). This
+ * distinction matters: a scope shortfall is fixed by re-auth, an admin denial is
+ * not, so we key only on the scope-specific signals and deliberately do NOT treat
+ * the umbrella `PERMISSION_DENIED` status as sufficient on its own. It surfaces
+ * when a token granted before `gmail.settings.basic` was added is used for a filter.
+ */
+export function isInsufficientScope(err: unknown): boolean {
+  if (statusOf(err) !== 403) return false;
+  const e = err as {
+    errors?: { reason?: unknown }[];
+    response?: { data?: { error?: { errors?: { reason?: unknown }[] } } };
+    message?: unknown;
+  };
+  // googleapis surfaces the reason array either at the top level (`err.errors`)
+  // or nested under `err.response.data.error.errors`, depending on version.
+  const reasons = [...(e?.errors ?? []), ...(e?.response?.data?.error?.errors ?? [])];
+  return (
+    reasons.some((x) => x?.reason === "insufficientPermissions") ||
+    (typeof e?.message === "string" &&
+      /insufficient (authentication|permission|scope)|ACCESS_TOKEN_SCOPE_INSUFFICIENT/i.test(
+        e.message,
+      ))
+  );
+}
+
+/** Map mailwarden's FilterCriteria to the API's criteria shape, omitting empty fields. */
+export function filterCriteriaToApi(c: FilterCriteria): gmail_v1.Schema$FilterCriteria {
+  const out: gmail_v1.Schema$FilterCriteria = {};
+  if (c.from) out.from = c.from;
+  if (c.to) out.to = c.to;
+  if (c.subject) out.subject = c.subject;
+  if (c.query) out.query = c.query;
+  if (c.negatedQuery) out.negatedQuery = c.negatedQuery;
+  if (c.hasAttachment != null) out.hasAttachment = c.hasAttachment;
+  if (c.excludeChats != null) out.excludeChats = c.excludeChats;
+  if (c.size != null) {
+    out.size = c.size;
+    out.sizeComparison = c.sizeComparison ?? "larger";
+  }
+  return out;
+}
+
+/** Map the API's criteria shape back to mailwarden's FilterCriteria, omitting empty fields. */
+export function filterCriteriaFromApi(c: gmail_v1.Schema$FilterCriteria | undefined): FilterCriteria {
+  const out: FilterCriteria = {};
+  if (!c) return out;
+  if (c.from) out.from = c.from;
+  if (c.to) out.to = c.to;
+  if (c.subject) out.subject = c.subject;
+  if (c.query) out.query = c.query;
+  if (c.negatedQuery) out.negatedQuery = c.negatedQuery;
+  if (c.hasAttachment != null) out.hasAttachment = c.hasAttachment;
+  if (c.excludeChats != null) out.excludeChats = c.excludeChats;
+  if (c.size != null) out.size = c.size;
+  if (c.sizeComparison === "smaller" || c.sizeComparison === "larger")
+    out.sizeComparison = c.sizeComparison;
+  return out;
+}
+
+/**
+ * Translate filter criteria into a Gmail search query, so a newly-created filter
+ * can also be applied to mail that already arrived (a filter itself only affects
+ * future mail). This is a best-effort mapping onto Gmail's search operators —
+ * matching parity with the filter engine is not guaranteed (the search index is
+ * looser, same caveat as bulk_modify). `query` is already search syntax and is
+ * passed through; the size comparison maps to Gmail's `larger:`/`smaller:` (bytes).
+ */
+export function filterCriteriaToQuery(c: FilterCriteria): string {
+  const parts: string[] = [];
+  if (c.from) parts.push(`from:(${c.from})`);
+  if (c.to) parts.push(`to:(${c.to})`);
+  if (c.subject) parts.push(`subject:(${c.subject})`);
+  if (c.query) parts.push(`(${c.query})`);
+  if (c.negatedQuery) parts.push(`-(${c.negatedQuery})`);
+  if (c.hasAttachment === true) parts.push("has:attachment");
+  else if (c.hasAttachment === false) parts.push("-has:attachment");
+  if (c.excludeChats) parts.push("-in:chats");
+  if (c.size != null && c.sizeComparison) parts.push(`${c.sizeComparison}:${c.size}`);
+  return parts.join(" ");
 }
 
 /**
@@ -413,6 +523,17 @@ export class Gmail {
           "mailwarden's saved authorization has expired or been revoked. Run `mailwarden --auth` to re-authorize.",
         );
       }
+      // A token authorized before the settings scope was added can't manage
+      // filters — tell the user exactly which scope is missing and how to fix it,
+      // rather than surfacing a raw 403 "insufficient authentication scopes".
+      if (isInsufficientScope(err)) {
+        throw new Error(
+          "mailwarden's saved authorization is missing a Gmail scope this operation needs. " +
+            "This usually means filter management (list_filters/create_filter/delete_filter), which " +
+            "requires 'gmail.settings.basic' — a scope newer than the one your stored token was granted. " +
+            "Run `mailwarden --auth` once to re-grant all required scopes, then retry.",
+        );
+      }
       throw err;
     }
   }
@@ -682,6 +803,76 @@ export class Gmail {
 
   async deleteLabel(id: string): Promise<void> {
     await this.req(() => this.api.users.labels.delete({ userId: "me", id }));
+  }
+
+  async listFilters(): Promise<FilterSummary[]> {
+    const res = await this.req(() => this.api.users.settings.filters.list({ userId: "me" }));
+    return (res.data.filter ?? []).map((f) => {
+      const a = f.action ?? {};
+      return {
+        id: f.id!,
+        criteria: filterCriteriaFromApi(f.criteria ?? undefined),
+        addLabelIds: a.addLabelIds ?? [],
+        removeLabelIds: a.removeLabelIds ?? [],
+        ...(a.forward ? { forward: a.forward } : {}),
+      };
+    });
+  }
+
+  /**
+   * Create a filter with label actions only. Label names in the actions are
+   * resolved (and unknown names in `addLabels` auto-created) exactly as
+   * modify_labels does. The `forward` action is intentionally unsupported — a
+   * forwarding filter is a send/exfiltration path, which this server does not offer.
+   */
+  async createFilter(
+    criteria: FilterCriteria,
+    action: { addLabels?: string[]; removeLabels?: string[] },
+  ): Promise<FilterSummary> {
+    // Guard with the SAME mapping the request uses, so the "is it empty?" question
+    // can't be answered one way here and another way when the body is built (an
+    // empty-string field, e.g. from:"", is dropped by filterCriteriaToApi and would
+    // otherwise reach Gmail as empty criteria → a cryptic 400).
+    const apiCriteria = filterCriteriaToApi(criteria);
+    if (Object.keys(apiCriteria).length === 0) {
+      throw new Error(
+        "create_filter has no usable match criteria — provide at least one of " +
+          "from/to/subject/query/negatedQuery/hasAttachment/size.",
+      );
+    }
+    const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(
+      action.addLabels ?? [],
+      action.removeLabels ?? [],
+    );
+    // An unknown name in removeLabels is dropped (nothing to remove), so the input
+    // action count can be non-zero yet the EFFECTIVE action set empty — Gmail rejects
+    // an action-less filter. Catch it here with a name-pointing message.
+    if (addLabelIds.length === 0 && removeLabelIds.length === 0) {
+      throw new Error(
+        "create_filter resolved to no label action: addLabels was empty and the names in " +
+          "removeLabels don't exist (nothing to remove). Check the label names with list_labels.",
+      );
+    }
+    const res = await this.req(() =>
+      this.api.users.settings.filters.create({
+        userId: "me",
+        requestBody: {
+          criteria: apiCriteria,
+          action: { addLabelIds, removeLabelIds },
+        },
+      }),
+    );
+    const a = res.data.action ?? {};
+    return {
+      id: res.data.id!,
+      criteria: filterCriteriaFromApi(res.data.criteria ?? undefined),
+      addLabelIds: a.addLabelIds ?? addLabelIds,
+      removeLabelIds: a.removeLabelIds ?? removeLabelIds,
+    };
+  }
+
+  async deleteFilter(id: string): Promise<void> {
+    await this.req(() => this.api.users.settings.filters.delete({ userId: "me", id }));
   }
 
   async downloadAttachment(messageId: string, attachmentId: string, destPath: string): Promise<string> {
