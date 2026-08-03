@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-03
+
 ### Added
 - **Guided `--auth`.** Before opening the browser, `mailwarden --auth` now validates
   `credentials.json` and, on any problem, prints an actionable message (missing file,
@@ -15,6 +17,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Cannot read properties of undefined`. After consent it makes one live Gmail call and
   confirms the authorized account (`✓ mailwarden authorized as you@example.com`), so a
   credential that stored but can't actually call Gmail is caught immediately.
+
+### Fixed
+- **Build from source now produces `dist/`.** Added a `prepare` script so an
+  install from the git source (`npm install github:csitte/mailwarden`, or a
+  source-based build) compiles TypeScript instead of leaving `bin` pointing at a
+  non-existent `dist/index.js`. Consumers installing the published npm package are
+  unaffected — the tarball already ships `dist/`, and `prepare` doesn't run for
+  registry installs.
 
 ## [0.2.0] - 2026-08-02
 
