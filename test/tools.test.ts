@@ -80,7 +80,7 @@ describe("tool results — structured content + fenced text", () => {
             emailAddress: "me@example.com",
             messagesTotal: 1200,
             threadsTotal: 640,
-            historyId: "99001",
+            historyId: "99001", // present on the API response but not surfaced by the tool
           },
         }),
       },
@@ -92,7 +92,6 @@ describe("tool results — structured content + fenced text", () => {
       emailAddress: "me@example.com",
       messagesTotal: 1200,
       threadsTotal: 640,
-      historyId: "99001",
     });
     expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
   });

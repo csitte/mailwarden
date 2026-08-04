@@ -173,12 +173,12 @@ export function registerTools(server: McpServer): void {
       description:
         "Return the authorized account: email address plus total message/thread counts. " +
         "USE WHEN: confirming WHICH mailbox is connected before a bulk or filter action, or as a cheap liveness check. " +
+        "DO NOT USE: to enumerate messages — this returns only counts, not a listing (use search). " +
         "SIDE EFFECTS: none.",
       outputSchema: {
         emailAddress: z.string(),
         messagesTotal: z.number(),
         threadsTotal: z.number(),
-        historyId: z.string(),
       },
       annotations: { title: "Get profile", ...readOnly },
     },

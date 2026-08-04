@@ -926,7 +926,7 @@ describe("Gmail.getProfile", () => {
             emailAddress: "me@example.com",
             messagesTotal: 4321,
             threadsTotal: 987,
-            historyId: "556677",
+            historyId: "556677", // present on the API but deliberately not surfaced
           },
         }),
       },
@@ -935,17 +935,21 @@ describe("Gmail.getProfile", () => {
       emailAddress: "me@example.com",
       messagesTotal: 4321,
       threadsTotal: 987,
-      historyId: "556677",
     });
   });
 
-  it("defaults each field when the API omits it", async () => {
-    const api: any = { users: { getProfile: async () => ({ data: {} }) } };
+  it("defaults each field when the API returns it null or omitted", async () => {
+    const api: any = {
+      users: {
+        getProfile: async () => ({
+          data: { emailAddress: null, messagesTotal: null }, // threadsTotal omitted entirely
+        }),
+      },
+    };
     expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({
       emailAddress: "",
       messagesTotal: 0,
       threadsTotal: 0,
-      historyId: "",
     });
   });
 });

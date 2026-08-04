@@ -783,19 +783,19 @@ export class Gmail {
   /**
    * The authorized account's identity + mailbox totals — a cheap authenticated call,
    * doubling as the post-auth smoke test (callers that only need the address destructure it).
+   * historyId is deliberately NOT surfaced: it is the incremental-sync cursor, and syncing
+   * is a hard non-goal (every call stays live against the API).
    */
   async getProfile(): Promise<{
     emailAddress: string;
     messagesTotal: number;
     threadsTotal: number;
-    historyId: string;
   }> {
     const res = await this.req(() => this.api.users.getProfile({ userId: "me" }));
     return {
       emailAddress: res.data.emailAddress ?? "",
       messagesTotal: res.data.messagesTotal ?? 0,
       threadsTotal: res.data.threadsTotal ?? 0,
-      historyId: res.data.historyId ?? "",
     };
   }
 
