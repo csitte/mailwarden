@@ -7,7 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-04
+
 ### Added
+- **`get_profile` tool.** Returns the connected account's email address plus total
+  message/thread counts — so an agent can confirm *which* mailbox is wired up before a
+  bulk or filter action, or use it as a cheap liveness check. Read-only, no additional
+  OAuth scope (works under `gmail.readonly`), and available in `MAILWARDEN_READONLY` mode.
+  Gmail's incremental-sync `historyId` is deliberately not surfaced (syncing is a non-goal).
 - **Filter management.** New `list_filters`, `create_filter`, and `delete_filter` tools for
   Gmail's server-side auto-triage rules. `create_filter` supports label actions only (criteria →
   add/remove labels, by name or id — unknown names auto-created); it deliberately **cannot create a
@@ -29,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   advertise that `add`/`remove` accept a plain label **name** as well as an id — an
   unknown name in `add` is created automatically, an unknown name in `remove` is ignored.
   (The name-resolution itself already shipped; this exposes it and adds the explicit tool.)
+
+### Security
+- **Closed 4 transitive `npm audit` advisories** via `overrides` (none on mailwarden's own
+  code path): `fast-uri`, `hono`, `ip-address`, `postcss`. Each pinned to an in-range fix,
+  no major bumps; `npm audit` is back to 0 vulnerabilities.
 
 ## [0.3.0] - 2026-08-03
 
@@ -314,7 +326,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/csitte/mailwarden/compare/v0.3.0...v0.4.0
+[0.3.0]: https://github.com/csitte/mailwarden/compare/v0.2.0...v0.3.0
+[0.2.0]: https://github.com/csitte/mailwarden/compare/v0.1.10...v0.2.0
+[0.1.10]: https://github.com/csitte/mailwarden/compare/v0.1.9...v0.1.10
+[0.1.9]: https://github.com/csitte/mailwarden/compare/v0.1.8...v0.1.9
+[0.1.8]: https://github.com/csitte/mailwarden/compare/v0.1.7...v0.1.8
+[0.1.7]: https://github.com/csitte/mailwarden/compare/v0.1.6...v0.1.7
 [0.1.6]: https://github.com/csitte/mailwarden/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/csitte/mailwarden/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/csitte/mailwarden/compare/v0.1.3...v0.1.4
