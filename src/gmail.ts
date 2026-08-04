@@ -780,10 +780,23 @@ export class Gmail {
     await this.req(() => this.api.users.threads.untrash({ userId: "me", id: threadId }));
   }
 
-  /** The authorized account's email address — a cheap authenticated call for a post-auth smoke test. */
-  async getProfile(): Promise<{ emailAddress: string }> {
+  /**
+   * The authorized account's identity + mailbox totals — a cheap authenticated call,
+   * doubling as the post-auth smoke test (callers that only need the address destructure it).
+   */
+  async getProfile(): Promise<{
+    emailAddress: string;
+    messagesTotal: number;
+    threadsTotal: number;
+    historyId: string;
+  }> {
     const res = await this.req(() => this.api.users.getProfile({ userId: "me" }));
-    return { emailAddress: res.data.emailAddress ?? "" };
+    return {
+      emailAddress: res.data.emailAddress ?? "",
+      messagesTotal: res.data.messagesTotal ?? 0,
+      threadsTotal: res.data.threadsTotal ?? 0,
+      historyId: res.data.historyId ?? "",
+    };
   }
 
   async listLabels(): Promise<LabelInfo[]> {

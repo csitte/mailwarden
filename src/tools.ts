@@ -167,6 +167,24 @@ export function registerTools(server: McpServer): void {
     async () => ok({ snoozed: await listSnoozed(await client()) }),
   );
 
+  server.registerTool(
+    "get_profile",
+    {
+      description:
+        "Return the authorized account: email address plus total message/thread counts. " +
+        "USE WHEN: confirming WHICH mailbox is connected before a bulk or filter action, or as a cheap liveness check. " +
+        "SIDE EFFECTS: none.",
+      outputSchema: {
+        emailAddress: z.string(),
+        messagesTotal: z.number(),
+        threadsTotal: z.number(),
+        historyId: z.string(),
+      },
+      annotations: { title: "Get profile", ...readOnly },
+    },
+    async () => ok(await (await client()).getProfile()),
+  );
+
   // With MAILWARDEN_READONLY=1 only the read tools above exist — nothing that
   // can change the mailbox or write files is even advertised to clients.
   if (process.env.MAILWARDEN_READONLY === "1") return;

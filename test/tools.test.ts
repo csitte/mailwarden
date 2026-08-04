@@ -25,10 +25,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 19 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 20 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(19);
+    expect(tools).toHaveLength(20);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -40,6 +40,7 @@ describe("registerTools — tool surface", () => {
     const client = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "get_profile",
       "get_thread",
       "list_labels",
       "list_snoozed",
@@ -69,6 +70,31 @@ describe("tool results — structured content + fenced text", () => {
     const text = res.content[0].text as string;
     expect(text.startsWith("<untrusted-tool-output>")).toBe(true);
     expect(text).toContain('"name": "INBOX"');
+  });
+
+  it("get_profile returns the account address and mailbox totals", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        getProfile: async () => ({
+          data: {
+            emailAddress: "me@example.com",
+            messagesTotal: 1200,
+            threadsTotal: 640,
+            historyId: "99001",
+          },
+        }),
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "get_profile", arguments: {} });
+
+    expect(res.structuredContent).toEqual({
+      emailAddress: "me@example.com",
+      messagesTotal: 1200,
+      threadsTotal: 640,
+      historyId: "99001",
+    });
+    expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
   });
 
   it("create_label creates an unknown name and returns its id + name", async () => {

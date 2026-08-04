@@ -918,18 +918,35 @@ describe("Gmail.ensureLabel", () => {
 });
 
 describe("Gmail.getProfile", () => {
-  it("returns the authorized account's email address", async () => {
+  it("returns the authorized account's email address and mailbox totals", async () => {
     const api: any = {
-      users: { getProfile: async () => ({ data: { emailAddress: "me@example.com" } }) },
+      users: {
+        getProfile: async () => ({
+          data: {
+            emailAddress: "me@example.com",
+            messagesTotal: 4321,
+            threadsTotal: 987,
+            historyId: "556677",
+          },
+        }),
+      },
     };
     expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({
       emailAddress: "me@example.com",
+      messagesTotal: 4321,
+      threadsTotal: 987,
+      historyId: "556677",
     });
   });
 
-  it("defaults to an empty string when the API omits it", async () => {
+  it("defaults each field when the API omits it", async () => {
     const api: any = { users: { getProfile: async () => ({ data: {} }) } };
-    expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({ emailAddress: "" });
+    expect(await new Gmail(api as gmail_v1.Gmail).getProfile()).toEqual({
+      emailAddress: "",
+      messagesTotal: 0,
+      threadsTotal: 0,
+      historyId: "",
+    });
   });
 });
 

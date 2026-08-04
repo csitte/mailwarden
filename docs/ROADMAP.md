@@ -25,6 +25,8 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
   `applyToExisting` (build a search from the criteria + one-off bulk modify over the backlog).
   Adds the `gmail.settings.basic` scope.
 - Structured outputs (`outputSchema` + validated `structuredContent`) on every tool.
+- `get_profile` — the connected account's address plus message/thread totals, for confirming
+  *which* mailbox is wired up before a bulk or filter action (read-only, no extra scope).
 - Read-only mode (`MAILWARDEN_READONLY=1`).
 - Step-by-step [setup guide](SETUP.md) covering the Google Cloud / OAuth consent dance,
   the "unverified app" screen, and the Testing-status 7-day token expiry.
