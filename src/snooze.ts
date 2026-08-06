@@ -24,13 +24,38 @@ export function isValidIsoDate(s: string): boolean {
   return dt.getUTCMonth() === m - 1 && dt.getUTCDate() === d; // Date rolls over on overflow
 }
 
-/** The YYYY-MM-DD suffix of a dated snooze label, or undefined for anything else. */
-function snoozeDate(labelName: string): string | undefined {
+const pad2 = (n: number) => String(n).padStart(2, "0");
+
+/** Local wall-clock as a sortable `YYYY-MM-DDTHHMM` stamp (minute precision). */
+export const localStamp = (d = new Date()) =>
+  `${todayIso(d)}T${pad2(d.getHours())}${pad2(d.getMinutes())}`;
+
+/**
+ * A snooze key is either a bare date `YYYY-MM-DD` (due any time that day) or a
+ * dated timestamp `YYYY-MM-DDTHHMM` (due at that local minute). Both sort
+ * lexicographically against a `localStamp` cutoff: a bare date is a prefix of any
+ * same-day timestamp, so `<=` treats it as due from the start of that day.
+ */
+export function isValidSnoozeKey(s: string): boolean {
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})(?:T(\d{2})(\d{2}))?$/);
+  if (!m || !isValidIsoDate(m[1])) return false;
+  if (m[2] === undefined) return true;
+  return Number(m[2]) <= 23 && Number(m[3]) <= 59;
+}
+
+/** The snooze-key suffix of a snooze label, or undefined for anything else. */
+function snoozeKey(labelName: string): string | undefined {
   if (!labelName.startsWith(`${PARENT}/`)) return undefined;
-  const date = labelName.slice(PARENT.length + 1);
+  const key = labelName.slice(PARENT.length + 1);
   // Only real dated labels are sweepable — a manual sub-label like
   // `MCP/Snoozed/Archiv` must never be swept (and then deleted).
-  return isValidIsoDate(date) ? date : undefined;
+  return isValidSnoozeKey(key) ? key : undefined;
+}
+
+/** Human form of a snooze key: `YYYY-MM-DD` or `YYYY-MM-DD HH:MM`. */
+function formatSnoozeKey(key: string): string {
+  const m = key.match(/^(\d{4}-\d{2}-\d{2})T(\d{2})(\d{2})$/);
+  return m ? `${m[1]} ${m[2]}:${m[3]}` : key;
 }
 
 /**
@@ -41,13 +66,14 @@ function snoozeDate(labelName: string): string | undefined {
 const MAX_SWEEP_ITERATIONS = 10;
 
 /**
- * A dated snooze label `MCP/Snoozed/<YYYY-MM-DD>` is due when its date is
- * on or before the cutoff (today). ISO date strings compare lexicographically,
- * so a plain `<=` is a valid "due" check. Returns false for non-dated labels.
+ * A snooze label is due when its key is on or before the cutoff. Keys and the
+ * `localStamp` cutoff both sort lexicographically (`YYYY-MM-DD`[`THHMM`]), so a
+ * plain `<=` is a valid "due" check for bare-date and timestamped labels alike.
+ * Returns false for non-snooze labels.
  */
-export function isDue(labelName: string, cutoffIso: string): boolean {
-  const date = snoozeDate(labelName);
-  return date !== undefined && date <= cutoffIso;
+export function isDue(labelName: string, cutoff: string): boolean {
+  const key = snoozeKey(labelName);
+  return key !== undefined && key <= cutoff;
 }
 
 const WEEKDAYS: Record<string, number> = {
@@ -77,45 +103,123 @@ function nextWeekday(from: Date, target: number): Date {
   return addDays(from, delta);
 }
 
+/** Parse a clock token (`9am`, `9:30pm`, `17:00`, `8`) to 24h {h,m}, or undefined. */
+function parseTime(s: string): { h: number; m: number } | undefined {
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?(am|pm)?$/);
+  if (!m) return undefined;
+  let h = Number(m[1]);
+  const min = m[2] ? Number(m[2]) : 0;
+  if (min > 59) return undefined;
+  if (m[3]) {
+    if (h < 1 || h > 12) return undefined;
+    h = m[3] === "am" ? h % 12 : (h % 12) + 12; // 12am→0, 12pm→12
+  } else if (h > 23) {
+    return undefined;
+  }
+  return { h, m: min };
+}
+
+const stampKey = (date: string, t: { h: number; m: number }) =>
+  `${date}T${pad2(t.h)}${pad2(t.m)}`;
+
+/** Resolve a bare date phrase (no time) to a local-midnight Date, or undefined. */
+function resolveDatePreset(phrase: string, today: Date): Date | undefined {
+  if (phrase === "today") return addDays(today, 0);
+  if (phrase === "tomorrow") return addDays(today, 1);
+  if (phrase === "weekend") return nextWeekday(today, 6); // next Saturday
+  if (phrase === "next week") return nextWeekday(today, 1); // next Monday
+  if (phrase in WEEKDAYS) return nextWeekday(today, WEEKDAYS[phrase]);
+  const inDays = phrase.match(/^in (\d+) days?$/);
+  if (inDays) return addDays(today, Number(inDays[1]));
+  return undefined;
+}
+
+/** Peel an optional trailing clock token off a normalized preset phrase. */
+function peelTime(norm: string): { phrase: string; time?: { h: number; m: number } } {
+  const toks = norm.split(" ");
+  if (toks.length >= 2) {
+    const last = toks[toks.length - 1];
+    // "9 am" / "9:30 pm" arrive as two tokens — try the last two joined first.
+    if ((last === "am" || last === "pm") && toks.length >= 2) {
+      const t = parseTime(toks.slice(-2).join(""));
+      if (t) return { phrase: toks.slice(0, -2).join(" "), time: t };
+    }
+    const t = parseTime(last);
+    if (t) return { phrase: toks.slice(0, -1).join(" "), time: t };
+  }
+  return { phrase: norm };
+}
+
 /**
- * Resolve a snooze value to a concrete `YYYY-MM-DD`. Accepts either an explicit
- * ISO date or a natural preset — resolving presets server-side spares the caller
- * date arithmetic (a common source of off-by-one / wrong-timezone snoozes).
- * Presets (case/separator-insensitive): today, tomorrow, weekend (next Saturday),
- * next week (next Monday), a weekday name (monday–sunday, next occurrence), or
- * "in N days". Throws with an actionable message on anything else or a past date.
+ * Resolve a snooze value to a concrete key — a bare date `YYYY-MM-DD` or a dated
+ * timestamp `YYYY-MM-DDTHHMM`. Resolving presets and clock times server-side
+ * spares the caller date/time arithmetic (a common source of off-by-one and
+ * wrong-timezone snoozes). Accepts (case/separator-insensitive):
+ *   - an explicit date `2026-06-20`, optionally with a time `2026-06-20 9am` / `…T17:00`;
+ *   - a date preset — today, tomorrow, weekend (next Saturday), next week (next Monday),
+ *     a weekday name (monday–sunday, next occurrence) — optionally with a trailing
+ *     time (`tomorrow 9am`, `monday 8:30`);
+ *   - a relative offset `in N days` or `in N hours`.
+ * A time is stored to minute precision; the actual wake happens at the next sweep.
+ * Throws an actionable error on anything unrecognized or already in the past.
  */
 export function resolveSnoozeDate(input: string, today: Date = new Date()): string {
   const raw = input.trim();
   const cutoff = todayIso(today);
+  const now = localStamp(today);
+  const past = (label: string) =>
+    new Error(`Snooze target "${label}" is in the past — pick a later time.`);
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-    if (!isValidIsoDate(raw)) throw new Error(`Invalid snooze date "${raw}" — use YYYY-MM-DD.`);
-    if (raw < cutoff) throw new Error(`Snooze date "${raw}" is in the past — pick today or later.`);
-    return raw;
+  // Explicit date, optionally with a time.
+  const iso = raw.match(/^(\d{4}-\d{2}-\d{2})(?:[ T]\s*(.+))?$/i);
+  if (iso) {
+    if (!isValidIsoDate(iso[1])) throw new Error(`Invalid snooze date "${iso[1]}" — use YYYY-MM-DD.`);
+    if (iso[2] === undefined) {
+      if (iso[1] < cutoff) throw past(iso[1]);
+      return iso[1];
+    }
+    const t = parseTime(iso[2].toLowerCase().replace(/\s+/g, ""));
+    if (!t) throw new Error(`Invalid time in "${raw}" — use HH:MM or e.g. 9am.`);
+    const key = stampKey(iso[1], t);
+    if (key < now) throw past(formatSnoozeKey(key));
+    return key;
+  }
+
+  // Presets carry no signed numbers; ISO dates already returned above, so a
+  // leftover "-<digit>" is a negative offset. Reject it — normalization below
+  // folds "-" into a space, which would otherwise silently flip "in -1 days"
+  // into "in 1 days" (tomorrow) instead of erroring.
+  if (/-\d/.test(raw)) {
+    throw new Error(`Invalid snooze value "${raw}" — offsets must be positive, e.g. "in 3 days".`);
   }
 
   const norm = raw.toLowerCase().replace(/[\s_-]+/g, " ").trim();
-  if (norm === "today") return todayIso(today);
-  if (norm === "tomorrow") return todayIso(addDays(today, 1));
-  if (norm === "weekend") return todayIso(nextWeekday(today, 6)); // next Saturday
-  if (norm === "next week") return todayIso(nextWeekday(today, 1)); // next Monday
-  if (norm in WEEKDAYS) return todayIso(nextWeekday(today, WEEKDAYS[norm]));
-  const inDays = norm.match(/^in (\d+) days?$/);
-  if (inDays) return todayIso(addDays(today, Number(inDays[1])));
+
+  // "in N hours" resolves relative to the current minute (a timestamped key).
+  const inHours = norm.match(/^in (\d+) hours?$/);
+  if (inHours) return localStamp(new Date(today.getTime() + Number(inHours[1]) * 3600_000));
+
+  const { phrase, time } = peelTime(norm);
+  const base = resolveDatePreset(phrase, today);
+  if (base) {
+    if (!time) return todayIso(base);
+    const key = stampKey(todayIso(base), time);
+    if (key < now) throw past(formatSnoozeKey(key));
+    return key;
+  }
 
   throw new Error(
-    `Invalid snooze value "${raw}" — use a date (YYYY-MM-DD) or a preset: ` +
-      `today, tomorrow, weekend, next week, a weekday name (monday–sunday), or "in N days".`,
+    `Invalid snooze value "${raw}" — use a date/time (YYYY-MM-DD, "tomorrow 9am") or a preset: ` +
+      `today, tomorrow, weekend, next week, a weekday name (monday–sunday), "in N days", or "in N hours".`,
   );
 }
 
 export async function snooze(gmail: Gmail, threadId: string, until: string, today = new Date()) {
-  const date = resolveSnoozeDate(until, today);
+  const key = resolveSnoozeDate(until, today);
   const parentId = await gmail.ensureLabel(PARENT);
-  const dueId = await gmail.ensureLabel(datedLabel(date));
+  const dueId = await gmail.ensureLabel(datedLabel(key));
   await gmail.modifyLabels(threadId, [parentId, dueId], ["INBOX"]);
-  return { threadId, snoozedUntil: date };
+  return { threadId, snoozedUntil: formatSnoozeKey(key) };
 }
 
 export async function unsnooze(gmail: Gmail, threadId: string) {
@@ -130,22 +234,28 @@ export async function unsnooze(gmail: Gmail, threadId: string) {
 
 export async function listSnoozed(gmail: Gmail) {
   const labels = await gmail.listLabels();
-  const out: { threadId: string; subject: string; snoozedUntil: string }[] = [];
+  const out: { threadId: string; subject: string; key: string }[] = [];
   for (const label of labels) {
-    const due = snoozeDate(label.name);
-    if (!due) continue;
+    const key = snoozeKey(label.name);
+    if (!key) continue;
     for (const threadId of await gmail.listThreadIdsByLabel(label.id)) {
-      out.push({ threadId, subject: await gmail.getThreadSubject(threadId), snoozedUntil: due });
+      out.push({ threadId, subject: await gmail.getThreadSubject(threadId), key });
     }
   }
-  return out.sort((a, b) => a.snoozedUntil.localeCompare(b.snoozedUntil));
+  // Sort on the raw key (chronological), then present the human-readable form.
+  // Codepoint `<`, not localeCompare — same ordering the dueness check relies on.
+  return out
+    .sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0))
+    .map(({ threadId, subject, key }) => ({ threadId, subject, snoozedUntil: formatSnoozeKey(key) }));
 }
 
 /** Messages listed per sweep round — the drain loop covers anything beyond it. */
 const SWEEP_LIST_CAP = 5000;
 
 export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
-  const cutoff = todayIso(today);
+  // Minute-precision cutoff so timestamped snoozes fire at their local time;
+  // bare-date labels stay due for the whole day via the prefix-sort rule.
+  const cutoff = localStamp(today);
   const labels = await gmail.listLabels();
   const parent = labels.find((l) => l.name === PARENT);
   const dueLabels = labels.filter((l) => isDue(l.name, cutoff));
@@ -188,5 +298,5 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
       }
     }
   }
-  return { date: cutoff, wokenCount: woken.size, woken: [...woken], failedCount, errors };
+  return { date: todayIso(today), wokenCount: woken.size, woken: [...woken], failedCount, errors };
 }

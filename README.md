@@ -47,7 +47,7 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
-| **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`) or a preset (`tomorrow`, `weekend`, `next week`, a weekday name, `in N days`) |
+| **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`), a date+time (`2026-06-20 9am`), or a preset (`tomorrow`, `tomorrow 9am`, `weekend`, `next week`, a weekday name, `in N days`, `in N hours`) |
 | **`unsnooze`** | Cancel a snooze, return to inbox now |
 | **`list_snoozed`** | All snoozed threads + due dates |
 | **`sweep_snoozed`** | Resurface threads whose snooze is due (run on demand, via cron, or the daemon); batched, with partial-failure reporting |
@@ -60,7 +60,7 @@ alongside the same JSON as fenced text — clients never have to parse prose.
 
 ### How snooze works (no Gmail API snooze exists — we build it)
 
-`snooze` removes `INBOX` and applies a dated label `MCP/Snoozed/<YYYY-MM-DD>`. The `until` argument takes either an explicit `YYYY-MM-DD` or a preset resolved server-side — `today`, `tomorrow`, `weekend` (next Saturday), `next week` (next Monday), a weekday name (`monday`–`sunday`, next occurrence), or `in N days` — so the caller never has to compute the date itself. `sweep_snoozed` finds due labels and returns those threads to the inbox (marked unread). Run the sweep:
+`snooze` removes `INBOX` and applies a dated label `MCP/Snoozed/<key>`, where the key is either `YYYY-MM-DD` (due all day) or `YYYY-MM-DDTHHMM` (due at that local minute). The `until` argument takes an explicit date, a date+time (`2026-06-20 9am`, `…T17:00`), or a preset resolved server-side — `today`, `tomorrow`, `weekend` (next Saturday), `next week` (next Monday), a weekday name (`monday`–`sunday`, next occurrence), `in N days`, or `in N hours` — and a date preset may carry a trailing time (`tomorrow 9am`, `monday 8:30`), so the caller never has to compute the moment itself. `sweep_snoozed` finds due labels and returns those threads to the inbox (marked unread); a timed snooze wakes at the first sweep on/after its minute, so wake latency equals your sweep interval. Run the sweep:
 - on demand (`sweep_snoozed` tool),
 - via cron: `mailwarden --sweep`,
 - or automatically: set `MAILWARDEN_AUTO_SWEEP=1` (hourly sweep while the server runs).

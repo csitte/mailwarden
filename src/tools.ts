@@ -385,10 +385,12 @@ export function registerTools(server: McpServer): void {
     "snooze",
     {
       description:
-        "Snooze a thread until a date: archives it now, resurfaces on/after that date when sweep_snoozed runs. " +
-        "`until` accepts an explicit date (YYYY-MM-DD) OR a preset resolved server-side: today, tomorrow, " +
-        "weekend (next Saturday), next week (next Monday), a weekday name (monday–sunday, next occurrence), or \"in N days\". " +
-        "USE WHEN: deferring a thread to a later date instead of leaving it in the inbox. " +
+        "Snooze a thread until a date or time: archives it now, resurfaces when it comes due and sweep_snoozed runs. " +
+        "`until` accepts an explicit date (YYYY-MM-DD), a date+time (YYYY-MM-DD HH:MM or e.g. '2026-06-20 9am'), " +
+        "OR a preset resolved server-side: today, tomorrow, weekend (next Saturday), next week (next Monday), " +
+        "a weekday name (monday–sunday, next occurrence), 'in N days', or 'in N hours'. A preset may carry a " +
+        "trailing time ('tomorrow 9am', 'monday 8:30'). A timed snooze wakes at the next sweep on/after that minute. " +
+        "USE WHEN: deferring a thread to a later date/time instead of leaving it in the inbox. " +
         "DO NOT USE: for permanent removal (use archive or trash). " +
         "SIDE EFFECTS: removes INBOX, adds a dated MCP/Snoozed label; reversible via unsnooze.",
       inputSchema: {

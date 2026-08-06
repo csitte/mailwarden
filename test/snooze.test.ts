@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   isDue,
   isValidIsoDate,
+  isValidSnoozeKey,
   todayIso,
   resolveSnoozeDate,
   sweepSnoozed,
@@ -106,6 +107,75 @@ describe("resolveSnoozeDate", () => {
   it("rejects an unrecognized value with an actionable message", () => {
     expect(() => resolveSnoozeDate("someday", today)).toThrow(/Invalid snooze value/);
     expect(() => resolveSnoozeDate("next month", today)).toThrow(/Invalid snooze value/);
+  });
+
+  it("rejects a negative offset instead of silently flipping its sign", () => {
+    // "-" would normalize to a space and turn "in -1 days" into tomorrow.
+    expect(() => resolveSnoozeDate("in -1 days", today)).toThrow(/positive/);
+    expect(() => resolveSnoozeDate("in -3 hours", today)).toThrow(/positive/);
+  });
+});
+
+describe("resolveSnoozeDate — time of day", () => {
+  // Anchor: Saturday, 2026-06-20 at 09:00 local.
+  const today = new Date(2026, 5, 20, 9, 0);
+
+  it("appends a THHMM stamp for a preset with a trailing time", () => {
+    expect(resolveSnoozeDate("tomorrow 9am", today)).toBe("2026-06-21T0900");
+    expect(resolveSnoozeDate("today 5pm", today)).toBe("2026-06-20T1700");
+    expect(resolveSnoozeDate("monday 8:30", today)).toBe("2026-06-22T0830");
+    expect(resolveSnoozeDate("weekend 10am", today)).toBe("2026-06-27T1000");
+  });
+
+  it("accepts an explicit date + time with T or space and 12h or 24h clocks", () => {
+    expect(resolveSnoozeDate("2026-06-20T17:00", today)).toBe("2026-06-20T1700");
+    expect(resolveSnoozeDate("2026-06-20 9:30pm", today)).toBe("2026-06-20T2130");
+    expect(resolveSnoozeDate("2026-06-21 9 am", today)).toBe("2026-06-21T0900");
+  });
+
+  it("maps 12am to 00:00 and 12pm to 12:00", () => {
+    expect(resolveSnoozeDate("tomorrow 12am", today)).toBe("2026-06-21T0000");
+    expect(resolveSnoozeDate("tomorrow 12pm", today)).toBe("2026-06-21T1200");
+  });
+
+  it("resolves 'in N hours' relative to the current minute", () => {
+    expect(resolveSnoozeDate("in 3 hours", today)).toBe("2026-06-20T1200");
+    expect(resolveSnoozeDate("in 1 hour", today)).toBe("2026-06-20T1000");
+  });
+
+  it("rejects a time earlier today as past", () => {
+    expect(() => resolveSnoozeDate("today 8am", today)).toThrow(/in the past/);
+    expect(() => resolveSnoozeDate("2026-06-20 07:30", today)).toThrow(/in the past/);
+  });
+
+  it("rejects an impossible clock time", () => {
+    expect(() => resolveSnoozeDate("2026-06-20 25:00", today)).toThrow(/Invalid time/);
+    expect(() => resolveSnoozeDate("tomorrow 25:00", today)).toThrow();
+  });
+});
+
+describe("isValidSnoozeKey", () => {
+  it("accepts bare dates and valid THHMM timestamps", () => {
+    for (const s of ["2026-06-20", "2026-06-20T0900", "2026-06-20T0000", "2026-06-20T2359"]) {
+      expect(isValidSnoozeKey(s)).toBe(true);
+    }
+  });
+  it("rejects impossible times, wrong widths, and non-keys", () => {
+    for (const s of ["2026-06-20T2400", "2026-06-20T0960", "2026-06-20T900", "2026-13-01", "foo", ""]) {
+      expect(isValidSnoozeKey(s)).toBe(false);
+    }
+  });
+});
+
+describe("isDue — timestamped keys", () => {
+  it("compares to the minute against a localStamp cutoff", () => {
+    expect(isDue("MCP/Snoozed/2026-06-20T0900", "2026-06-20T0900")).toBe(true); // == due
+    expect(isDue("MCP/Snoozed/2026-06-20T0900", "2026-06-20T0859")).toBe(false); // one min early
+    expect(isDue("MCP/Snoozed/2026-06-20T0900", "2026-06-20T1000")).toBe(true); // later
+  });
+  it("treats a bare-date label as due from the start of its day", () => {
+    expect(isDue("MCP/Snoozed/2026-06-20", "2026-06-20T0000")).toBe(true);
+    expect(isDue("MCP/Snoozed/2026-06-21", "2026-06-20T2359")).toBe(false);
   });
 });
 
@@ -215,6 +285,33 @@ describe("listSnoozed", () => {
     // parent, Archiv, and unrelated labels are never queried
     expect(listedLabels.sort()).toEqual(["Label_a", "Label_b"]);
   });
+
+  it("presents timestamped keys in human form, sorted chronologically", async () => {
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [
+          { id: "L_pm", name: "MCP/Snoozed/2026-08-01T1730", type: "user" },
+          { id: "L_am", name: "MCP/Snoozed/2026-08-01T0900", type: "user" },
+          { id: "L_date", name: "MCP/Snoozed/2026-08-01", type: "user" },
+        ];
+      },
+      async listThreadIdsByLabel(labelId: string) {
+        return [labelId];
+      },
+      async getThreadSubject(threadId: string) {
+        return `subj-${threadId}`;
+      },
+    };
+
+    const res = await listSnoozed(fake as Gmail);
+
+    // Bare date (start of day) < 09:00 < 17:30, all on 2026-08-01.
+    expect(res).toEqual([
+      { threadId: "L_date", subject: "subj-L_date", snoozedUntil: "2026-08-01" },
+      { threadId: "L_am", subject: "subj-L_am", snoozedUntil: "2026-08-01 09:00" },
+      { threadId: "L_pm", subject: "subj-L_pm", snoozedUntil: "2026-08-01 17:30" },
+    ]);
+  });
 });
 
 describe("sweepSnoozed", () => {
@@ -305,6 +402,34 @@ describe("sweepSnoozed", () => {
     const { gmail } = makeFakeGmail(0);
     const res = await sweepSnoozed(gmail, new Date(2026, 5, 20));
     expect(res.wokenCount).toBe(0); // Label_archiv never swept
+  });
+
+  it("wakes a timestamped label only once its local minute has passed", async () => {
+    const swept: string[] = [];
+    let remaining = [{ id: "m-0", threadId: "th-0" }];
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [
+          { id: "L_due", name: "MCP/Snoozed/2026-06-20T0800", type: "user" }, // 08:00 — due at 09:00
+          { id: "L_later", name: "MCP/Snoozed/2026-06-20T1000", type: "user" }, // 10:00 — not yet
+        ];
+      },
+      async listMessageRefs({ labelIds }: any = {}) {
+        return labelIds?.includes("L_due") ? [...remaining] : [];
+      },
+      async batchModifyMessages(refs: any[]) {
+        swept.push(...refs.map((r) => r.id));
+        remaining = [];
+        return { modifiedMessages: refs.length, modifiedThreads: ["th-0"], failed: [] };
+      },
+      async deleteLabel() {},
+    };
+
+    const res = await sweepSnoozed(fake as Gmail, new Date(2026, 5, 20, 9, 0));
+
+    expect(res.wokenCount).toBe(1);
+    expect(swept).toEqual(["m-0"]); // the 10:00 label stays snoozed
+    expect(res.date).toBe("2026-06-20"); // summary reports the day, not the minute
   });
 
   it("wakes messages into the inbox as unread, stripping dated + parent label", async () => {

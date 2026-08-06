@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a weekday name (`monday`–`sunday`, resolved to the next occurrence), or `in N days`. Resolution happens
   server-side, so the caller no longer has to compute the date (a common source of off-by-one and
   wrong-timezone snoozes). Explicit dates behave exactly as before.
+- **Time-of-day snooze.** `until` now also accepts a clock time — a date+time (`2026-06-20 9am`,
+  `2026-06-20T17:00`), a preset with a trailing time (`tomorrow 9am`, `monday 8:30`), or `in N hours`.
+  A timed snooze is stored as a `MCP/Snoozed/YYYY-MM-DDTHHMM` label (minute precision, local time) and
+  resurfaces at the first sweep on/after that minute, so wake latency equals the sweep interval
+  (run `sweep_snoozed` on demand, or set `MAILWARDEN_AUTO_SWEEP=1` for an hourly sweep). Bare-date
+  snoozes are unchanged — still due for the whole day.
 
 ## [0.5.0] - 2026-08-06
 
