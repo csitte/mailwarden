@@ -183,6 +183,23 @@ do what the error says: revoke mailwarden's access at
 <https://myaccount.google.com/permissions> (or delete `~/.mailwarden/token.json`), then run
 `--auth` again and you'll get a fresh consent prompt including a refresh token.
 
+### "token.json is encrypted, but MAILWARDEN_TOKEN_PASSPHRASE is not set"
+
+You (or a previous `--auth` run) turned on at-rest encryption by setting
+`MAILWARDEN_TOKEN_PASSPHRASE`, but the server process doesn't have it. The **same** passphrase
+must be present both when you run `--auth` *and* whenever the server runs — set it in the same
+environment your MCP client launches mailwarden from (or your shell/service definition). If you
+never meant to encrypt the token, just run `--auth` again *without* the variable set and it'll be
+stored in plaintext.
+
+### "Could not decrypt token.json — MAILWARDEN_TOKEN_PASSPHRASE is wrong or the file is corrupted"
+
+The passphrase in the environment doesn't match the one the token was encrypted with (or the file
+was truncated/edited). There is **no recovery** of the refresh token without the exact passphrase —
+that's the point of the encryption. Options: fix `MAILWARDEN_TOKEN_PASSPHRASE` to the value you used
+at `--auth` time, or if it's lost, delete `~/.mailwarden/token.json` and run `npx -y mailwarden --auth`
+again (optionally revoke the old grant at <https://myaccount.google.com/permissions> first).
+
 ### "Cannot read OAuth credentials at …"
 
 `credentials.json` isn't where mailwarden looks. Default: `~/.mailwarden/credentials.json`;
