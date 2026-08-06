@@ -30,6 +30,9 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
 - Read-only mode (`MAILWARDEN_READONLY=1`).
 - Step-by-step [setup guide](SETUP.md) covering the Google Cloud / OAuth consent dance,
   the "unverified app" screen, and the Testing-status 7-day token expiry.
+- Optional at-rest token encryption (unreleased on `main`): set `MAILWARDEN_TOKEN_PASSPHRASE` and
+  `token.json` is stored AES-256-GCM-encrypted (scrypt key), closing the `0o600`-is-a-no-op gap on
+  Windows for file copies. Opt-in; defends against file theft, not same-user malware.
 
 ## Next
 

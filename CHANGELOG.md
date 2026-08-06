@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Optional token encryption at rest.** Set `MAILWARDEN_TOKEN_PASSPHRASE` to a passphrase and
+  `token.json` is stored AES-256-GCM-encrypted with a scrypt-derived key, so a copy of the file
+  (backup, synced folder, another machine) is useless without the passphrase — closing the gap
+  that `mode 0o600` leaves on Windows. Opt-in, mirroring the `--http` / `MAILWARDEN_TOKEN` pattern;
+  unset keeps today's plaintext behavior. Re-run `mailwarden --auth` once after setting the key to
+  encrypt an existing token. An encrypted token with a missing or wrong key yields an actionable
+  error instead of a misleading "not authorized" prompt. This defends against file theft, **not**
+  against malware running as the same user (which can read the passphrase from the environment).
+
 ## [0.4.0] - 2026-08-04
 
 ### Added

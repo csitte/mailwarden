@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { checkCredentials } from "../src/auth.js";
+import { checkCredentials, encryptToken, decryptToken } from "../src/auth.js";
 
 // Stable mock instance that survives vi.resetModules() (the factory re-runs,
 // but keeps handing out this same vi.fn).
@@ -187,6 +187,177 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     const { getAuth } = await freshAuth(tmp);
     await expect(getAuth(true)).rejects.toThrow(/no "installed" or "web" OAuth client/);
     expect(mocks.authenticate).not.toHaveBeenCalled();
+  });
+});
+
+describe("token encryption (pure encrypt/decrypt)", () => {
+  const secret = JSON.stringify({ type: "authorized_user", refresh_token: "rt-secret" });
+
+  it("round-trips plaintext through encrypt → decrypt", () => {
+    const enc = encryptToken(secret, "hunter2");
+    expect(enc.type).toBe("mailwarden-encrypted");
+    expect(enc.ciphertext).not.toContain("rt-secret"); // opaque on disk
+    expect(decryptToken(enc, "hunter2")).toBe(secret);
+  });
+
+  it("produces a self-describing, versioned envelope", () => {
+    const enc = encryptToken(secret, "hunter2");
+    expect(enc).toMatchObject({ type: "mailwarden-encrypted", v: 1, kdf: "scrypt" });
+    for (const f of ["salt", "iv", "tag", "ciphertext"] as const) {
+      expect(typeof enc[f]).toBe("string");
+      expect(enc[f].length).toBeGreaterThan(0);
+    }
+  });
+
+  it("rejects a tampered auth tag", () => {
+    const enc = encryptToken(secret, "hunter2");
+    const tag = Buffer.from(enc.tag, "base64");
+    tag[0] ^= 0xff;
+    expect(() => decryptToken({ ...enc, tag: tag.toString("base64") }, "hunter2")).toThrow();
+  });
+
+  it("rejects a tampered salt (key no longer derives)", () => {
+    const enc = encryptToken(secret, "hunter2");
+    const salt = Buffer.from(enc.salt, "base64");
+    salt[0] ^= 0xff;
+    expect(() => decryptToken({ ...enc, salt: salt.toString("base64") }, "hunter2")).toThrow();
+  });
+
+  it("uses a fresh random salt + iv each time (no reuse across encryptions)", () => {
+    const a = encryptToken(secret, "hunter2");
+    const b = encryptToken(secret, "hunter2");
+    expect(a.salt).not.toBe(b.salt);
+    expect(a.iv).not.toBe(b.iv);
+    expect(a.ciphertext).not.toBe(b.ciphertext);
+  });
+
+  it("fails to decrypt with the wrong passphrase", () => {
+    const enc = encryptToken(secret, "right");
+    expect(() => decryptToken(enc, "wrong")).toThrow();
+  });
+
+  it("rejects a tampered ciphertext (GCM auth-tag mismatch)", () => {
+    const enc = encryptToken(secret, "hunter2");
+    const ct = Buffer.from(enc.ciphertext, "base64");
+    ct[0] ^= 0xff; // flip a byte
+    const tampered = { ...enc, ciphertext: ct.toString("base64") };
+    expect(() => decryptToken(tampered, "hunter2")).toThrow();
+  });
+});
+
+describe("token encryption (persist + load through getAuth)", () => {
+  let tmp: string;
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    mocks.authenticate.mockReset();
+    if (tmp) await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  async function authWithKey(dir: string, key: string) {
+    vi.resetModules();
+    vi.stubEnv("MAILWARDEN_DIR", dir);
+    vi.stubEnv("MAILWARDEN_TOKEN_PASSPHRASE", key);
+    return await import("../src/auth.js");
+  }
+
+  it("persists an encrypted token.json when MAILWARDEN_TOKEN_PASSPHRASE is set", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+
+    const { getAuth } = await authWithKey(tmp, "pw");
+    await getAuth(true);
+
+    const raw = await fs.readFile(path.join(tmp, "token.json"), "utf8");
+    const stored = JSON.parse(raw);
+    expect(stored.type).toBe("mailwarden-encrypted");
+    expect(raw).not.toContain("fresh-rt"); // secret not on disk in the clear
+  });
+
+  it("loads an encrypted token back with the right key (no network)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+    // Store encrypted, then load in a fresh module instance (no in-process cache).
+    const store = await authWithKey(tmp, "pw");
+    await store.getAuth(true);
+
+    const { getAuth } = await authWithKey(tmp, "pw");
+    const client = await getAuth(false);
+    const rt = client.credentials.refresh_token ?? (client as any)._refreshToken;
+    expect(rt).toBe("fresh-rt");
+  });
+
+  it("throws an actionable error when the token is encrypted but no key is set", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify(encryptToken(JSON.stringify({ type: "authorized_user", refresh_token: "rt" }), "pw")),
+    );
+    const { getAuth } = await freshAuth(tmp); // MAILWARDEN_TOKEN_PASSPHRASE intentionally unset
+    await expect(getAuth(false)).rejects.toThrow(/encrypted.*MAILWARDEN_TOKEN_PASSPHRASE is not set/s);
+  });
+
+  it("throws an actionable error when the key is wrong", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify(encryptToken(JSON.stringify({ type: "authorized_user", refresh_token: "rt" }), "right")),
+    );
+    const { getAuth } = await authWithKey(tmp, "wrong");
+    await expect(getAuth(false)).rejects.toThrow(/Could not decrypt/);
+  });
+
+  it("still loads a plaintext token when a key is set, warning to re-encrypt", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify({ type: "authorized_user", client_id: "cid", client_secret: "cs", refresh_token: "rt-plain" }),
+    );
+    const warn = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { getAuth } = await authWithKey(tmp, "pw");
+    const client = await getAuth(false);
+    const rt = client.credentials.refresh_token ?? (client as any)._refreshToken;
+    expect(rt).toBe("rt-plain"); // still usable — encryption is opt-in, not enforced on read
+    expect(warn).toHaveBeenCalledWith(expect.stringMatching(/stored in plaintext/));
+    warn.mockRestore();
+  });
+
+  it("treats a valid-JSON token of the wrong shape as not-authorized", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(path.join(tmp, "token.json"), JSON.stringify({ foo: 1 }));
+    const { getAuth } = await freshAuth(tmp);
+    await expect(getAuth(false)).rejects.toThrow(/--auth/);
+  });
+
+  it("treats a correctly-decrypted but wrong-shape token as not-authorized (not 'wrong key')", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    // Key is correct → GCM verifies → but the payload isn't an authorized_user: must fall through to
+    // the "not authorized" path, NOT be mislabeled as a decryption failure.
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify(encryptToken(JSON.stringify({ foo: 1 }), "pw")),
+    );
+    const { getAuth } = await authWithKey(tmp, "pw");
+    await expect(getAuth(false)).rejects.toThrow(/--auth/);
+  });
+
+  it("treats a correctly-decrypted but non-JSON payload as not-authorized", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify(encryptToken("not json at all", "pw")),
+    );
+    const { getAuth } = await authWithKey(tmp, "pw");
+    await expect(getAuth(false)).rejects.toThrow(/--auth/);
   });
 });
 

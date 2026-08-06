@@ -106,6 +106,13 @@ approve the `gmail.modify` and `gmail.settings.basic` scopes, and the terminal p
 the refresh token in `~/.mailwarden/token.json` (mode `0600`) — that's the only local state
 it keeps, and you never have to do this again on this machine.
 
+> **Optional — encrypt the token at rest.** `mode 0600` is a no-op on Windows, so on that
+> platform (or if `token.json` might end up in a backup or synced folder) set a passphrase
+> before authorizing: `MAILWARDEN_TOKEN_PASSPHRASE=<your-passphrase>`. The token is then stored
+> AES-256-GCM-encrypted, and a copy of the file is useless without the passphrase. The server
+> needs the same `MAILWARDEN_TOKEN_PASSPHRASE` set at runtime to read it. This guards against a stolen
+> *file*, not against malware running as your own user. See *Security & privacy* in the README.
+
 ### The "unverified app" warning is normal
 
 Because `gmail.modify` is a restricted scope and your app hasn't gone through Google's

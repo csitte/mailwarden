@@ -116,6 +116,12 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
   instructions.
 - **Live API, no copy.** No mailbox mirror or search index is stored anywhere. The only local state
   is your OAuth token in `~/.mailwarden/`.
+- **Optional token encryption at rest.** `token.json` holds a refresh token; on disk it is protected
+  only by `mode 0o600` (a no-op on Windows). Set `MAILWARDEN_TOKEN_PASSPHRASE` to a passphrase and the token
+  is stored AES-256-GCM-encrypted (scrypt-derived key), so a *copy* of the file — a backup, a synced
+  folder, another machine — is useless without the passphrase. Re-run `mailwarden --auth` once after
+  setting it to encrypt the existing token. Note the boundary: this defends against file theft, **not**
+  against malware running as your user (which can read the passphrase from the environment too).
 
 ## Quick start
 
@@ -176,6 +182,7 @@ node dist/index.js --auth
 |---|---|
 | `MAILWARDEN_DIR` | config dir (default `~/.mailwarden`) |
 | `MAILWARDEN_CREDENTIALS` | path to `credentials.json` |
+| `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile) |
