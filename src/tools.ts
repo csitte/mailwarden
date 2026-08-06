@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Gmail, filterCriteriaToQuery } from "./gmail.js";
 import { getAuth } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
+import { buildDigest, friendlyLabelName } from "./digest.js";
 import { fenceOutput } from "./sanitize.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -183,6 +184,64 @@ export function registerTools(server: McpServer): void {
       annotations: { title: "Get profile", ...readOnly },
     },
     async () => ok(await (await client()).getProfile()),
+  );
+
+  server.registerTool(
+    "triage_digest",
+    {
+      description:
+        "Structured overview of a mailbox slice for triage DECISIONS — sender / label / age buckets plus unread and attachment counts, instead of a raw thread list. " +
+        "USE WHEN: deciding what to bulk-archive/snooze/label, or summarizing inbox state ('what's in my inbox?'). " +
+        "DO NOT USE: to read a specific thread (use search/get_thread). " +
+        "Samples up to `max` most-recent matches; hasMore flags that more matched than were sampled. " +
+        "byAge buckets by each thread's FIRST message date (thread age, not last activity). SIDE EFFECTS: none.",
+      inputSchema: {
+        query: z.string().trim().min(1).default("in:inbox"),
+        max: z.number().int().min(1).max(100).default(100),
+        topN: z.number().int().min(1).max(50).default(10),
+      },
+      outputSchema: {
+        query: z.string(),
+        sampled: z.number(),
+        hasMore: z.boolean(),
+        unread: z.number(),
+        withAttachments: z.number(),
+        byAge: z.object({
+          last24h: z.number(),
+          last7d: z.number(),
+          last30d: z.number(),
+          older: z.number(),
+          undated: z.number(),
+        }),
+        topSenders: z.array(
+          z.object({
+            sender: z.string(),
+            name: z.string(),
+            count: z.number(),
+            unread: z.number(),
+          }),
+        ),
+        topLabels: z.array(z.object({ label: z.string(), count: z.number() })),
+      },
+      annotations: { title: "Triage digest", ...readOnly },
+    },
+    async ({ query, max, topN }) => {
+      const gmail = await client();
+      const [result, labels] = await Promise.all([gmail.search(query, max), gmail.listLabels()]);
+      const nameById = new Map(labels.map((l) => [l.id, l.name]));
+      const digest = buildDigest(
+        result.threads,
+        (id) => friendlyLabelName(id, nameById),
+        new Date(),
+        { topN },
+      );
+      // Honest "there may be more than shown": either the listing had further
+      // pages, or we filled the sample cap (search caps filtered queries like
+      // in:inbox internally, so nextPageToken alone can miss a max-truncated set).
+      // Over-reports only when exactly `max` matched — the safe direction.
+      const hasMore = result.nextPageToken != null || result.threads.length >= max;
+      return ok({ query, hasMore, ...digest });
+    },
   );
 
   // With MAILWARDEN_READONLY=1 only the read tools above exist — nothing that

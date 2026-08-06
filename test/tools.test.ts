@@ -25,10 +25,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 20 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 21 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(20);
+    expect(tools).toHaveLength(21);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -45,6 +45,7 @@ describe("registerTools — tool surface", () => {
       "list_labels",
       "list_snoozed",
       "search",
+      "triage_digest",
     ]);
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true);
   });
@@ -94,6 +95,99 @@ describe("tool results — structured content + fenced text", () => {
       threadsTotal: 640,
     });
     expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
+  });
+
+  it("triage_digest aggregates a search slice into sender/label/age buckets", async () => {
+    const messages: Record<string, any> = {
+      t1: {
+        id: "m1",
+        threadId: "t1",
+        labelIds: ["INBOX", "UNREAD", "Label_7"],
+        snippet: "hi",
+        payload: {
+          headers: [
+            { name: "From", value: "Alice <alice@x.com>" },
+            { name: "Subject", value: "Hello" },
+            { name: "Date", value: "Mon, 01 Jun 2026 10:00:00 +0000" },
+          ],
+        },
+      },
+      t2: {
+        id: "m2",
+        threadId: "t2",
+        labelIds: ["INBOX"],
+        snippet: "yo",
+        payload: {
+          headers: [
+            { name: "From", value: "bob@y.com" },
+            { name: "Subject", value: "Re: stuff" },
+            { name: "Date", value: "Tue, 02 Jun 2026 09:00:00 +0000" },
+          ],
+        },
+      },
+    };
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: [{ id: "t1" }, { id: "t2" }] } }),
+          get: async (req: any) => ({ data: { messages: [messages[req.id]] } }),
+        },
+        labels: {
+          list: async () => ({
+            data: {
+              labels: [
+                { id: "Label_7", name: "Work", type: "user" },
+                { id: "INBOX", name: "INBOX", type: "system" },
+              ],
+            },
+          }),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "triage_digest", arguments: {} });
+
+    const d = res.structuredContent;
+    expect(d.query).toBe("in:inbox");
+    expect(d.sampled).toBe(2);
+    expect(d.hasMore).toBe(false);
+    expect(d.unread).toBe(1);
+    expect(d.withAttachments).toBe(0);
+    // Both senders appear once; tie broken alphabetically by address.
+    expect(d.topSenders).toEqual([
+      { sender: "alice@x.com", name: "Alice", count: 1, unread: 1 },
+      { sender: "bob@y.com", name: "", count: 1, unread: 0 },
+    ]);
+    // INBOX/UNREAD are skipped; the user label maps to its friendly name.
+    expect(d.topLabels).toEqual([{ label: "Work", count: 1 }]);
+    expect(Object.values(d.byAge).reduce((a: number, b: any) => a + b, 0)).toBe(2);
+  });
+
+  it("triage_digest reports hasMore when the sample cap truncates the matches", async () => {
+    const msg = (id: string, thr: string) => ({
+      id,
+      threadId: thr,
+      labelIds: ["INBOX"],
+      snippet: "",
+      payload: { headers: [{ name: "From", value: `${thr}@x.com` }, { name: "Date", value: "" }] },
+    });
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          // Two inbox threads, single list page (no nextPageToken).
+          list: async () => ({ data: { threads: [{ id: "t1" }, { id: "t2" }] } }),
+          get: async (req: any) => ({ data: { messages: [msg("m", req.id)] } }),
+        },
+        labels: { list: async () => ({ data: { labels: [] } }) },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "triage_digest", arguments: { max: 1 } });
+
+    // Only 1 of 2 sampled, and no nextPageToken — hasMore must still be true,
+    // not falsely claim the digest covers the whole inbox.
+    expect(res.structuredContent.sampled).toBe(1);
+    expect(res.structuredContent.hasMore).toBe(true);
   });
 
   it("create_label creates an unknown name and returns its id + name", async () => {

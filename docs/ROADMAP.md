@@ -38,6 +38,9 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
   (`today`, `tomorrow`, `weekend`, `next week`, a weekday name, `in N days`, `in N hours`) resolved
   server-side, alongside explicit `YYYY-MM-DD`, plus a clock time (`tomorrow 9am`, `2026-06-20 17:00`)
   stored to minute precision and woken at the next sweep on/after that minute.
+- **`triage_digest`** (unreleased on `main`): read-only structured overview of a mailbox slice —
+  top senders, label/age buckets, unread + attachment counts — for triage decisions instead of a
+  raw thread list. No new scope; available in read-only mode.
 
 ## Next
 

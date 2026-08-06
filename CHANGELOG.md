@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`triage_digest` tool.** A read-only, structured overview of a mailbox slice (default `in:inbox`)
+  for triage *decisions* rather than reading: top senders (with per-sender unread), label buckets,
+  age buckets (`last24h`/`last7d`/`last30d`/`older`/`undated`), and unread + attachment counts. Samples
+  up to `max` (≤100) of the most recent matches and flags `hasMore` when more matched. Adds no new scope
+  (runs under `gmail.readonly`) and is available in `MAILWARDEN_READONLY` mode. Aggregation is a pure,
+  fully-tested function over the summaries `search` already returns — no extra API calls beyond that search.
 - **Snooze presets.** The `snooze` tool's `until` argument now accepts natural presets in addition to
   an explicit `YYYY-MM-DD` — `today`, `tomorrow`, `weekend` (next Saturday), `next week` (next Monday),
   a weekday name (`monday`–`sunday`, resolved to the next occurrence), or `in N days`. Resolution happens
