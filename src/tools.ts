@@ -2,7 +2,7 @@ import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Gmail, filterCriteriaToQuery } from "./gmail.js";
 import { getAuth } from "./auth.js";
-import { snooze, unsnooze, listSnoozed, sweepSnoozed, isValidIsoDate, todayIso } from "./snooze.js";
+import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { fenceOutput } from "./sanitize.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -385,17 +385,15 @@ export function registerTools(server: McpServer): void {
     "snooze",
     {
       description:
-        "Snooze a thread until a date (YYYY-MM-DD): archives it now, resurfaces on/after that date when sweep_snoozed runs. " +
+        "Snooze a thread until a date: archives it now, resurfaces on/after that date when sweep_snoozed runs. " +
+        "`until` accepts an explicit date (YYYY-MM-DD) OR a preset resolved server-side: today, tomorrow, " +
+        "weekend (next Saturday), next week (next Monday), a weekday name (monday–sunday, next occurrence), or \"in N days\". " +
         "USE WHEN: deferring a thread to a later date instead of leaving it in the inbox. " +
         "DO NOT USE: for permanent removal (use archive or trash). " +
         "SIDE EFFECTS: removes INBOX, adds a dated MCP/Snoozed label; reversible via unsnooze.",
       inputSchema: {
         threadId: z.string(),
-        until: z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/, "use YYYY-MM-DD")
-          .refine(isValidIsoDate, "not a real calendar date")
-          .refine((s) => s >= todayIso(), "snooze date is in the past"),
+        until: z.string().trim().min(1),
       },
       outputSchema: { threadId: z.string(), snoozedUntil: z.string() },
       annotations: { title: "Snooze thread", ...write },

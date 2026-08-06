@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { isDue, isValidIsoDate, todayIso, sweepSnoozed, snooze, unsnooze, listSnoozed } from "../src/snooze.js";
+import {
+  isDue,
+  isValidIsoDate,
+  todayIso,
+  resolveSnoozeDate,
+  sweepSnoozed,
+  snooze,
+  unsnooze,
+  listSnoozed,
+} from "../src/snooze.js";
 import { Gmail } from "../src/gmail.js";
 
 describe("todayIso — local calendar date, not UTC", () => {
@@ -52,6 +61,54 @@ describe("isDue — snooze dueness boundary", () => {
   });
 });
 
+describe("resolveSnoozeDate", () => {
+  // Anchor: Saturday, 2026-06-20 (verified). Fixed so weekday presets are deterministic.
+  const today = new Date(2026, 5, 20);
+
+  it("passes an explicit YYYY-MM-DD through unchanged", () => {
+    expect(resolveSnoozeDate("2026-06-25", today)).toBe("2026-06-25");
+    expect(resolveSnoozeDate("2026-06-20", today)).toBe("2026-06-20"); // today is allowed
+  });
+
+  it("resolves the relative presets", () => {
+    expect(resolveSnoozeDate("today", today)).toBe("2026-06-20");
+    expect(resolveSnoozeDate("tomorrow", today)).toBe("2026-06-21");
+    expect(resolveSnoozeDate("in 3 days", today)).toBe("2026-06-23");
+    expect(resolveSnoozeDate("in 1 day", today)).toBe("2026-06-21");
+  });
+
+  it("resolves next week to the next Monday and weekend to the next Saturday", () => {
+    expect(resolveSnoozeDate("next week", today)).toBe("2026-06-22");
+    // today IS Saturday ⇒ weekend means NEXT Saturday, never now
+    expect(resolveSnoozeDate("weekend", today)).toBe("2026-06-27");
+  });
+
+  it("resolves a weekday name to its next strictly-future occurrence", () => {
+    expect(resolveSnoozeDate("friday", today)).toBe("2026-06-26");
+    expect(resolveSnoozeDate("monday", today)).toBe("2026-06-22");
+    expect(resolveSnoozeDate("saturday", today)).toBe("2026-06-27"); // +7, not today
+  });
+
+  it("is case- and separator-insensitive", () => {
+    expect(resolveSnoozeDate("  Next-Week ", today)).toBe("2026-06-22");
+    expect(resolveSnoozeDate("TOMORROW", today)).toBe("2026-06-21");
+    expect(resolveSnoozeDate("In 2 Days", today)).toBe("2026-06-22");
+  });
+
+  it("rejects an ISO-shaped but impossible date", () => {
+    expect(() => resolveSnoozeDate("2026-99-99", today)).toThrow(/Invalid snooze date/);
+  });
+
+  it("rejects a past explicit date", () => {
+    expect(() => resolveSnoozeDate("2026-06-19", today)).toThrow(/in the past/);
+  });
+
+  it("rejects an unrecognized value with an actionable message", () => {
+    expect(() => resolveSnoozeDate("someday", today)).toThrow(/Invalid snooze value/);
+    expect(() => resolveSnoozeDate("next month", today)).toThrow(/Invalid snooze value/);
+  });
+});
+
 describe("snooze — input validation", () => {
   it("rejects an invalid date before touching the API", async () => {
     const gmail = {} as Gmail; // must not be called
@@ -73,13 +130,30 @@ describe("snooze — happy path", () => {
       },
     };
 
-    const res = await snooze(fake as Gmail, "th-1", "2026-08-01");
+    // Fixed `today` so the future-date guard stays deterministic over time.
+    const res = await snooze(fake as Gmail, "th-1", "2026-08-01", new Date(2026, 6, 1));
 
     expect(ensured).toEqual(["MCP/Snoozed", "MCP/Snoozed/2026-08-01"]);
     expect(modified).toEqual([
       { threadId: "th-1", add: ["id:MCP/Snoozed", "id:MCP/Snoozed/2026-08-01"], remove: ["INBOX"] },
     ]);
     expect(res).toEqual({ threadId: "th-1", snoozedUntil: "2026-08-01" });
+  });
+
+  it("resolves a preset before hitting the API", async () => {
+    const ensured: string[] = [];
+    const fake: Partial<Gmail> = {
+      async ensureLabel(name: string) {
+        ensured.push(name);
+        return `id:${name}`;
+      },
+      async modifyLabels() {},
+    };
+
+    const res = await snooze(fake as Gmail, "th-1", "tomorrow", new Date(2026, 5, 20));
+
+    expect(ensured).toEqual(["MCP/Snoozed", "MCP/Snoozed/2026-06-21"]);
+    expect(res).toEqual({ threadId: "th-1", snoozedUntil: "2026-06-21" });
   });
 });
 

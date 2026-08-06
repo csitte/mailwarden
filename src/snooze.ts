@@ -50,12 +50,72 @@ export function isDue(labelName: string, cutoffIso: string): boolean {
   return date !== undefined && date <= cutoffIso;
 }
 
-export async function snooze(gmail: Gmail, threadId: string, until: string) {
-  if (!isValidIsoDate(until)) throw new Error(`Invalid snooze date "${until}" — use YYYY-MM-DD.`);
+const WEEKDAYS: Record<string, number> = {
+  sunday: 0,
+  monday: 1,
+  tuesday: 2,
+  wednesday: 3,
+  thursday: 4,
+  friday: 5,
+  saturday: 6,
+};
+
+/** A local-calendar date `n` days after `from` (midnight-anchored, DST-safe). */
+function addDays(from: Date, n: number): Date {
+  const r = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  r.setDate(r.getDate() + n);
+  return r;
+}
+
+/**
+ * The next occurrence of weekday `target` (0=Sun..6=Sat) STRICTLY after `from`.
+ * "Snooze until monday" on a Monday means *next* Monday — you never snooze to now.
+ */
+function nextWeekday(from: Date, target: number): Date {
+  const cur = new Date(from.getFullYear(), from.getMonth(), from.getDate()).getDay();
+  const delta = (target - cur + 7) % 7 || 7;
+  return addDays(from, delta);
+}
+
+/**
+ * Resolve a snooze value to a concrete `YYYY-MM-DD`. Accepts either an explicit
+ * ISO date or a natural preset — resolving presets server-side spares the caller
+ * date arithmetic (a common source of off-by-one / wrong-timezone snoozes).
+ * Presets (case/separator-insensitive): today, tomorrow, weekend (next Saturday),
+ * next week (next Monday), a weekday name (monday–sunday, next occurrence), or
+ * "in N days". Throws with an actionable message on anything else or a past date.
+ */
+export function resolveSnoozeDate(input: string, today: Date = new Date()): string {
+  const raw = input.trim();
+  const cutoff = todayIso(today);
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    if (!isValidIsoDate(raw)) throw new Error(`Invalid snooze date "${raw}" — use YYYY-MM-DD.`);
+    if (raw < cutoff) throw new Error(`Snooze date "${raw}" is in the past — pick today or later.`);
+    return raw;
+  }
+
+  const norm = raw.toLowerCase().replace(/[\s_-]+/g, " ").trim();
+  if (norm === "today") return todayIso(today);
+  if (norm === "tomorrow") return todayIso(addDays(today, 1));
+  if (norm === "weekend") return todayIso(nextWeekday(today, 6)); // next Saturday
+  if (norm === "next week") return todayIso(nextWeekday(today, 1)); // next Monday
+  if (norm in WEEKDAYS) return todayIso(nextWeekday(today, WEEKDAYS[norm]));
+  const inDays = norm.match(/^in (\d+) days?$/);
+  if (inDays) return todayIso(addDays(today, Number(inDays[1])));
+
+  throw new Error(
+    `Invalid snooze value "${raw}" — use a date (YYYY-MM-DD) or a preset: ` +
+      `today, tomorrow, weekend, next week, a weekday name (monday–sunday), or "in N days".`,
+  );
+}
+
+export async function snooze(gmail: Gmail, threadId: string, until: string, today = new Date()) {
+  const date = resolveSnoozeDate(until, today);
   const parentId = await gmail.ensureLabel(PARENT);
-  const dueId = await gmail.ensureLabel(datedLabel(until));
+  const dueId = await gmail.ensureLabel(datedLabel(date));
   await gmail.modifyLabels(threadId, [parentId, dueId], ["INBOX"]);
-  return { threadId, snoozedUntil: until };
+  return { threadId, snoozedUntil: date };
 }
 
 export async function unsnooze(gmail: Gmail, threadId: string) {

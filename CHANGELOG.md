@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Snooze presets.** The `snooze` tool's `until` argument now accepts natural presets in addition to
+  an explicit `YYYY-MM-DD` — `today`, `tomorrow`, `weekend` (next Saturday), `next week` (next Monday),
+  a weekday name (`monday`–`sunday`, resolved to the next occurrence), or `in N days`. Resolution happens
+  server-side, so the caller no longer has to compute the date (a common source of off-by-one and
+  wrong-timezone snoozes). Explicit dates behave exactly as before.
+
 ## [0.5.0] - 2026-08-06
 
 ### Added

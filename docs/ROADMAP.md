@@ -34,6 +34,10 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
   `token.json` is stored AES-256-GCM-encrypted (scrypt key), closing the `0o600`-is-a-no-op gap on
   Windows for file copies. Opt-in; defends against file theft, not same-user malware.
 
+- **Snooze presets** (unreleased on `main`): `snooze`'s `until` accepts natural presets
+  (`today`, `tomorrow`, `weekend`, `next week`, a weekday name, `in N days`) resolved server-side,
+  alongside explicit `YYYY-MM-DD`.
+
 ## Next
 
 1. **Multi-account** support — only if real demand shows up.
