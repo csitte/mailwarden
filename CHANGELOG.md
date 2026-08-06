@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   error instead of a misleading "not authorized" prompt. This defends against file theft, **not**
   against malware running as the same user (which can read the passphrase from the environment).
 
+### Changed
+- **`homepage`** now points to the canonical project page (`https://www.csitte.at/mailwarden/`)
+  instead of a GitHub README anchor, so npm and downstream scrapers (Glama, CodeGuilds) link there;
+  added a website badge to the README. Metadata only — no behavior change.
+
 ## [0.4.0] - 2026-08-04
 
 ### Added
