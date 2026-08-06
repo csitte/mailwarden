@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-06
+
 ### Added
 - **Optional token encryption at rest.** Set `MAILWARDEN_TOKEN_PASSPHRASE` to a passphrase and
   `token.json` is stored AES-256-GCM-encrypted with a scrypt-derived key, so a copy of the file
@@ -341,7 +343,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/csitte/mailwarden/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/csitte/mailwarden/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/csitte/mailwarden/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/csitte/mailwarden/compare/v0.1.10...v0.2.0
