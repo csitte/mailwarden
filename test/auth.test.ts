@@ -361,6 +361,108 @@ describe("token encryption (persist + load through getAuth)", () => {
   });
 });
 
+describe("tier-derived scopes + recorded-scope gating", () => {
+  const MODIFY = "https://www.googleapis.com/auth/gmail.modify";
+  const READONLY = "https://www.googleapis.com/auth/gmail.readonly";
+  const SETTINGS = "https://www.googleapis.com/auth/gmail.settings.basic";
+  let tmp: string;
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+    mocks.authenticate.mockReset();
+    if (tmp) await fs.rm(tmp, { recursive: true, force: true });
+  });
+
+  async function freshAuthWithTools(dir: string, tools?: string) {
+    vi.resetModules();
+    vi.stubEnv("MAILWARDEN_DIR", dir);
+    if (tools !== undefined) vi.stubEnv("MAILWARDEN_TOOLS", tools);
+    return await import("../src/auth.js");
+  }
+
+  it("requests modify+settings.basic by default and records the granted scopes", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
+    const granted = `${MODIFY} ${SETTINGS}`;
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt", scope: granted } });
+
+    const { getAuth } = await freshAuthWithTools(tmp); // no MAILWARDEN_TOOLS → all tiers
+    await getAuth(true);
+
+    expect(mocks.authenticate).toHaveBeenCalledWith(
+      expect.objectContaining({ scopes: [MODIFY, SETTINGS] }),
+    );
+    const stored = JSON.parse(await fs.readFile(path.join(tmp, "token.json"), "utf8"));
+    expect(stored.scope).toBe(granted); // recorded so registration can gate without a network call
+  });
+
+  it("requests only gmail.readonly for a read-only tier selection", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+
+    const { getAuth } = await freshAuthWithTools(tmp, "read");
+    await getAuth(true);
+
+    expect(mocks.authenticate).toHaveBeenCalledWith(
+      expect.objectContaining({ scopes: [READONLY] }),
+    );
+  });
+
+  it("hasFilterScope reflects the recorded token scopes (true / false / unknown)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    const writeToken = (scope?: string) =>
+      fs.writeFile(
+        path.join(tmp, "token.json"),
+        JSON.stringify({
+          type: "authorized_user",
+          client_id: "c",
+          client_secret: "s",
+          refresh_token: "rt",
+          ...(scope ? { scope } : {}),
+        }),
+      );
+
+    await writeToken(`${MODIFY} ${SETTINGS}`);
+    let mod = await freshAuthWithTools(tmp);
+    expect(mod.hasFilterScope()).toBe(true);
+    expect(mod.hasModifyScope()).toBe(true);
+
+    await writeToken(MODIFY); // granted, but without settings.basic
+    mod = await freshAuthWithTools(tmp);
+    expect(mod.hasFilterScope()).toBe(false);
+    expect(mod.hasModifyScope()).toBe(true);
+
+    await writeToken(READONLY); // read-only grant → can't write/sweep
+    mod = await freshAuthWithTools(tmp);
+    expect(mod.hasModifyScope()).toBe(false);
+    expect(mod.hasFilterScope()).toBe(false);
+
+    await writeToken(); // older token, no scope field
+    mod = await freshAuthWithTools(tmp);
+    expect(mod.hasFilterScope()).toBeUndefined();
+    expect(mod.hasModifyScope()).toBeUndefined();
+  });
+
+  it("hasFilterScope is undefined with no token or an encrypted one", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    expect((await freshAuthWithTools(tmp)).hasFilterScope()).toBeUndefined(); // no token.json yet
+
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify(encryptToken(JSON.stringify({ type: "authorized_user", refresh_token: "rt", scope: SETTINGS }), "pw")),
+    );
+    expect((await freshAuthWithTools(tmp)).hasFilterScope()).toBeUndefined(); // encrypted → not read at registration
+  });
+});
+
 describe("checkCredentials — --auth preflight (pure)", () => {
   const P = "/cfg/credentials.json";
 

@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
-import { getAuth } from "./auth.js";
+import { getAuth, hasModifyScope } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
@@ -39,6 +39,12 @@ async function main(): Promise<void> {
 
   // Cron-friendly: resurface due snoozes and exit.
   if (args.includes("--sweep")) {
+    if (hasModifyScope() === false) {
+      console.error(
+        "mailwarden: the stored token is read-only (no gmail.modify) — snooze sweeping writes labels. " +
+          "Re-run `mailwarden --auth` with the manage tier enabled (MAILWARDEN_TOOLS includes 'manage', the default).",
+      );
+    }
     const res = await sweepSnoozed(new Gmail(await getAuth(false)));
     const failNote = res.failedCount ? ` (${res.failedCount} message(s) failed — label kept)` : "";
     console.error(`✓ sweep: ${res.wokenCount} thread(s) resurfaced.${failNote}`);
@@ -56,6 +62,12 @@ async function main(): Promise<void> {
   // Optional snooze sweep while the (long-lived) server runs: once at startup
   // (the first interval tick would otherwise be an hour away), then hourly.
   if (process.env.MAILWARDEN_AUTO_SWEEP === "1") {
+    if (hasModifyScope() === false) {
+      console.error(
+        "mailwarden: MAILWARDEN_AUTO_SWEEP is on but the stored token is read-only (no gmail.modify) — " +
+          "the hourly snooze sweep will fail. Re-run `mailwarden --auth` with the manage tier enabled.",
+      );
+    }
     const sweep = async () => {
       try {
         await sweepSnoozed(new Gmail(await getAuth(false)));

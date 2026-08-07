@@ -3,20 +3,20 @@ import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
+import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
 
 /**
- * `gmail.modify` covers read + write (labels, archive, trash, mark-read, attachments).
- * `gmail.settings.basic` is needed for filter management (list/create/delete_filter);
- * it grants no send capability. Existing users who authorized before this scope was
- * added must re-run `--auth` once — filter calls until then surface an actionable
- * insufficient-scope message (see gmail.ts).
+ * The OAuth scopes to request are derived from the enabled tool tiers (see tiers.ts):
+ * `gmail.modify` for read+write, `gmail.settings.basic` only when the `filters` tier is on
+ * (it grants no send capability). Default (all tiers) = modify + settings.basic, as before.
+ * Users who authorized before a scope they now need must re-run `--auth`; until then a call
+ * needing the missing scope surfaces an actionable insufficient-scope message (see gmail.ts),
+ * and — when the granted scopes were recorded (see persistToken) — the filter tools are
+ * hidden up front rather than advertised and failing (see hasFilterScope + tools.ts).
  */
-const SCOPES = [
-  "https://www.googleapis.com/auth/gmail.modify",
-  "https://www.googleapis.com/auth/gmail.settings.basic",
-];
 
 const CONFIG_DIR = process.env.MAILWARDEN_DIR ?? path.join(os.homedir(), ".mailwarden");
 const TOKEN_PATH = path.join(CONFIG_DIR, "token.json");
@@ -88,6 +88,45 @@ export function decryptToken(enc: EncryptedToken, passphrase: string): string {
     decipher.update(Buffer.from(enc.ciphertext, "base64")),
     decipher.final(),
   ]).toString("utf8");
+}
+
+/**
+ * The scopes recorded in token.json, or null when unknown — no token yet, an older
+ * token written before scopes were recorded, or an encrypted token (whose scope lives
+ * inside the ciphertext; we deliberately don't decrypt synchronously at registration).
+ * Synchronous + network-free by design: it runs while the tool surface is being built.
+ */
+export function persistedScopes(): string[] | null {
+  try {
+    const parsed = JSON.parse(readFileSync(TOKEN_PATH, "utf8")) as { type?: unknown; scope?: unknown };
+    if (parsed.type === ENC_TYPE) return null; // encrypted → scope not readable without the key
+    return typeof parsed.scope === "string" && parsed.scope.trim()
+      ? parsed.scope.trim().split(/\s+/)
+      : null;
+  } catch {
+    return null; // missing / unreadable / not JSON
+  }
+}
+
+/**
+ * Whether the stored token carries the filter scope (gmail.settings.basic):
+ * true / false when the granted scopes are known, undefined when they aren't
+ * (see persistedScopes). tools.ts advertises the filter tier unless this is false.
+ */
+export function hasFilterScope(): boolean | undefined {
+  const scopes = persistedScopes();
+  return scopes === null ? undefined : scopes.includes(GMAIL_SETTINGS_BASIC);
+}
+
+/**
+ * Whether the stored token can write (gmail.modify) — true/false when the granted
+ * scopes are known, undefined when they aren't. Snooze sweeping (--sweep /
+ * MAILWARDEN_AUTO_SWEEP) writes, so a read-only grant can't sweep; index.ts warns
+ * up front instead of failing silently every hour.
+ */
+export function hasModifyScope(): boolean | undefined {
+  const scopes = persistedScopes();
+  return scopes === null ? undefined : scopes.includes(GMAIL_MODIFY);
 }
 
 async function loadSavedToken(): Promise<OAuth2Client | null> {
@@ -200,6 +239,10 @@ async function persistToken(client: OAuth2Client, cred: { client_id: string; cli
       client_id: cred.client_id,
       client_secret: cred.client_secret,
       refresh_token: client.credentials.refresh_token,
+      // Record the granted scopes so registration can gate scope-dependent tools
+      // (filters) without a network round-trip. Optional: google.auth.fromJSON
+      // ignores this extra field, and an older token without it reads as "unknown".
+      ...(client.credentials.scope ? { scope: client.credentials.scope } : {}),
     },
     null,
     2,
@@ -262,7 +305,8 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
   // previously saved token here — a stale/expired token.json (e.g. the 7-day refresh-token expiry
   // of a "Testing" OAuth consent screen, which surfaces as invalid_grant) would otherwise make
   // re-auth a silent no-op that never opens the browser and never replaces the dead token.
-  const client = (await authenticate({ scopes: SCOPES, keyfilePath: CRED_PATH })) as OAuth2Client;
+  const scopes = authScopesForTiers(resolveEnabledTiers(process.env));
+  const client = (await authenticate({ scopes, keyfilePath: CRED_PATH })) as OAuth2Client;
   if (!client.credentials.refresh_token) {
     throw new Error(
       "Consent completed but Google returned no refresh token — the old token was left untouched. " +

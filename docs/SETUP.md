@@ -51,7 +51,8 @@ still requires it — and one setting here matters more than all the others.
 4. **Scopes:** you can skip this page. mailwarden requests its scopes
    (`gmail.modify` for read + label/archive/trash, and `gmail.settings.basic` for filter
    management — neither grants a send capability) at authorization time; they do not need
-   to be pre-declared here.
+   to be pre-declared here. The exact scopes follow your enabled tool tiers (`MAILWARDEN_TOOLS`,
+   see the README) — the default requests both; a `read`-only setup asks only for `gmail.readonly`.
 5. If the console asks for **test users**, add your own Gmail address.
 6. **Now the important part — publish the app:** on the consent-screen overview, under
    **Publishing status**, click **Publish app** and confirm. The status must read

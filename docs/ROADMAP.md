@@ -29,8 +29,9 @@ What's planned, in rough priority. Informed by a survey of the Gmail MCP server 
   *which* mailbox is wired up before a bulk or filter action (read-only, no extra scope).
 - Read-only mode (`MAILWARDEN_READONLY=1`).
 - Tool tiers (unreleased on `main`): `MAILWARDEN_TOOLS` advertises only the named tiers
-  (`read`/`manage`/`filters`) for progressive disclosure and least-scope deployments;
-  `MAILWARDEN_READONLY=1` is shorthand for `MAILWARDEN_TOOLS=read`.
+  (`read`/`manage`/`filters`) for progressive disclosure; `MAILWARDEN_READONLY=1` is shorthand
+  for `MAILWARDEN_TOOLS=read`. The `--auth` OAuth scopes are derived from the enabled tiers, and the
+  filter tools are hidden when the stored token lacks `gmail.settings.basic` (recorded at auth time).
 - Step-by-step [setup guide](SETUP.md) covering the Google Cloud / OAuth consent dance,
   the "unverified app" screen, and the Testing-status 7-day token expiry.
 - Optional at-rest token encryption (unreleased on `main`): set `MAILWARDEN_TOKEN_PASSPHRASE` and

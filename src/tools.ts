@@ -1,10 +1,12 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Gmail, filterCriteriaToQuery } from "./gmail.js";
-import { getAuth } from "./auth.js";
+import { getAuth, hasFilterScope } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
+import { resolveEnabledTiers } from "./tiers.js";
 import { fenceOutput } from "./sanitize.js";
+export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
 async function client(): Promise<Gmail> {
@@ -97,42 +99,25 @@ const filterAppliedSchema = z.object({
 
 const okOutput = { ok: z.boolean() };
 
-/** The tool tiers a deployment can enable independently (progressive disclosure). */
-export type ToolTier = "read" | "manage" | "filters";
-const ALL_TIERS: readonly ToolTier[] = ["read", "manage", "filters"];
-
-/**
- * Which tool tiers to advertise, from the environment:
- *   - `MAILWARDEN_TOOLS` — comma-separated subset of read/manage/filters, authoritative
- *     whenever the variable is DEFINED (a defined-but-blank value is an error, not "default",
- *     so a misconfigured `MAILWARDEN_TOOLS=${UNSET}` never silently opens the full surface);
- *   - else `MAILWARDEN_READONLY=1` — the original binary switch, = the `read` tier only;
- *   - else all tiers.
- * `read` is the usual base (search/get_thread/…); enabling only manage/filters is allowed
- * but leaves the agent without read tools. Unknown or empty values throw at startup.
- */
-export function resolveEnabledTiers(env: NodeJS.ProcessEnv): Set<ToolTier> {
-  const configured = env.MAILWARDEN_TOOLS;
-  if (configured !== undefined) {
-    const requested = configured.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
-    const unknown = requested.filter((t) => !ALL_TIERS.includes(t as ToolTier));
-    if (requested.length === 0 || unknown.length) {
-      throw new Error(
-        `MAILWARDEN_TOOLS is invalid (${unknown.length ? `unknown: ${unknown.join(", ")}` : "empty"}). ` +
-          `Set it to a comma-separated subset of: ${ALL_TIERS.join(", ")}.`,
-      );
-    }
-    return new Set(requested as ToolTier[]);
-  }
-  if (env.MAILWARDEN_READONLY === "1") return new Set<ToolTier>(["read"]);
-  return new Set(ALL_TIERS);
-}
-
 export function registerTools(server: McpServer): void {
   const tiers = resolveEnabledTiers(process.env);
   if (tiers.has("read")) registerReadTools(server);
   if (tiers.has("manage")) registerManageTools(server);
-  if (tiers.has("filters")) registerFilterTools(server);
+  if (tiers.has("filters")) {
+    // Scope-gate the filters tier: advertise it only when the stored token
+    // actually carries gmail.settings.basic. `false` = a token known to lack it
+    // (skip + tell the user), `undefined` = unknown (no token yet, an old token
+    // without a recorded scope, or an encrypted one) → keep the prior behavior of
+    // advertising and letting the runtime insufficient-scope message guide re-auth.
+    if (hasFilterScope() === false) {
+      console.error(
+        "mailwarden: the 'filters' tier is enabled but the stored token lacks the " +
+          "gmail.settings.basic scope — filter tools are hidden. Re-run `mailwarden --auth` to grant it.",
+      );
+    } else {
+      registerFilterTools(server);
+    }
+  }
 }
 
 function registerReadTools(server: McpServer): void {

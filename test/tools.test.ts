@@ -3,12 +3,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { registerTools, resolveEnabledTiers } from "../src/tools.js";
-import { getAuth } from "../src/auth.js";
+import { getAuth, hasFilterScope } from "../src/auth.js";
 
 // getAuth is the only seam to the outside world. It may return a ready-made
 // gmail_v1.Gmail (anything with a `users` object) — the Gmail class then uses
-// it directly, so tools run end-to-end against a fake API.
-vi.mock("../src/auth.js", () => ({ getAuth: vi.fn() }));
+// it directly, so tools run end-to-end against a fake API. hasFilterScope gates
+// the filters tier; default vi.fn() returns undefined = "unknown" → advertised.
+vi.mock("../src/auth.js", () => ({ getAuth: vi.fn(), hasFilterScope: vi.fn() }));
 
 async function connect() {
   const server = new McpServer({ name: "mailwarden", version: "0.0.0" });
@@ -69,6 +70,16 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("search"); // no read tier
     expect(names).not.toContain("list_filters"); // no filters tier
     expect(names).toHaveLength(12);
+  });
+
+  it("hides the filters tier when the stored token is known to lack settings.basic", async () => {
+    (hasFilterScope as Mock).mockReturnValueOnce(false); // token without gmail.settings.basic
+    const client = await connect();
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).not.toContain("list_filters");
+    expect(names).not.toContain("create_filter");
+    expect(names).not.toContain("delete_filter");
+    expect(names).toHaveLength(18); // 21 - 3 filter tools
   });
 });
 

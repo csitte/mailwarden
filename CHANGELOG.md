@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Scope-derived, scope-gated tiers.** The OAuth scopes requested at `--auth` are now derived from the
+  enabled tool tiers: `read` asks for `gmail.readonly`, `manage` for `gmail.modify`, and
+  `gmail.settings.basic` is requested only when the `filters` tier is on (default, all tiers, is
+  unchanged: `gmail.modify` + `gmail.settings.basic`). The granted scopes are recorded in `token.json`,
+  and the filter tools are hidden at startup when the stored token lacks `gmail.settings.basic` (with a
+  hint to re-run `--auth`) instead of being advertised and failing at call time. Tokens written before
+  this (no recorded scope) and encrypted tokens are advertised as before, with the runtime
+  insufficient-scope message as the fallback.
 - **Tool tiers (`MAILWARDEN_TOOLS`).** Advertise only the tool tiers a deployment needs —
   `read` (read tools), `manage` (mailbox mutations, snooze, downloads), `filters` (filter CRUD).
   Comma-separated, default all three. Keeps the surface focused (progressive disclosure) — e.g.
