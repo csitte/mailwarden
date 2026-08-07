@@ -140,7 +140,7 @@ function peelTime(norm: string): { phrase: string; time?: { h: number; m: number
   if (toks.length >= 2) {
     const last = toks[toks.length - 1];
     // "9 am" / "9:30 pm" arrive as two tokens — try the last two joined first.
-    if ((last === "am" || last === "pm") && toks.length >= 2) {
+    if (last === "am" || last === "pm") {
       const t = parseTime(toks.slice(-2).join(""));
       if (t) return { phrase: toks.slice(0, -2).join(" "), time: t };
     }
@@ -185,6 +185,13 @@ export function resolveSnoozeDate(input: string, today: Date = new Date()): stri
     return key;
   }
 
+  // A loose date (single-digit month/day, e.g. 2026-2-3) misses the strict ISO
+  // regex above; point the user at the zero-padded form rather than letting it
+  // fall into the negative-offset guard below (whose "-2" would misfire).
+  if (/^\d{4}-\d{1,2}-\d{1,2}/.test(raw)) {
+    throw new Error(`Invalid snooze date "${raw}" — use zero-padded YYYY-MM-DD (e.g. 2026-06-01).`);
+  }
+
   // Presets carry no signed numbers; ISO dates already returned above, so a
   // leftover "-<digit>" is a negative offset. Reject it — normalization below
   // folds "-" into a space, which would otherwise silently flip "in -1 days"
@@ -195,16 +202,25 @@ export function resolveSnoozeDate(input: string, today: Date = new Date()): stri
 
   const norm = raw.toLowerCase().replace(/[\s_-]+/g, " ").trim();
 
+  // An absurd offset ("in 999999999 days/hours") overflows Date arithmetic into a
+  // "NaN…" / year-100000 key that would never come due — silently stranding the
+  // archived thread. Validate every resolved key and reject the out-of-range ones.
+  const tooFar = () => new Error(`Snooze target "${raw}" is too far in the future.`);
+
   // "in N hours" resolves relative to the current minute (a timestamped key).
   const inHours = norm.match(/^in (\d+) hours?$/);
-  if (inHours) return localStamp(new Date(today.getTime() + Number(inHours[1]) * 3600_000));
+  if (inHours) {
+    const key = localStamp(new Date(today.getTime() + Number(inHours[1]) * 3600_000));
+    if (!isValidSnoozeKey(key)) throw tooFar();
+    return key;
+  }
 
   const { phrase, time } = peelTime(norm);
   const base = resolveDatePreset(phrase, today);
   if (base) {
-    if (!time) return todayIso(base);
-    const key = stampKey(todayIso(base), time);
-    if (key < now) throw past(formatSnoozeKey(key));
+    const key = time ? stampKey(todayIso(base), time) : todayIso(base);
+    if (!isValidSnoozeKey(key)) throw tooFar();
+    if (time && key < now) throw past(formatSnoozeKey(key));
     return key;
   }
 

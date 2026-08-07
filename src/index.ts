@@ -7,6 +7,7 @@ import { getAuth, hasModifyScope } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
+import { resolveEnabledTiers } from "./tiers.js";
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
@@ -18,6 +19,11 @@ function makeServer(): McpServer {
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
+
+  // Validate MAILWARDEN_TOOLS once at boot so a misconfigured value fails fast and
+  // cleanly (via main().catch) in every mode — including --http, where registration
+  // otherwise runs per-request and a bad value would hang the first request instead.
+  resolveEnabledTiers(process.env);
 
   // One-time interactive OAuth consent.
   if (args.includes("--auth")) {

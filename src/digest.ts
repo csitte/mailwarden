@@ -111,8 +111,8 @@ export function buildDigest(
       if (SKIP_LABELS.has(id)) continue;
       // Count by resolved display name so two ids that render the same (e.g. a
       // user label "Important" and the system IMPORTANT) merge into one row.
-      const name = labelName(id);
-      labels.set(name, (labels.get(name) ?? 0) + 1);
+      const labelDisplay = labelName(id);
+      labels.set(labelDisplay, (labels.get(labelDisplay) ?? 0) + 1);
     }
   }
 

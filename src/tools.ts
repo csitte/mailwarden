@@ -270,6 +270,12 @@ function registerReadTools(server: McpServer): void {
 }
 
 function registerManageTools(server: McpServer): void {
+  // Unlike the filters tier, manage is NOT scope-gated: gmail.modify is the default
+  // grant so almost every token has it, and hasModifyScope() is `undefined` (unknown)
+  // for the common encrypted/old-token case — gating here would either do nothing or
+  // hide tools from users who can actually write. A genuine mismatch (broader runtime
+  // MAILWARDEN_TOOLS than the token was authorized for) fails gracefully at call time
+  // via the insufficient-scope message in gmail.ts; the sweep paths warn in index.ts.
   // ---- Mailbox actions ---- (the `manage` tier: mutations, snooze, downloads)
   server.registerTool(
     "create_label",

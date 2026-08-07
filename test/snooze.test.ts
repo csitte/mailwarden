@@ -114,6 +114,19 @@ describe("resolveSnoozeDate", () => {
     expect(() => resolveSnoozeDate("in -1 days", today)).toThrow(/positive/);
     expect(() => resolveSnoozeDate("in -3 hours", today)).toThrow(/positive/);
   });
+
+  it("rejects an absurd offset instead of stranding the thread on a NaN key", () => {
+    // Overflowing Date arithmetic would otherwise yield a key that never comes due.
+    expect(() => resolveSnoozeDate("in 999999999 days", today)).toThrow(/too far/);
+    expect(() => resolveSnoozeDate("in 999999999 hours", today)).toThrow(/too far/);
+    // …but a large-yet-valid offset still resolves.
+    expect(resolveSnoozeDate("in 3000 days", today)).toBe("2034-09-06");
+  });
+
+  it("points a loose (non-zero-padded) date at the correct format", () => {
+    expect(() => resolveSnoozeDate("2026-2-3", today)).toThrow(/zero-padded YYYY-MM-DD/);
+    expect(() => resolveSnoozeDate("2026-6-1", today)).toThrow(/zero-padded YYYY-MM-DD/);
+  });
 });
 
 describe("resolveSnoozeDate — time of day", () => {
