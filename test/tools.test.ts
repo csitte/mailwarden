@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { registerTools } from "../src/tools.js";
+import { registerTools, resolveEnabledTiers } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 
 // getAuth is the only seam to the outside world. It may return a ready-made
@@ -48,6 +48,64 @@ describe("registerTools — tool surface", () => {
       "triage_digest",
     ]);
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true);
+  });
+
+  it("MAILWARDEN_TOOLS selects tiers — e.g. read + filters, no manage tools", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,filters");
+    const client = await connect();
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).toContain("search"); // read tier
+    expect(names).toContain("create_filter"); // filters tier
+    expect(names).not.toContain("archive"); // manage tier excluded
+    expect(names).not.toContain("snooze");
+    expect(names).toHaveLength(9); // 6 read + 3 filters
+  });
+
+  it("MAILWARDEN_TOOLS can register a single tier on its own", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "manage");
+    const client = await connect();
+    const names = (await client.listTools()).tools.map((t) => t.name);
+    expect(names).toContain("snooze");
+    expect(names).not.toContain("search"); // no read tier
+    expect(names).not.toContain("list_filters"); // no filters tier
+    expect(names).toHaveLength(12);
+  });
+});
+
+describe("resolveEnabledTiers", () => {
+  it("defaults to all tiers when nothing is set", () => {
+    expect(resolveEnabledTiers({})).toEqual(new Set(["read", "manage", "filters"]));
+  });
+  it("maps MAILWARDEN_READONLY=1 to the read tier only", () => {
+    expect(resolveEnabledTiers({ MAILWARDEN_READONLY: "1" })).toEqual(new Set(["read"]));
+  });
+  it("parses MAILWARDEN_TOOLS case- and space-insensitively", () => {
+    expect(resolveEnabledTiers({ MAILWARDEN_TOOLS: " read , FILTERS " })).toEqual(
+      new Set(["read", "filters"]),
+    );
+  });
+  it("lets MAILWARDEN_TOOLS win over MAILWARDEN_READONLY", () => {
+    expect(
+      resolveEnabledTiers({ MAILWARDEN_TOOLS: "read,manage", MAILWARDEN_READONLY: "1" }),
+    ).toEqual(new Set(["read", "manage"]));
+  });
+  it("dedups repeated tiers", () => {
+    expect(resolveEnabledTiers({ MAILWARDEN_TOOLS: "read,read,manage" })).toEqual(
+      new Set(["read", "manage"]),
+    );
+  });
+  it("throws on an unknown or empty tier list", () => {
+    expect(() => resolveEnabledTiers({ MAILWARDEN_TOOLS: "read,bogus" })).toThrow(/unknown/);
+    expect(() => resolveEnabledTiers({ MAILWARDEN_TOOLS: "  ,  " })).toThrow(/empty/);
+  });
+  it("treats a defined-but-blank value as an error, not a silent 'all tiers'", () => {
+    // MAILWARDEN_TOOLS=${UNSET} expands to "" — must fail closed, not open the full surface.
+    expect(() => resolveEnabledTiers({ MAILWARDEN_TOOLS: "" })).toThrow(/empty/);
+    expect(() => resolveEnabledTiers({ MAILWARDEN_TOOLS: "   " })).toThrow(/empty/);
+    // Even alongside READONLY, a defined-but-blank MAILWARDEN_TOOLS is authoritative → error.
+    expect(() => resolveEnabledTiers({ MAILWARDEN_TOOLS: "", MAILWARDEN_READONLY: "1" })).toThrow(
+      /empty/,
+    );
   });
 });
 

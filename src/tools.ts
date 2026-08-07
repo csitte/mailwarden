@@ -97,7 +97,45 @@ const filterAppliedSchema = z.object({
 
 const okOutput = { ok: z.boolean() };
 
+/** The tool tiers a deployment can enable independently (progressive disclosure). */
+export type ToolTier = "read" | "manage" | "filters";
+const ALL_TIERS: readonly ToolTier[] = ["read", "manage", "filters"];
+
+/**
+ * Which tool tiers to advertise, from the environment:
+ *   - `MAILWARDEN_TOOLS` — comma-separated subset of read/manage/filters, authoritative
+ *     whenever the variable is DEFINED (a defined-but-blank value is an error, not "default",
+ *     so a misconfigured `MAILWARDEN_TOOLS=${UNSET}` never silently opens the full surface);
+ *   - else `MAILWARDEN_READONLY=1` — the original binary switch, = the `read` tier only;
+ *   - else all tiers.
+ * `read` is the usual base (search/get_thread/…); enabling only manage/filters is allowed
+ * but leaves the agent without read tools. Unknown or empty values throw at startup.
+ */
+export function resolveEnabledTiers(env: NodeJS.ProcessEnv): Set<ToolTier> {
+  const configured = env.MAILWARDEN_TOOLS;
+  if (configured !== undefined) {
+    const requested = configured.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+    const unknown = requested.filter((t) => !ALL_TIERS.includes(t as ToolTier));
+    if (requested.length === 0 || unknown.length) {
+      throw new Error(
+        `MAILWARDEN_TOOLS is invalid (${unknown.length ? `unknown: ${unknown.join(", ")}` : "empty"}). ` +
+          `Set it to a comma-separated subset of: ${ALL_TIERS.join(", ")}.`,
+      );
+    }
+    return new Set(requested as ToolTier[]);
+  }
+  if (env.MAILWARDEN_READONLY === "1") return new Set<ToolTier>(["read"]);
+  return new Set(ALL_TIERS);
+}
+
 export function registerTools(server: McpServer): void {
+  const tiers = resolveEnabledTiers(process.env);
+  if (tiers.has("read")) registerReadTools(server);
+  if (tiers.has("manage")) registerManageTools(server);
+  if (tiers.has("filters")) registerFilterTools(server);
+}
+
+function registerReadTools(server: McpServer): void {
   // ---- Read / find ----
   server.registerTool(
     "search",
@@ -244,11 +282,10 @@ export function registerTools(server: McpServer): void {
     },
   );
 
-  // With MAILWARDEN_READONLY=1 only the read tools above exist — nothing that
-  // can change the mailbox or write files is even advertised to clients.
-  if (process.env.MAILWARDEN_READONLY === "1") return;
+}
 
-  // ---- Mailbox actions ----
+function registerManageTools(server: McpServer): void {
+  // ---- Mailbox actions ---- (the `manage` tier: mutations, snooze, downloads)
   server.registerTool(
     "create_label",
     {
@@ -494,9 +531,12 @@ export function registerTools(server: McpServer): void {
     async () => ok(await sweepSnoozed(await client())),
   );
 
+}
+
+function registerFilterTools(server: McpServer): void {
   // ---- Filters (server-side auto-triage rules) ----
-  // Not registered in MAILWARDEN_READONLY mode: filter management needs the
-  // broader gmail.settings.basic scope, which a read-only deployment shouldn't require.
+  // Its own `filters` tier: filter management needs the broader gmail.settings.basic
+  // scope, which a read-only or triage-only deployment shouldn't have to grant.
   server.registerTool(
     "list_filters",
     {

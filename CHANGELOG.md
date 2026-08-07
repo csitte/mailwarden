@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tool tiers (`MAILWARDEN_TOOLS`).** Advertise only the tool tiers a deployment needs —
+  `read` (read tools), `manage` (mailbox mutations, snooze, downloads), `filters` (filter CRUD).
+  Comma-separated, default all three. Keeps the surface focused (progressive disclosure) — e.g.
+  `read,manage` skips filter management, the only tier whose tools need `gmail.settings.basic`.
+  `MAILWARDEN_READONLY=1` is now shorthand for `MAILWARDEN_TOOLS=read` (unchanged behavior);
+  `MAILWARDEN_TOOLS` is authoritative when defined (a blank value is a startup error, not "all").
 - **`triage_digest` tool.** A read-only, structured overview of a mailbox slice (default `in:inbox`)
   for triage *decisions* rather than reading: top senders (with per-sender unread), label buckets,
   age buckets (`last24h`/`last7d`/`last30d`/`older`/`undated`), and unread + attachment counts. Samples

@@ -106,8 +106,15 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
   the same rule: it can label, archive, trash, star or mark mail, but **never** creates a *forwarding*
   filter (which would be an exfiltration path). `list_filters` still surfaces any forwarding filter
   already on the account, so you can spot one.
-- **Read-only mode.** Set `MAILWARDEN_READONLY=1` and only the read tools (`search`, `get_thread`,
-  `list_labels`, `list_snoozed`, `get_profile`, `triage_digest`) are registered — nothing that can change the mailbox or write
+- **Tool tiers (progressive disclosure).** `MAILWARDEN_TOOLS` advertises only the tiers you name —
+  `read` (the read tools), `manage` (mailbox mutations, snooze, downloads), `filters` (server-side
+  filter CRUD, the only tier whose tools need `gmail.settings.basic`). Default is all three; e.g.
+  `read,manage` gives a full triage surface without filter management. Keeps the tool list focused for
+  the agent; to also narrow the *granted* OAuth scopes, restrict consent when you run `--auth` (the
+  scopes mailwarden requests are currently fixed regardless of tier).
+- **Read-only mode.** Set `MAILWARDEN_READONLY=1` (shorthand for `MAILWARDEN_TOOLS=read`) and only the
+  read tools (`search`, `get_thread`, `list_labels`, `list_snoozed`, `get_profile`, `triage_digest`)
+  are registered — nothing that can change the mailbox or write
   files is even advertised to clients (the filter tools, which need the broader `gmail.settings.basic`
   scope, are excluded too). Recommended for shared/HTTP deployments that only triage.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
@@ -186,7 +193,8 @@ node dist/index.js --auth
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
-| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest) |
+| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest). Shorthand for `MAILWARDEN_TOOLS=read` |
+| `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). E.g. `read,manage` drops the filter tools — the only ones whose use needs the `gmail.settings.basic` scope |
 | `PORT` | HTTP port (default 8787) |
 | `MAILWARDEN_HOST` | HTTP bind address (default `127.0.0.1`; set e.g. `0.0.0.0` for remote hosting) |
 | `MAILWARDEN_TOKEN` | bearer token for the HTTP endpoint — **required** for `--http` unless overridden |
