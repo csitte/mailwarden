@@ -208,6 +208,19 @@ overrides: `MAILWARDEN_CREDENTIALS` (file path) or `MAILWARDEN_DIR` (directory).
 the file is the *OAuth client* JSON (top-level key `"installed"`) — an API key or a service
 account JSON won't work.
 
+### The filter tools are missing, or a call fails with "missing a Gmail scope this operation needs"
+
+Scopes are tied to tool tiers. Filter management (`list_filters`/`create_filter`/`delete_filter`)
+needs `gmail.settings.basic`; write actions (label/archive/trash/snooze, and the snooze sweep) need
+`gmail.modify`. If your stored token was granted before you needed a scope — or you authorized with a
+narrower `MAILWARDEN_TOOLS` (e.g. `read` or `read,manage`) than you now run with — mailwarden either
+**hides the filter tools at startup** (with a one-line stderr hint) or, for older tokens that predate
+the recorded-scope check, surfaces the message **at call time**. A read-only grant likewise can't run
+the snooze sweep (`--sweep` / `MAILWARDEN_AUTO_SWEEP`), and warns at startup. Fix in all cases: run
+`npx -y mailwarden --auth` with the tiers you need enabled — the default (`MAILWARDEN_TOOLS` unset)
+grants `gmail.modify` + `gmail.settings.basic` and covers everything. See the README "Tool tiers"
+section for how tiers map to tools and scopes.
+
 ### Authorized the wrong Google account
 
 Revoke the token at <https://myaccount.google.com/permissions> for the wrong account (or
