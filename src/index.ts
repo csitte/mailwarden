@@ -18,41 +18,75 @@ function makeServer(): McpServer {
   return server;
 }
 
-/** Read a `--flag value` / `--flag=value` option from argv, or undefined if absent. */
-function readFlagValue(args: string[], flag: string): string | undefined {
-  const i = args.indexOf(flag);
-  if (i !== -1) return args[i + 1];
-  const eq = args.find((a) => a.startsWith(`${flag}=`));
-  return eq ? eq.slice(flag.length + 1) : undefined;
+/**
+ * Read an explicit `--account <name>` / `--account=<name>` from argv (undefined if absent), and
+ * validate the name. Throws — rather than silently defaulting — on a value-less `--account` (last
+ * arg, or immediately followed by another flag), so a dropped name never lands auth in the wrong
+ * token file.
+ */
+function readAccountArg(args: string[]): string | undefined {
+  const i = args.indexOf("--account");
+  if (i !== -1) {
+    const v = args[i + 1];
+    if (v === undefined || v.startsWith("-")) {
+      throw new Error("`--account` needs a value, e.g. `--account work`.");
+    }
+    return sanitizeAccount(v);
+  }
+  const eq = args.find((a) => a.startsWith("--account="));
+  if (eq !== undefined) return sanitizeAccount(eq.slice("--account=".length)); // empty ⇒ sanitizeAccount throws
+  return undefined;
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // Validate MAILWARDEN_TOOLS + MAILWARDEN_ACCOUNT once at boot so a misconfigured value fails fast
-  // and cleanly (via main().catch) in every mode — including --http, where registration otherwise
-  // runs per-request and a bad value would hang the first request instead.
+  // Validate MAILWARDEN_TOOLS once at boot so a misconfigured value fails fast in every mode —
+  // including --http, where registration otherwise runs per-request and a bad value would hang the
+  // first request instead.
   resolveEnabledTiers(process.env);
-  activeAccount();
 
-  // Setup doctor: diagnose credentials/token/scopes/live-call and exit.
+  // Resolve an explicit `--account <name>` once and make it the account for this WHOLE invocation
+  // (so --auth, --check, --sweep and the running server all agree). Setting the env is the single
+  // source of truth downstream (activeAccount/tokenPath/getAuth/runDoctor all read it).
+  const accountArg = readAccountArg(args);
+  if (accountArg !== undefined) process.env.MAILWARDEN_ACCOUNT = accountArg;
+
+  // Setup doctor: diagnose credentials/token/scopes/live-call and exit. Runs BEFORE the account
+  // env is validated for other modes, so a malformed MAILWARDEN_ACCOUNT is reported by the doctor
+  // (which tolerates it) rather than crashing the very command meant to diagnose it.
   if (args.includes("--check") || args.includes("--doctor")) {
     process.exitCode = await runDoctor();
     return;
   }
 
-  // One-time interactive OAuth consent. `--account <name>` stores under a named token file
-  // (token.<name>.json) for multi-account setups; otherwise MAILWARDEN_ACCOUNT / the default.
+  // Validate MAILWARDEN_ACCOUNT for the remaining (non-doctor) modes — fail fast on a bad value.
+  const account = activeAccount();
+
+  // One-time interactive OAuth consent. Named accounts go via `--account <name>` (→ token.<name>.json);
+  // otherwise MAILWARDEN_ACCOUNT / the default token.json.
   if (args.includes("--auth")) {
-    const accountArg = readFlagValue(args, "--account");
-    const account = accountArg !== undefined ? sanitizeAccount(accountArg) : activeAccount();
-    const client = await getAuth(true, account);
+    // A bare positional (e.g. `mailwarden --auth work`) is almost certainly a forgotten `--account`;
+    // refuse it rather than silently authorizing — and overwriting — the DEFAULT token.
+    const stray = args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--account");
+    if (stray) {
+      throw new Error(
+        `Unexpected argument '${stray}'. To authorize a named account use: mailwarden --auth --account <name>.`,
+      );
+    }
+    const client = await getAuth(true);
     // Prove the credential works end-to-end before declaring success — catches a
     // consent that completed but can't actually call Gmail (wrong scope, etc.).
     try {
       const { emailAddress } = await new Gmail(client).getProfile();
       const label = account ? ` (account: ${account})` : "";
       console.error(`✓ mailwarden authorized as ${emailAddress}${label} — refresh token stored.`);
+      if (account) {
+        console.error(
+          `  To use this account, start the server with MAILWARDEN_ACCOUNT=${account} ` +
+            "(add it to the MCP server's env).",
+        );
+      }
     } catch (err) {
       console.error(
         "⚠ Token was stored, but a test call to Gmail failed:",

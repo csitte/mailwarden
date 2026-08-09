@@ -152,6 +152,24 @@ const ICON: Record<CheckStatus, string> = { ok: "✓", warn: "!", fail: "✗" };
 
 /** Run all checks against the real environment, print the report, return an exit code. */
 export async function runDoctor(): Promise<number> {
+  console.error("mailwarden --check\n");
+
+  // Resolve the account first, defensively: a malformed MAILWARDEN_ACCOUNT is exactly the kind of
+  // misconfiguration --check exists to diagnose, so report it here instead of throwing (which is why
+  // index.ts runs --check before validating the account for other modes).
+  let account: string | null;
+  try {
+    account = activeAccount();
+  } catch (err) {
+    console.error(`  ✗ Account: ${err instanceof Error ? err.message : String(err)}`);
+    console.error("\n✗ Setup has problems — fix MAILWARDEN_ACCOUNT and re-run.");
+    return 1;
+  }
+  const others = discoverAccounts().filter((a) => a !== account);
+  console.error(`  Account: ${account ?? "(default)"}`);
+  if (others.length) console.error(`  Other accounts found: ${others.join(", ")}`);
+  console.error("");
+
   // Credentials (reuse the same preflight --auth uses).
   let credRaw: string | null;
   try {
@@ -162,12 +180,14 @@ export async function runDoctor(): Promise<number> {
   const cred = checkCredentials(credRaw, CRED_PATH);
 
   const tokenState = tokenFileState();
+  const passphraseSet = Boolean(process.env.MAILWARDEN_TOKEN_PASSPHRASE);
   const enabledTiers = resolveEnabledTiers(process.env);
   const requiredScopes = authScopesForTiers(enabledTiers);
 
-  // Live smoke test — only when there is plausibly a usable token to try.
+  // Live smoke test — only when the token is plausibly usable. Skip an encrypted token with no
+  // passphrase: the Token check already fails with the fix, and the live call would just repeat it.
   let profile: DoctorInputs["profile"] = null;
-  if (tokenState === "plaintext" || tokenState === "encrypted") {
+  if (tokenState === "plaintext" || (tokenState === "encrypted" && passphraseSet)) {
     try {
       const { emailAddress } = await new Gmail(await getAuth(false)).getProfile();
       profile = { ok: true, email: emailAddress };
@@ -181,19 +201,13 @@ export async function runDoctor(): Promise<number> {
     tokenPath: tokenPath(),
     cred,
     tokenState,
-    passphraseSet: Boolean(process.env.MAILWARDEN_TOKEN_PASSPHRASE),
+    passphraseSet,
     grantedScopes: persistedScopes(),
     enabledTiers,
     requiredScopes,
     profile,
   });
 
-  const account = activeAccount();
-  const others = discoverAccounts().filter((a) => a !== account);
-  console.error("mailwarden --check\n");
-  console.error(`  Account: ${account ?? "(default)"}`);
-  if (others.length) console.error(`  Other accounts found: ${others.join(", ")}`);
-  console.error("");
   for (const c of checks) console.error(`  ${ICON[c.status]} ${c.name}: ${c.detail}`);
   const code = reportExitCode(checks);
   console.error(`\n${code === 0 ? "✓ Setup looks good." : "✗ Setup has problems — see the ✗ lines above."}`);

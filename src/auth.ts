@@ -36,7 +36,9 @@ const ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 export function sanitizeAccount(name: string): string {
   const t = name.trim();
-  if (t === "." || t === ".." || !ACCOUNT_RE.test(t)) {
+  // ACCOUNT_RE requires an alphanumeric first char, so "", ".", ".." and any path separator
+  // ("/", "\") are already rejected — no dot/traversal special-casing needed.
+  if (!ACCOUNT_RE.test(t)) {
     throw new Error(
       `Invalid MAILWARDEN_ACCOUNT "${name}" — use letters, digits, dot, dash or underscore ` +
         "(must start alphanumeric, no path separators).",
@@ -339,13 +341,13 @@ async function persistToken(
 let cachedClient: OAuth2Client | null = null;
 
 /**
- * Returns an authenticated OAuth2 client.
- * - interactive=false (server runtime): loads the stored refresh token for the MAILWARDEN_ACCOUNT
- *   in effect, else throws.
- * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it under
- *   `account` (defaults to MAILWARDEN_ACCOUNT) — this is the only place the `account` argument is used.
+ * Returns an authenticated OAuth2 client for the account in effect (MAILWARDEN_ACCOUNT, or the
+ * default). The CLI sets that env from `--account` up front, so account selection is uniform across
+ * load and store — there is no per-call account argument to diverge from it.
+ * - interactive=false (server runtime): loads the stored refresh token, else throws.
+ * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it.
  */
-export async function getAuth(interactive = false, account: string | null = activeAccount()): Promise<OAuth2Client> {
+export async function getAuth(interactive = false): Promise<OAuth2Client> {
   if (!interactive) {
     if (cachedClient) return cachedClient;
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
@@ -389,7 +391,7 @@ export async function getAuth(interactive = false, account: string | null = acti
         "then run `mailwarden --auth` again.",
     );
   }
-  await persistToken(client, cred, account);
+  await persistToken(client, cred, activeAccount());
   cachedClient = null; // a later non-interactive load re-reads the freshly stored token
   return client;
 }
