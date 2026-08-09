@@ -128,6 +128,9 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
 
 ## Security & privacy
 
+> For the full threat model — trust boundary, per-threat mitigations, explicit non-goals, and how to
+> report a vulnerability — see **[SECURITY.md](SECURITY.md)**. The highlights:
+
 - **No telemetry.** Nothing phones home — no analytics, no crash reporting, no tracking.
 - **No open ports by default.** stdio only. The optional `--http` listener binds to `127.0.0.1`
   (not the LAN) and **refuses to start without a `MAILWARDEN_TOKEN`** bearer token — set
