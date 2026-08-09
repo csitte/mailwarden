@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-09
+
+Non-breaking robustness and edge-case hardening from a full-codebase review. No API or tool changes.
+
+### Fixed
+- **Search survives a concurrently-deleted thread.** A single `threads.get` that fails because a hit
+  vanished between the list snapshot and the fetch (deleted or moved — e.g. by another client or an
+  auto-trashing filter) no longer aborts the whole search; that one candidate is skipped instead. The
+  underlying `threads.list` stays unguarded, so a systemic auth/network failure still surfaces.
+- **Transient network failures are retried.** `withBackoff` now retries network-level errors that carry
+  no HTTP status (`ECONNRESET`, `ETIMEDOUT`, `EAI_AGAIN`, `EPIPE`, `"socket hang up"`), not only
+  `429`/`5xx` — a dropped socket mid-sweep rides out the blip instead of failing immediately.
+- **Snooze accepts hyphen-separated presets.** The negative-offset guard treats `-` as a sign only at a
+  token boundary, so `in-3-days` and `monday-9am` are parsed as intended rather than rejected as
+  negative offsets (a genuine `in -3 days` is still refused).
+- **`--http` rejects a malformed `PORT`.** A non-numeric `PORT` now fails fast with an actionable
+  message instead of passing `NaN` to `listen()` and silently binding a random port.
+- **`unsnooze` preserves manual sub-labels.** It strips only the parent and real dated snooze labels,
+  leaving a hand-made bucket like `MCP/Snoozed/Archiv` intact — the same validity rule `sweep_snoozed`
+  already uses.
+
+### Changed
+- **`list_snoozed` fetches subjects concurrently** (bounded pool) instead of one thread at a time,
+  speeding up large snooze backlogs.
+
 ## [0.6.0] - 2026-08-07
 
 ### Added
