@@ -33,6 +33,25 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 
 `search` goes one step further than the raw API: Gmail's `threads.list` index is sometimes *loose* for read-state operators — `is:unread` is silently dropped in some operator combinations (e.g. `category:updates is:unread -in:inbox` returns read mail too). Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
 
+## Compared to other Gmail MCP servers
+
+Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden`, and one deliberate omission is a security feature, not a gap.
+
+| Capability | **mailwarden** | [taylorwilsdon](https://github.com/taylorwilsdon/google_workspace_mcp) | [Google official](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | mcpemails.com |
+|---|:--:|:--:|:--:|:--:|
+| **Snooze** — defer a thread back to the inbox on a date/time or preset | ✅ | — | — | — |
+| **Search-result re-verification** — drops the index's false positives against live labels | ✅ | — | — | — |
+| **Sweep / bulk over a query** — one action across every matching thread | ✅ 1000/req, partial-success | — | — | ⚠️ bulk organize (no query re-verification) |
+| **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose at all | ❌ sends | ⚠️ draft-only | ❌ sends |
+| **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | — | ⚠️ scope split | ⚠️ scoped keys |
+| **Token encryption at rest** (optional) | ✅ AES-256-GCM | ✅ | n/a (hosted) | ✅ AES-256-GCM |
+| **Runs fully local — no cloud copy of your mail** | ✅ | ✅ | ❌ hosted | ❌ SaaS |
+| **Structured outputs** — every tool declares an `outputSchema` | ✅ | — | — | — |
+
+<sub>Snapshot as of August 2026, from each project's public docs/repo; `—` = not offered / not documented. Send capability is listed as a security property: `mailwarden`'s lack of it is intentional (see [Security & privacy](#security--privacy)).</sub>
+
+The moat isn't any single row — it's **snooze + live re-verification together**: an actual inbox-workflow layer that acts on the mailbox's *current* state, not a cached snapshot. Where competitors have caught up (bulk actions, at-rest encryption) it's noted honestly above.
+
 ## Tools
 
 | Tool | What it does |
