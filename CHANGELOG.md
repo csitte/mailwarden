@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`mailwarden --check` (setup doctor).** Diagnoses the OAuth setup end to end — `credentials.json`
+  shape, token presence/encryption, whether the granted scopes cover the enabled tiers, and one live
+  Gmail call — printing a concrete fix for anything wrong and exiting non-zero on failure (usable in
+  CI/health checks). `--doctor` is an alias.
+- **Runnable re-verification demo** (`scripts/demo-reverify.mjs`). Credential-free proof that
+  `search()` drops the Gmail index's `is:unread` false positives; asserts its outcome and is linked
+  from the README.
+
 ## [0.6.1] - 2026-08-09
 
 Non-breaking robustness and edge-case hardening from a full-codebase review. No API or tool changes.

@@ -189,6 +189,16 @@ First time setting up a Google OAuth app? Follow the **[step-by-step setup guide
    Scopes requested: `gmail.modify` (read + label/archive/trash) and `gmail.settings.basic`
    (filter management — grants no send capability). If you authorized a version before filters
    existed, re-run `--auth` once to grant the added scope.
+4. **Verify the setup** any time with the built-in doctor:
+   ```bash
+   npx -y mailwarden --check
+   ```
+   It checks `credentials.json`, whether a token exists (and if it's encrypted), whether the
+   granted scopes cover your enabled tiers, and makes one live Gmail call to prove the token
+   still works — printing a concrete fix for anything that's wrong, and exiting non-zero if so
+   (handy in CI/health checks). Diagnoses the common traps: no/`wrong` credentials file, never
+   authorized, an encrypted token with no `MAILWARDEN_TOKEN_PASSPHRASE`, a missing scope, or the
+   7-day "Testing"-consent token expiry.
 
 ## Connect
 

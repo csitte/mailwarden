@@ -8,6 +8,7 @@ import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
 import { resolveEnabledTiers } from "./tiers.js";
+import { runDoctor } from "./doctor.js";
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
@@ -24,6 +25,12 @@ async function main(): Promise<void> {
   // cleanly (via main().catch) in every mode — including --http, where registration
   // otherwise runs per-request and a bad value would hang the first request instead.
   resolveEnabledTiers(process.env);
+
+  // Setup doctor: diagnose credentials/token/scopes/live-call and exit.
+  if (args.includes("--check") || args.includes("--doctor")) {
+    process.exitCode = await runDoctor();
+    return;
+  }
 
   // One-time interactive OAuth consent.
   if (args.includes("--auth")) {

@@ -18,9 +18,9 @@ import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_B
  * hidden up front rather than advertised and failing (see hasFilterScope + tools.ts).
  */
 
-const CONFIG_DIR = process.env.MAILWARDEN_DIR ?? path.join(os.homedir(), ".mailwarden");
-const TOKEN_PATH = path.join(CONFIG_DIR, "token.json");
-const CRED_PATH = process.env.MAILWARDEN_CREDENTIALS ?? path.join(CONFIG_DIR, "credentials.json");
+export const CONFIG_DIR = process.env.MAILWARDEN_DIR ?? path.join(os.homedir(), ".mailwarden");
+export const TOKEN_PATH = path.join(CONFIG_DIR, "token.json");
+export const CRED_PATH = process.env.MAILWARDEN_CREDENTIALS ?? path.join(CONFIG_DIR, "credentials.json");
 
 /**
  * Optional at-rest encryption of token.json.
@@ -105,6 +105,25 @@ export function persistedScopes(): string[] | null {
       : null;
   } catch {
     return null; // missing / unreadable / not JSON
+  }
+}
+
+/**
+ * The on-disk state of token.json, for the `--check` doctor: whether it exists and,
+ * if so, whether it is a plaintext or an encrypted envelope. "invalid" = present but
+ * not JSON. Synchronous + network-free; does not attempt to decrypt.
+ */
+export function tokenFileState(): "missing" | "plaintext" | "encrypted" | "invalid" {
+  let raw: string;
+  try {
+    raw = readFileSync(TOKEN_PATH, "utf8");
+  } catch {
+    return "missing";
+  }
+  try {
+    return isEncrypted(JSON.parse(raw)) ? "encrypted" : "plaintext";
+  } catch {
+    return "invalid";
   }
 }
 
