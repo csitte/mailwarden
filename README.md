@@ -226,6 +226,33 @@ MAILWARDEN_TOKEN=<secret> MAILWARDEN_HOST=0.0.0.0 npx -y mailwarden --http   # :
 ```
 Then in claude.ai: Settings → Connectors → *Add custom connector* → your `https://your-host/mcp` URL. In Claude Code: `claude mcp add --transport http mailwarden https://your-host/mcp`.
 
+## Multiple accounts
+
+One OAuth app (one `credentials.json`) can authorize several Gmail accounts. Each account keeps its
+own refresh token in a separate file, selected by `MAILWARDEN_ACCOUNT`:
+
+```bash
+mailwarden --auth --account work        # stores token.work.json
+mailwarden --auth --account personal    # stores token.personal.json
+```
+
+Run them side by side by registering the server **once per account**, each with its own
+`MAILWARDEN_ACCOUNT`. Every instance is fully isolated — its own token, its own granted scopes, its
+own tool surface — so nothing can act on the wrong mailbox:
+
+```json
+{
+  "mcpServers": {
+    "gmail-work":     { "command": "npx", "args": ["-y", "mailwarden"], "env": { "MAILWARDEN_ACCOUNT": "work" } },
+    "gmail-personal": { "command": "npx", "args": ["-y", "mailwarden"], "env": { "MAILWARDEN_ACCOUNT": "personal" } }
+  }
+}
+```
+
+`mailwarden --check` shows the active account and lists the others it finds. With no
+`MAILWARDEN_ACCOUNT` set, everything uses the default `token.json` exactly as before — this is fully
+backward compatible.
+
 ## From source
 
 ```bash
@@ -240,6 +267,7 @@ node dist/index.js --auth
 |---|---|
 | `MAILWARDEN_DIR` | config dir (default `~/.mailwarden`) |
 | `MAILWARDEN_CREDENTIALS` | path to `credentials.json` |
+| `MAILWARDEN_ACCOUNT` | select a named account (its token is `token.<name>.json`); unset = the default `token.json`. See [Multiple accounts](#multiple-accounts) |
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |

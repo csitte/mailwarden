@@ -12,7 +12,9 @@
 import fs from "node:fs/promises";
 import {
   CRED_PATH,
-  TOKEN_PATH,
+  tokenPath,
+  activeAccount,
+  discoverAccounts,
   checkCredentials,
   persistedScopes,
   tokenFileState,
@@ -176,7 +178,7 @@ export async function runDoctor(): Promise<number> {
 
   const checks = buildReport({
     credPath: CRED_PATH,
-    tokenPath: TOKEN_PATH,
+    tokenPath: tokenPath(),
     cred,
     tokenState,
     passphraseSet: Boolean(process.env.MAILWARDEN_TOKEN_PASSPHRASE),
@@ -186,7 +188,12 @@ export async function runDoctor(): Promise<number> {
     profile,
   });
 
+  const account = activeAccount();
+  const others = discoverAccounts().filter((a) => a !== account);
   console.error("mailwarden --check\n");
+  console.error(`  Account: ${account ?? "(default)"}`);
+  if (others.length) console.error(`  Other accounts found: ${others.join(", ")}`);
+  console.error("");
   for (const c of checks) console.error(`  ${ICON[c.status]} ${c.name}: ${c.detail}`);
   const code = reportExitCode(checks);
   console.error(`\n${code === 0 ? "✓ Setup looks good." : "✗ Setup has problems — see the ✗ lines above."}`);

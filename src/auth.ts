@@ -3,7 +3,7 @@ import { google } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
@@ -19,8 +19,57 @@ import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_B
  */
 
 export const CONFIG_DIR = process.env.MAILWARDEN_DIR ?? path.join(os.homedir(), ".mailwarden");
-export const TOKEN_PATH = path.join(CONFIG_DIR, "token.json");
 export const CRED_PATH = process.env.MAILWARDEN_CREDENTIALS ?? path.join(CONFIG_DIR, "credentials.json");
+
+/**
+ * Multi-account support. One Gmail *app* (credentials.json) can authorize several *users*;
+ * each account keeps its own refresh token in a separate file, selected by `MAILWARDEN_ACCOUNT`:
+ *   - unset (or empty) → the default account, `token.json` — exactly today's behavior;
+ *   - `MAILWARDEN_ACCOUNT=work` → `token.work.json`.
+ * credentials.json is shared across accounts (same OAuth client). Run several accounts side by side
+ * by registering the server twice with different `MAILWARDEN_ACCOUNT` values — each instance is fully
+ * isolated (own token, own granted scopes, own tool surface), which keeps scope-gating intact.
+ *
+ * The account name goes into a filename, so it is restricted to a safe charset (no path separators).
+ */
+const ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+export function sanitizeAccount(name: string): string {
+  const t = name.trim();
+  if (t === "." || t === ".." || !ACCOUNT_RE.test(t)) {
+    throw new Error(
+      `Invalid MAILWARDEN_ACCOUNT "${name}" — use letters, digits, dot, dash or underscore ` +
+        "(must start alphanumeric, no path separators).",
+    );
+  }
+  return t;
+}
+
+/** The selected account name, or null for the default. Throws on a malformed name. */
+export function activeAccount(): string | null {
+  const raw = process.env.MAILWARDEN_ACCOUNT?.trim();
+  return raw ? sanitizeAccount(raw) : null;
+}
+
+/** Path to a given account's token file (default account → token.json). */
+export function tokenPath(account: string | null = activeAccount()): string {
+  return path.join(CONFIG_DIR, account ? `token.${account}.json` : "token.json");
+}
+
+/**
+ * Account names discovered from token.<name>.json files in CONFIG_DIR (the default token.json is
+ * not an "account" and is excluded). Best-effort + synchronous, for `--check`; never throws.
+ */
+export function discoverAccounts(): string[] {
+  try {
+    return readdirSync(CONFIG_DIR)
+      .map((f) => /^token\.(.+)\.json$/.exec(f)?.[1])
+      .filter((n): n is string => Boolean(n))
+      .sort();
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Optional at-rest encryption of token.json.
@@ -98,7 +147,7 @@ export function decryptToken(enc: EncryptedToken, passphrase: string): string {
  */
 export function persistedScopes(): string[] | null {
   try {
-    const parsed = JSON.parse(readFileSync(TOKEN_PATH, "utf8")) as { type?: unknown; scope?: unknown };
+    const parsed = JSON.parse(readFileSync(tokenPath(), "utf8")) as { type?: unknown; scope?: unknown };
     if (parsed.type === ENC_TYPE) return null; // encrypted → scope not readable without the key
     return typeof parsed.scope === "string" && parsed.scope.trim()
       ? parsed.scope.trim().split(/\s+/)
@@ -116,7 +165,7 @@ export function persistedScopes(): string[] | null {
 export function tokenFileState(): "missing" | "plaintext" | "encrypted" | "invalid" {
   let raw: string;
   try {
-    raw = readFileSync(TOKEN_PATH, "utf8");
+    raw = readFileSync(tokenPath(), "utf8");
   } catch {
     return "missing";
   }
@@ -149,9 +198,10 @@ export function hasModifyScope(): boolean | undefined {
 }
 
 async function loadSavedToken(): Promise<OAuth2Client | null> {
+  const tp = tokenPath();
   let parsed: unknown;
   try {
-    parsed = JSON.parse(await fs.readFile(TOKEN_PATH, "utf8"));
+    parsed = JSON.parse(await fs.readFile(tp, "utf8"));
   } catch {
     return null; // missing or malformed → treated as "not authorized"
   }
@@ -162,7 +212,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
     const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
     if (!key) {
       throw new Error(
-        `${TOKEN_PATH} is encrypted, but MAILWARDEN_TOKEN_PASSPHRASE is not set. Set it to the passphrase ` +
+        `${tp} is encrypted, but MAILWARDEN_TOKEN_PASSPHRASE is not set. Set it to the passphrase ` +
           "you used when authorizing, or re-run `mailwarden --auth` to store a fresh token.",
       );
     }
@@ -174,7 +224,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
       decrypted = decryptToken(parsed, key);
     } catch {
       throw new Error(
-        `Could not decrypt ${TOKEN_PATH} — MAILWARDEN_TOKEN_PASSPHRASE is wrong or the file is corrupted. ` +
+        `Could not decrypt ${tp} — MAILWARDEN_TOKEN_PASSPHRASE is wrong or the file is corrupted. ` +
           "Fix the passphrase, or re-run `mailwarden --auth` to store a fresh token.",
       );
     }
@@ -250,7 +300,11 @@ export function checkCredentials(raw: string | null, credPath: string): CredChec
   return { ok: true, kind, client_id: key.client_id, client_secret: key.client_secret };
 }
 
-async function persistToken(client: OAuth2Client, cred: { client_id: string; client_secret: string }): Promise<void> {
+async function persistToken(
+  client: OAuth2Client,
+  cred: { client_id: string; client_secret: string },
+  account: string | null,
+): Promise<void> {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
   const payload = JSON.stringify(
     {
@@ -271,7 +325,7 @@ async function persistToken(client: OAuth2Client, cred: { client_id: string; cli
   // exactly the gap MAILWARDEN_TOKEN_PASSPHRASE closes for file copies).
   const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
   const contents = key ? JSON.stringify(encryptToken(payload, key), null, 2) : payload;
-  await fs.writeFile(TOKEN_PATH, contents, { mode: 0o600 });
+  await fs.writeFile(tokenPath(account), contents, { mode: 0o600 });
   if (key) console.error("mailwarden: token stored encrypted at rest (MAILWARDEN_TOKEN_PASSPHRASE).");
 }
 
@@ -286,10 +340,12 @@ let cachedClient: OAuth2Client | null = null;
 
 /**
  * Returns an authenticated OAuth2 client.
- * - interactive=false (server runtime): loads the stored refresh token, else throws.
- * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it.
+ * - interactive=false (server runtime): loads the stored refresh token for the MAILWARDEN_ACCOUNT
+ *   in effect, else throws.
+ * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it under
+ *   `account` (defaults to MAILWARDEN_ACCOUNT) — this is the only place the `account` argument is used.
  */
-export async function getAuth(interactive = false): Promise<OAuth2Client> {
+export async function getAuth(interactive = false, account: string | null = activeAccount()): Promise<OAuth2Client> {
   if (!interactive) {
     if (cachedClient) return cachedClient;
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
@@ -333,7 +389,7 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
         "then run `mailwarden --auth` again.",
     );
   }
-  await persistToken(client, cred);
+  await persistToken(client, cred, account);
   cachedClient = null; // a later non-interactive load re-reads the freshly stored token
   return client;
 }

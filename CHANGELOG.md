@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Multiple accounts.** `MAILWARDEN_ACCOUNT=<name>` selects a named account whose token lives in
+  `token.<name>.json`; `mailwarden --auth --account <name>` provisions it. One shared `credentials.json`
+  authorizes several Gmail accounts; run them side by side by registering the server once per account.
+  Fully backward compatible — unset means the default `token.json` as before.
 - **`mailwarden --check` (setup doctor).** Diagnoses the OAuth setup end to end — `credentials.json`
   shape, token presence/encryption, whether the granted scopes cover the enabled tiers, and one live
   Gmail call — printing a concrete fix for anything wrong and exiting non-zero on failure (usable in
