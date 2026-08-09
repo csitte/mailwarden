@@ -52,6 +52,12 @@ Most Gmail MCP servers cover the same read/label/send surface. Two capabilities 
 
 The moat isn't any single row — it's **snooze + live re-verification together**: an actual inbox-workflow layer that acts on the mailbox's *current* state, not a cached snapshot. Where competitors have caught up (bulk actions, at-rest encryption) it's noted honestly above.
 
+### Why re-verification matters — a concrete case
+
+Ask an assistant to *"archive the unread promotional mail that's already skipped my inbox"* and it will reach for the obvious query, `category:updates is:unread -in:inbox`. Gmail's `threads.list` index answers **loosely** here: it silently drops the `is:unread` constraint and hands back read mail too. A server that trusts the index now archives threads you'd already read — mail you never meant to touch, gone in a bulk action you can't easily reverse.
+
+`mailwarden` fetches every hit live anyway, so `search` re-checks the unambiguous predicates (`is:unread`, `is:read`, `in:inbox`, `category:…`, with negation) against each thread's **true** labels and drops the index's false positives before any tool sees them. The bulk action then runs on exactly the set you asked for. This is the difference between acting on what Gmail *indexed* and acting on what's *actually in the mailbox right now* — and it's why snooze/sweep are safe to hand to an assistant: the sweep resurfaces only threads whose snooze is genuinely due, verified against live labels at run time.
+
 ## Tools
 
 | Tool | What it does |
