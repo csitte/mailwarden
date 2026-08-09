@@ -349,6 +349,37 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     await gmail.search("from:foo@bar.com", 25);
     expect(stats().listMaxResults).toBe(25); // no over-scan when nothing to verify
   });
+
+  it("skips a candidate whose get fails (vanished between list and get) instead of failing the whole search", async () => {
+    // Unfiltered query so every candidate is kept; the middle thread 404s (deleted
+    // after the list snapshot). The search must still return a and c.
+    const api: any = {
+      users: {
+        threads: {
+          list: async () => ({
+            data: { threads: [{ id: "a" }, { id: "b" }, { id: "c" }] },
+          }),
+          get: async (req: any) => {
+            if (req.id === "b") throw Object.assign(new Error("not found"), { status: 404 });
+            return {
+              data: {
+                messages: [
+                  {
+                    id: `m-${req.id}`,
+                    labelIds: ["INBOX"],
+                    payload: { headers: [{ name: "Subject", value: `subj-${req.id}` }] },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.search("from:foo@bar.com", 25);
+    expect(res.threads.map((r) => r.threadId)).toEqual(["a", "c"]);
+  });
 });
 
 describe("modifyLabels — Bug 3: name → id resolution", () => {
@@ -740,7 +771,7 @@ describe("withBackoff", () => {
     expect(calls).toBe(2);
   });
 
-  it("recognizes a string status like code: '429' but not 'ECONNRESET'", async () => {
+  it("recognizes a string status like code: '429'", async () => {
     let calls = 0;
     const result = await withBackoff(
       async () => {
@@ -752,18 +783,35 @@ describe("withBackoff", () => {
     );
     expect(result).toBe(1);
     expect(calls).toBe(2);
+  });
 
-    let calls2 = 0;
+  it("retries a transient network error (ECONNRESET / socket hang up), then succeeds", async () => {
+    let calls = 0;
+    const result = await withBackoff(
+      async () => {
+        calls++;
+        if (calls === 1) throw Object.assign(new Error("read"), { code: "ECONNRESET" });
+        if (calls === 2) throw new Error("socket hang up"); // no code, only the message
+        return "ok";
+      },
+      { sleep: async () => {} },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  it("gives up on a network error after the retry budget", async () => {
+    let calls = 0;
     await expect(
       withBackoff(
         async () => {
-          calls2++;
-          throw Object.assign(new Error("reset"), { code: "ECONNRESET" });
+          calls++;
+          throw Object.assign(new Error("timeout"), { code: "ETIMEDOUT" });
         },
-        { sleep: async () => {} },
+        { retries: 2, sleep: async () => {} },
       ),
-    ).rejects.toThrow("reset");
-    expect(calls2).toBe(1);
+    ).rejects.toThrow("timeout");
+    expect(calls).toBe(3); // initial + 2 retries, not infinite
   });
 });
 
@@ -1339,5 +1387,16 @@ describe("Gmail.downloadAttachment", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
     const gmail = new Gmail(apiWith(null));
     await expect(gmail.downloadAttachment("m1", "a1", path.join(tmp, "f"))).rejects.toThrow(/no data/);
+  });
+
+  it("gives up after 100 taken filenames instead of looping forever", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    // Occupy report.pdf and report-1.pdf … report-99.pdf — all 100 candidates.
+    await fs.writeFile(path.join(tmp, "report.pdf"), "x");
+    for (let i = 1; i < 100; i++) await fs.writeFile(path.join(tmp, `report-${i}.pdf`), "x");
+    const gmail = new Gmail(apiWith(b64url("NEW")));
+    await expect(
+      gmail.downloadAttachment("m1", "a1", path.join(tmp, "report.pdf")),
+    ).rejects.toThrow(/No free filename/);
   });
 });

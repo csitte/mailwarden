@@ -126,6 +126,20 @@ describe("buildDigest", () => {
     expect(d.topLabels).toEqual([{ label: "Important", count: 2 }]); // one row, not two
   });
 
+  it("breaks equal-count ties alphabetically for senders and labels", () => {
+    const d = buildDigest(
+      [
+        thread({ from: "zed@x.com", labelIds: ["INBOX", "Zeta"] }),
+        thread({ from: "amy@x.com", labelIds: ["INBOX", "Alpha"] }),
+      ],
+      id,
+      now,
+    );
+    // Every sender/label has count 1, so the localeCompare tiebreak decides order.
+    expect(d.topSenders.map((s) => s.sender)).toEqual(["amy@x.com", "zed@x.com"]);
+    expect(d.topLabels.map((l) => l.label)).toEqual(["Alpha", "Zeta"]);
+  });
+
   it("honors topN and groups empty From under (unknown)", () => {
     const d = buildDigest(
       [

@@ -144,6 +144,29 @@ export function isInvalidGrant(err: unknown): boolean {
 /** HTTP statuses worth retrying: rate limits and transient server errors. */
 const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
 
+/**
+ * Transient network failures that carry NO HTTP status (the request never got a
+ * response) but are still worth retrying — a dropped socket, a timed-out
+ * connection, a flaky DNS lookup. Without this, a single `ECONNRESET` mid-sweep
+ * (the exact signature seen against flaky upstream infra) fails immediately
+ * instead of riding out a blip.
+ */
+const RETRYABLE_NET_CODES = new Set([
+  "ECONNRESET",
+  "ETIMEDOUT",
+  "ECONNREFUSED",
+  "EPIPE",
+  "EAI_AGAIN",
+  "ERR_STREAM_PREMATURE_CLOSE",
+]);
+
+function isRetryableNetworkError(err: unknown): boolean {
+  const e = err as { code?: unknown; message?: unknown };
+  if (typeof e?.code === "string" && RETRYABLE_NET_CODES.has(e.code)) return true;
+  // Some layers surface the reset only in the message (e.g. "socket hang up").
+  return typeof e?.message === "string" && /socket hang up|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(e.message);
+}
+
 function statusOf(err: unknown): number | undefined {
   const e = err as { status?: unknown; code?: unknown; response?: { status?: unknown } };
   for (const s of [e?.status, e?.code, e?.response?.status]) {
@@ -259,7 +282,9 @@ export async function withBackoff<T>(
       return await fn();
     } catch (err) {
       const status = statusOf(err);
-      if (attempt >= retries || status === undefined || !RETRYABLE_STATUS.has(status)) throw err;
+      const retryable =
+        (status !== undefined && RETRYABLE_STATUS.has(status)) || isRetryableNetworkError(err);
+      if (attempt >= retries || !retryable) throw err;
       await sleep(baseMs * 2 ** attempt + Math.random() * 100);
     }
   }
@@ -576,14 +601,22 @@ export class Gmail {
     const out: ThreadSummary[] = [];
     for (let i = 0; i < candidates.length && out.length < maxResults; i += GET_CONCURRENCY) {
       const chunk = candidates.slice(i, i + GET_CONCURRENCY);
+      // A single hit that vanished between the list and this get (deleted/moved —
+      // e.g. by another client or an auto-trashing filter) must not sink the whole
+      // search: the list call already proved auth works, so a per-thread failure is
+      // local. Swallow it and drop that one candidate. (`threads.list` above is NOT
+      // wrapped this way, so a systemic auth/network failure still surfaces.)
       const metas = await Promise.all(
         chunk.map((t) =>
-          this.req(() => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" })),
+          this.req(() => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" }))
+            .catch(() => null),
         ),
       );
       for (let j = 0; j < chunk.length && out.length < maxResults; j++) {
+        const meta = metas[j];
+        if (!meta) continue; // thread vanished or errored after retries — skip it
         const t = chunk[j];
-        const msgs = metas[j].data.messages ?? [];
+        const msgs = meta.data.messages ?? [];
         const labelIds = [...new Set(msgs.flatMap((m) => m.labelIds ?? []))];
         if (!threadMatchesFilters(labelIds, filters)) continue; // drop index false positives
         const headers = msgs[0]?.payload?.headers ?? [];

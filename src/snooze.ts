@@ -195,8 +195,11 @@ export function resolveSnoozeDate(input: string, today: Date = new Date()): stri
   // Presets carry no signed numbers; ISO dates already returned above, so a
   // leftover "-<digit>" is a negative offset. Reject it — normalization below
   // folds "-" into a space, which would otherwise silently flip "in -1 days"
-  // into "in 1 days" (tomorrow) instead of erroring.
-  if (/-\d/.test(raw)) {
+  // into "in 1 days" (tomorrow) instead of erroring. A minus counts as a sign
+  // only at a token boundary (start / after whitespace): between two word chars
+  // it's a separator, so "in-3-days" and "monday-9am" (advertised as separator-
+  // insensitive via the `[\s_-]+` fold below) are NOT mistaken for negatives.
+  if (/(^|\s)-\d/.test(raw)) {
     throw new Error(`Invalid snooze value "${raw}" — offsets must be positive, e.g. "in 3 days".`);
   }
 
@@ -239,8 +242,12 @@ export async function snooze(gmail: Gmail, threadId: string, until: string, toda
 }
 
 export async function unsnooze(gmail: Gmail, threadId: string) {
+  // Strip the parent and every REAL dated snooze label — but not a manual
+  // sub-label like `MCP/Snoozed/Archiv` (snoozeKey rejects it), matching the
+  // same validity rule sweepSnoozed uses so unsnooze never clobbers a user's
+  // own bucket under the namespace.
   const remove = (await gmail.listLabels())
-    .filter((l) => l.name === PARENT || l.name.startsWith(`${PARENT}/`))
+    .filter((l) => l.name === PARENT || snoozeKey(l.name) !== undefined)
     .map((l) => l.id);
   // No UNREAD here (unlike sweepSnoozed): unsnooze is user-initiated, the user
   // is already looking at the thread — no resurface signal needed.
@@ -248,16 +255,42 @@ export async function unsnooze(gmail: Gmail, threadId: string) {
   return { threadId, unsnoozed: true };
 }
 
+/** Max concurrent getThreadSubject calls while listing snoozed threads. */
+const SUBJECT_CONCURRENCY = 8;
+
+/**
+ * Map `items` through `fn` with at most `limit` in flight at once, preserving
+ * input order in the result. Keeps a large snooze backlog from serializing one
+ * subject fetch at a time without unbounded fan-out at the API.
+ */
+async function mapPool<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 export async function listSnoozed(gmail: Gmail) {
   const labels = await gmail.listLabels();
-  const out: { threadId: string; subject: string; key: string }[] = [];
+  // Collect (threadId, key) pairs first (cheap list pages), then fetch subjects
+  // concurrently — the subject GET is the per-thread cost worth parallelizing.
+  const pairs: { threadId: string; key: string }[] = [];
   for (const label of labels) {
     const key = snoozeKey(label.name);
     if (!key) continue;
-    for (const threadId of await gmail.listThreadIdsByLabel(label.id)) {
-      out.push({ threadId, subject: await gmail.getThreadSubject(threadId), key });
-    }
+    for (const threadId of await gmail.listThreadIdsByLabel(label.id)) pairs.push({ threadId, key });
   }
+  const out = await mapPool(pairs, SUBJECT_CONCURRENCY, async ({ threadId, key }) => ({
+    threadId,
+    key,
+    subject: await gmail.getThreadSubject(threadId),
+  }));
   // Sort on the raw key (chronological), then present the human-readable form.
   // Codepoint `<`, not localeCompare — same ordering the dueness check relies on.
   return out

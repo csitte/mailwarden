@@ -96,6 +96,15 @@ describe("resolveSnoozeDate", () => {
     expect(resolveSnoozeDate("In 2 Days", today)).toBe("2026-06-22");
   });
 
+  it("treats a hyphen between word chars as a separator, not a negative sign", () => {
+    // The negative-offset guard must not misread "in-3-days" / "monday-9am" as a
+    // negative number — only a "-" at a token boundary (start / after space) is a sign.
+    expect(resolveSnoozeDate("in-3-days", today)).toBe("2026-06-23");
+    expect(resolveSnoozeDate("monday-9am", today)).toBe("2026-06-22T0900");
+    // A genuine negative sign is still rejected.
+    expect(() => resolveSnoozeDate("in -3 days", today)).toThrow(/positive/);
+  });
+
   it("rejects an ISO-shaped but impossible date", () => {
     expect(() => resolveSnoozeDate("2026-99-99", today)).toThrow(/Invalid snooze date/);
   });
@@ -156,6 +165,16 @@ describe("resolveSnoozeDate — time of day", () => {
     expect(resolveSnoozeDate("in 1 hour", today)).toBe("2026-06-20T1000");
   });
 
+  it("rolls 'in N hours' over local midnight into the next day", () => {
+    // 09:00 + 18h = 03:00 the following day — the stamp carries the new date.
+    expect(resolveSnoozeDate("in 18 hours", today)).toBe("2026-06-21T0300");
+  });
+
+  it("peels a space-separated am/pm token off a preset ('monday 9 am')", () => {
+    expect(resolveSnoozeDate("monday 9 am", today)).toBe("2026-06-22T0900");
+    expect(resolveSnoozeDate("tomorrow 5 pm", today)).toBe("2026-06-21T1700");
+  });
+
   it("rejects a time earlier today as past", () => {
     expect(() => resolveSnoozeDate("today 8am", today)).toThrow(/in the past/);
     expect(() => resolveSnoozeDate("2026-06-20 07:30", today)).toThrow(/in the past/);
@@ -164,6 +183,12 @@ describe("resolveSnoozeDate — time of day", () => {
   it("rejects an impossible clock time", () => {
     expect(() => resolveSnoozeDate("2026-06-20 25:00", today)).toThrow(/Invalid time/);
     expect(() => resolveSnoozeDate("tomorrow 25:00", today)).toThrow();
+  });
+
+  it("rejects out-of-range minutes and 12h hours in an explicit date+time", () => {
+    expect(() => resolveSnoozeDate("2026-06-21 9:60", today)).toThrow(/Invalid time/); // minute > 59
+    expect(() => resolveSnoozeDate("2026-06-21 0am", today)).toThrow(/Invalid time/); // 12h hour < 1
+    expect(() => resolveSnoozeDate("2026-06-21 13pm", today)).toThrow(/Invalid time/); // 12h hour > 12
   });
 });
 
@@ -263,6 +288,30 @@ describe("unsnooze", () => {
       { threadId: "th-1", add: ["INBOX"], remove: ["Label_parent", "Label_a", "Label_b"] },
     ]);
     expect(res).toEqual({ threadId: "th-1", unsnoozed: true });
+  });
+
+  it("preserves a manual non-dated sub-label (MCP/Snoozed/Archiv) — only real dated labels are stripped", async () => {
+    const modified: any[] = [];
+    const fake: Partial<Gmail> = {
+      async listLabels() {
+        return [
+          { id: "Label_parent", name: "MCP/Snoozed", type: "user" },
+          { id: "Label_a", name: "MCP/Snoozed/2026-08-01", type: "user" },
+          { id: "Label_archiv", name: "MCP/Snoozed/Archiv", type: "user" }, // manual bucket
+          { id: "Label_todo", name: "ToDo", type: "user" },
+        ];
+      },
+      async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []) {
+        modified.push({ threadId, add, remove });
+      },
+    };
+
+    await unsnooze(fake as Gmail, "th-1");
+
+    // Label_archiv is NOT in the remove set — same validity rule as sweepSnoozed.
+    expect(modified).toEqual([
+      { threadId: "th-1", add: ["INBOX"], remove: ["Label_parent", "Label_a"] },
+    ]);
   });
 });
 

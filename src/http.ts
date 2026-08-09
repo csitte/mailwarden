@@ -26,9 +26,23 @@ export interface HttpConfig {
   extraAllowedHosts: string[];
 }
 
+/**
+ * Parse PORT to a valid TCP port, defaulting to 8787 when unset/blank. A
+ * malformed value (`Number("abc")` → NaN) must fail fast with an actionable
+ * message rather than reach `app.listen(NaN)`, which silently binds a random port.
+ */
+export function parsePort(raw: string | undefined): number {
+  if (raw === undefined || raw.trim() === "") return 8787;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new Error(`Invalid PORT "${raw}" — must be an integer between 1 and 65535.`);
+  }
+  return n;
+}
+
 export function readHttpConfig(env: NodeJS.ProcessEnv = process.env): HttpConfig {
   return {
-    port: Number(env.PORT ?? 8787),
+    port: parsePort(env.PORT),
     host: env.MAILWARDEN_HOST ?? "127.0.0.1",
     bearer: env.MAILWARDEN_TOKEN || undefined,
     allowNoToken: env.MAILWARDEN_ALLOW_NO_TOKEN === "1",

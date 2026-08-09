@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   readHttpConfig,
+  parsePort,
   isLoopbackHost,
   assertAuthConfigured,
   buildAllowedHosts,
@@ -46,6 +47,30 @@ describe("readHttpConfig", () => {
 
   it("treats an empty MAILWARDEN_TOKEN as no token", () => {
     expect(readHttpConfig({ MAILWARDEN_TOKEN: "" }).bearer).toBeUndefined();
+  });
+
+  it("rejects a malformed PORT instead of binding a random port (NaN)", () => {
+    expect(() => readHttpConfig({ PORT: "not-a-port" })).toThrow(/Invalid PORT/);
+  });
+});
+
+describe("parsePort", () => {
+  it("defaults to 8787 when unset or blank", () => {
+    expect(parsePort(undefined)).toBe(8787);
+    expect(parsePort("")).toBe(8787);
+    expect(parsePort("   ")).toBe(8787);
+  });
+
+  it("parses a valid port", () => {
+    expect(parsePort("9000")).toBe(9000);
+    expect(parsePort("1")).toBe(1);
+    expect(parsePort("65535")).toBe(65535);
+  });
+
+  it("rejects non-integers and out-of-range values (would become NaN or an invalid bind)", () => {
+    for (const bad of ["abc", "80.5", "0", "-1", "65536", "99999"]) {
+      expect(() => parsePort(bad)).toThrow(/Invalid PORT/);
+    }
   });
 });
 
