@@ -43,6 +43,14 @@ jobs:
       - name: Test
         run: npm test
 
+      # Last gate before an IRREVERSIBLE publish: pack the tarball, install it into a clean
+      # project and drive the real MCP handshake. `npm test` runs against src/ with this repo's
+      # node_modules and therefore cannot see a tree that only resolves HERE — the failure mode
+      # that shipped in 0.7.0 (a root-only `overrides` entry). Runs after the tests so a plain
+      # logic break reports as a test failure, not as a smoke failure.
+      - name: Smoke-test the packed package
+        run: npm run smoke
+
       # No NODE_AUTH_TOKEN — OIDC exchanges a short-lived credential.
       - name: Publish to npm
         if: github.event_name == 'push'

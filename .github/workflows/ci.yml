@@ -1,0 +1,54 @@
+name: CI
+
+# Build + tests on every push and PR to main. Until now the ONLY workflow was publish.yml, which
+# fires on a version tag — so a broken commit on main stayed invisible until release time, with
+# the tag already pushed. This is the guard rail that catches it beforehand.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      # Both ends of the supported range (package.json engines: node >= 20). 22 is what
+      # publish.yml releases with; 20 is what a conservative user runs.
+      matrix:
+        node: ["20", "22"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm test
+
+  # Installs the packed tarball into a clean project and drives it through a real MCP handshake.
+  # Runs once (not per matrix entry) — it is about the artifact's dependency tree, not the runtime.
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: npm ci
+
+      - name: Smoke-test the packed package
+        run: npm run smoke

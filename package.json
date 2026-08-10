@@ -32,7 +32,8 @@
     "start": "node dist/index.js",
     "dev": "tsx src/index.ts",
     "auth": "tsx src/index.ts --auth",
-    "sweep": "tsx src/index.ts --sweep"
+    "sweep": "tsx src/index.ts --sweep",
+    "smoke": "node scripts/smoke-package.mjs"
   },
   "keywords": [
     "mcp",
