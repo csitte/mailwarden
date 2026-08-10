@@ -50,3 +50,15 @@ export function authScopesForTiers(tiers: Set<ToolTier>): string[] {
   if (tiers.has("filters")) scopes.push(GMAIL_SETTINGS_BASIC);
   return scopes;
 }
+
+/**
+ * Which of `required` a grant of `granted` does NOT cover — by *capability*, not string equality.
+ * `gmail.modify` is a strict superset of `gmail.readonly`, so a token authorized for the full
+ * surface satisfies a later read-only deployment. Comparing literally would flag such a healthy
+ * setup as broken and push the user into re-consenting with a narrower scope.
+ */
+export function missingScopes(granted: string[], required: string[]): string[] {
+  const effective = new Set(granted);
+  if (effective.has(GMAIL_MODIFY)) effective.add(GMAIL_READONLY);
+  return required.filter((s) => !effective.has(s));
+}

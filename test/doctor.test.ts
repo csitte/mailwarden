@@ -10,6 +10,7 @@ function inputs(over: Partial<DoctorInputs> = {}): DoctorInputs {
     credPath: "/cfg/credentials.json",
     tokenPath: "/cfg/token.json",
     cred: { ok: true, kind: "installed", client_id: "id", client_secret: "sec" },
+    account: null,
     tokenState: "plaintext",
     passphraseSet: false,
     grantedScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
@@ -76,6 +77,32 @@ describe("buildReport", () => {
     const r = buildReport(inputs({ grantedScopes: null }));
     expect(check(r, "Scopes")).toMatchObject({ status: "warn" });
     expect(reportExitCode(r)).toBe(0); // unknown scopes must not be a hard failure
+  });
+
+  it("accepts gmail.modify as covering a read-only deployment's gmail.readonly", () => {
+    // modify is a superset of readonly — a full-surface token must not be reported as broken
+    // just because MAILWARDEN_TOOLS=read narrows the required scope list.
+    const r = buildReport(
+      inputs({
+        grantedScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
+        requiredScopes: [GMAIL_READONLY],
+        enabledTiers: tiers("read"),
+      }),
+    );
+    expect(check(r, "Scopes")).toMatchObject({ status: "ok" });
+    expect(reportExitCode(r)).toBe(0);
+  });
+
+  it("does not nag about unreadable scopes on an encrypted token (re-auth can't fix it)", () => {
+    const r = buildReport(inputs({ tokenState: "encrypted", passphraseSet: true, grantedScopes: null }));
+    const scopes = check(r, "Scopes");
+    expect(scopes.status).toBe("ok"); // a permanent, unfixable warning would be noise
+    expect(scopes.detail).not.toMatch(/--auth/);
+  });
+
+  it("names the account in remediation so a named-account user can't clobber the default token", () => {
+    const r = buildReport(inputs({ account: "work", tokenState: "missing", grantedScopes: null, profile: null }));
+    expect(check(r, "Token").detail).toMatch(/mailwarden --auth --account work/);
   });
 
   it("surfaces a failing live Gmail call (e.g. revoked/expired token)", () => {

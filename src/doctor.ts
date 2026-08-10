@@ -22,7 +22,7 @@ import {
   type CredCheck,
 } from "./auth.js";
 import { Gmail } from "./gmail.js";
-import { authScopesForTiers, resolveEnabledTiers, type ToolTier } from "./tiers.js";
+import { authScopesForTiers, missingScopes, resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 export interface DoctorCheck {
@@ -34,6 +34,8 @@ export interface DoctorCheck {
 export interface DoctorInputs {
   credPath: string;
   tokenPath: string;
+  /** Active account name, or null for the default — so remediation names the right --account. */
+  account: string | null;
   cred: CredCheck;
   tokenState: "missing" | "plaintext" | "encrypted" | "invalid";
   /** Whether MAILWARDEN_TOKEN_PASSPHRASE is set (only relevant for an encrypted token). */
@@ -51,6 +53,9 @@ const SCOPE_SHORT = (s: string): string => s.replace("https://www.googleapis.com
 /** Build the diagnostic report from already-gathered inputs. Pure — no IO. */
 export function buildReport(i: DoctorInputs): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
+  // Remediation must name the account, or a named-account user runs a bare `--auth` and
+  // overwrites the DEFAULT token while the reported problem stays.
+  const authCmd = `mailwarden --auth${i.account ? ` --account ${i.account}` : ""}`;
 
   // 1. Credentials file.
   checks.push(
@@ -65,14 +70,14 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
       checks.push({
         name: "Token",
         status: "fail",
-        detail: `No token at ${i.tokenPath}. Run \`mailwarden --auth\` once to authorize.`,
+        detail: `No token at ${i.tokenPath}. Run \`${authCmd}\` once to authorize.`,
       });
       break;
     case "invalid":
       checks.push({
         name: "Token",
         status: "fail",
-        detail: `${i.tokenPath} exists but is not valid JSON. Re-run \`mailwarden --auth\` to replace it.`,
+        detail: `${i.tokenPath} exists but is not valid JSON. Re-run \`${authCmd}\` to replace it.`,
       });
       break;
     case "encrypted":
@@ -101,19 +106,32 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
   // 3. Granted scopes vs. what the enabled tiers need.
   const tiers = [...i.enabledTiers].join(", ");
   if (i.grantedScopes === null) {
-    // Unknown: only warn when there's actually a token to reason about.
-    if (i.tokenState === "plaintext" || i.tokenState === "encrypted") {
+    if (i.tokenState === "encrypted") {
+      // Scopes live inside the ciphertext and are deliberately not decrypted here, so they can
+      // never be read for an encrypted token. Reporting that as a warning with a "re-run --auth"
+      // fix would be permanently unfixable noise — re-authorizing just re-encrypts them.
+      checks.push({
+        name: "Scopes",
+        status: "ok",
+        detail:
+          `Not recorded for an encrypted token (by design) — cannot verify against the enabled tiers (${tiers}). ` +
+          "A genuinely missing scope surfaces as an actionable insufficient-scope error on first use.",
+      });
+    } else if (i.tokenState === "plaintext") {
+      // Old token written before scopes were recorded — here --auth genuinely fixes it.
       checks.push({
         name: "Scopes",
         status: "warn",
         detail:
           `Enabled tiers (${tiers}) need: ${i.requiredScopes.map(SCOPE_SHORT).join(", ")}. ` +
-          "The stored token records no scopes (authorized before scope-recording, or encrypted) — cannot verify; " +
-          "re-run `mailwarden --auth` to record them.",
+          `The stored token records no scopes (authorized before scope-recording) — cannot verify; ` +
+          `re-run \`${authCmd}\` to record them.`,
       });
     }
   } else {
-    const missing = i.requiredScopes.filter((s) => !i.grantedScopes!.includes(s));
+    // Capability containment, not string equality: gmail.modify covers gmail.readonly, so a
+    // full-surface token must not be reported as broken for a read-only deployment.
+    const missing = missingScopes(i.grantedScopes, i.requiredScopes);
     checks.push(
       missing.length === 0
         ? {
@@ -126,7 +144,7 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
             status: "fail",
             detail:
               `Enabled tiers (${tiers}) need ${missing.map(SCOPE_SHORT).join(", ")}, which the token lacks. ` +
-              "Re-run `mailwarden --auth` with those tiers enabled (MAILWARDEN_TOOLS).",
+              `Re-run \`${authCmd}\` with those tiers enabled (MAILWARDEN_TOOLS).`,
           },
     );
   }
@@ -170,18 +188,35 @@ export async function runDoctor(): Promise<number> {
   if (others.length) console.error(`  Other accounts found: ${others.join(", ")}`);
   console.error("");
 
-  // Credentials (reuse the same preflight --auth uses).
-  let credRaw: string | null;
+  // Credentials (reuse the same preflight --auth uses). Distinguish "absent" from "present but
+  // unreadable" exactly as getAuth does — reporting an EACCES/EISDIR file as "not found, download
+  // it from Google Cloud" sends the user to re-download a file that was there all along.
+  let cred: CredCheck;
   try {
-    credRaw = await fs.readFile(CRED_PATH, "utf8");
-  } catch {
-    credRaw = null;
+    cred = checkCredentials(await fs.readFile(CRED_PATH, "utf8"), CRED_PATH);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    cred =
+      code === "ENOENT"
+        ? checkCredentials(null, CRED_PATH)
+        : {
+            ok: false,
+            message: `Cannot read ${CRED_PATH} — it exists but could not be read (${code}). Check file permissions.`,
+          };
   }
-  const cred = checkCredentials(credRaw, CRED_PATH);
 
   const tokenState = tokenFileState();
   const passphraseSet = Boolean(process.env.MAILWARDEN_TOKEN_PASSPHRASE);
-  const enabledTiers = resolveEnabledTiers(process.env);
+
+  // A bad MAILWARDEN_TOOLS is a misconfiguration --check should *explain*, not crash on.
+  let enabledTiers: Set<ToolTier>;
+  try {
+    enabledTiers = resolveEnabledTiers(process.env);
+  } catch (err) {
+    console.error(`  ✗ Tool tiers: ${err instanceof Error ? err.message : String(err)}`);
+    console.error("\n✗ Setup has problems — fix MAILWARDEN_TOOLS and re-run.");
+    return 1;
+  }
   const requiredScopes = authScopesForTiers(enabledTiers);
 
   // Live smoke test — only when the token is plausibly usable. Skip an encrypted token with no
@@ -199,6 +234,7 @@ export async function runDoctor(): Promise<number> {
   const checks = buildReport({
     credPath: CRED_PATH,
     tokenPath: tokenPath(),
+    account,
     cred,
     tokenState,
     passphraseSet,

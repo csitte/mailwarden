@@ -30,8 +30,21 @@ describe("multi-account", () => {
     expect(sanitizeAccount(" work ")).toBe("work"); // trimmed
     expect(sanitizeAccount("a.b-c_1")).toBe("a.b-c_1");
     for (const bad of ["", ".", "..", "a/b", "a\\b", "../evil", ".hidden", "-lead"]) {
-      expect(() => sanitizeAccount(bad)).toThrow(/Invalid MAILWARDEN_ACCOUNT/);
+      expect(() => sanitizeAccount(bad)).toThrow(/Invalid account name/);
     }
+  });
+
+  it("lower-cases account names so two casings can't share one token file", async () => {
+    // On Windows/macOS token.Work.json and token.work.json are the SAME file — without
+    // normalization the second --auth would silently overwrite the first account's token.
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-acct-"));
+    const { sanitizeAccount, tokenPath } = await freshAuth(tmp);
+    expect(sanitizeAccount("Work")).toBe("work");
+    expect(sanitizeAccount("WORK")).toBe("work");
+    expect(tokenPath(sanitizeAccount("Work"))).toBe(tokenPath(sanitizeAccount("work")));
+
+    const upper = await freshAuth(tmp, "Work");
+    expect(upper.activeAccount()).toBe("work"); // env value normalized too
   });
 
   it("activeAccount is null by default and the sanitized value when set", async () => {
@@ -43,7 +56,7 @@ describe("multi-account", () => {
     expect(withAcct.activeAccount()).toBe("work");
 
     const bad = await freshAuth(tmp, "../evil");
-    expect(() => bad.activeAccount()).toThrow(/Invalid MAILWARDEN_ACCOUNT/);
+    expect(() => bad.activeAccount()).toThrow(/Invalid account name/);
   });
 
   it("tokenPath maps the default account to token.json and a named one to token.<name>.json", async () => {

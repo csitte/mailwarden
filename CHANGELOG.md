@@ -20,6 +20,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `search()` drops the Gmail index's `is:unread` false positives; asserts its outcome and is linked
   from the README.
 
+### Fixed
+- **Account names are case-insensitive.** They are lower-cased before becoming a filename, so
+  `Work` and `work` can no longer map to one token file on Windows/macOS (where the second `--auth`
+  would silently overwrite the first account's token and the server would act on the wrong mailbox).
+- **`--check` accepts a token that is *more* privileged than the enabled tiers.** The scope check
+  now compares capabilities instead of strings, so a `gmail.modify` grant satisfies a read-only
+  deployment's `gmail.readonly` instead of failing with exit 1 and advising a scope downgrade.
+- **Authorization errors name the account and its token file**, and the `--auth` command they
+  suggest carries the matching `--account` — a named-account user is no longer steered into
+  overwriting the default account's token.
+- **`--check` diagnoses configuration it used to crash on**: a malformed `MAILWARDEN_ACCOUNT`
+  (also when given as `--account`) or `MAILWARDEN_TOOLS` is now reported as a check line instead of
+  a raw stack trace. Other modes still fail fast.
+- **`--check` distinguishes an unreadable `credentials.json` from a missing one** (`EACCES`/`EISDIR`
+  no longer read as "not found — download it from Google Cloud").
+- **No more unfixable scope warning for encrypted tokens.** Scopes are not readable from an
+  encrypted envelope by design, so `--check` reports that as expected rather than advising a
+  re-authorization that cannot change it.
+- CLI errors print their message instead of a stack trace (`MAILWARDEN_DEBUG=1` restores the full
+  error).
+
 ## [0.6.1] - 2026-08-09
 
 Non-breaking robustness and edge-case hardening from a full-codebase review. No API or tool changes.

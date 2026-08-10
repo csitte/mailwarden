@@ -32,16 +32,23 @@ export const CRED_PATH = process.env.MAILWARDEN_CREDENTIALS ?? path.join(CONFIG_
  *
  * The account name goes into a filename, so it is restricted to a safe charset (no path separators).
  */
-const ACCOUNT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const ACCOUNT_RE = /^[a-z0-9][a-z0-9._-]*$/;
 
+/**
+ * Normalize + validate an account name. **Lower-cased on purpose:** the name becomes a filename,
+ * and on Windows/macOS (case-insensitive filesystems) `Work` and `work` would otherwise be two
+ * account names mapping to ONE token file — the second `--auth` would silently overwrite the
+ * first account's refresh token and the server would then act on the wrong mailbox. Lower-casing
+ * makes the name→file mapping injective on every platform.
+ */
 export function sanitizeAccount(name: string): string {
-  const t = name.trim();
+  const t = name.trim().toLowerCase();
   // ACCOUNT_RE requires an alphanumeric first char, so "", ".", ".." and any path separator
   // ("/", "\") are already rejected — no dot/traversal special-casing needed.
   if (!ACCOUNT_RE.test(t)) {
     throw new Error(
-      `Invalid MAILWARDEN_ACCOUNT "${name}" — use letters, digits, dot, dash or underscore ` +
-        "(must start alphanumeric, no path separators).",
+      `Invalid account name "${name}" — use letters, digits, dot, dash or underscore ` +
+        "(must start alphanumeric, no path separators). Names are case-insensitive.",
     );
   }
   return t;
@@ -238,7 +245,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
   } else if (process.env.MAILWARDEN_TOKEN_PASSPHRASE) {
     // Plaintext token while a key is configured — still usable, but nudge to re-encrypt.
     console.error(
-      "mailwarden: MAILWARDEN_TOKEN_PASSPHRASE is set but token.json is stored in plaintext — " +
+      `mailwarden: MAILWARDEN_TOKEN_PASSPHRASE is set but ${tp} is stored in plaintext — ` +
         "re-run `mailwarden --auth` to encrypt it at rest.",
     );
   }
@@ -353,8 +360,14 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
     const saved = await loadSavedToken();
     if (saved) return (cachedClient = saved);
+    // Name the account and the file we looked for, and the exact command that fills THAT file.
+    // A bare `mailwarden --auth` writes the DEFAULT token.json — telling a named-account user to
+    // run it would overwrite their default account's token and leave this error unchanged.
+    const account = activeAccount();
     throw new Error(
-      "mailwarden is not authorized yet. Run `mailwarden --auth` once to grant Gmail access.",
+      `Not authorized yet for ${account ? `account '${account}'` : "the default account"} ` +
+        `(no token at ${tokenPath(account)}). Run \`mailwarden --auth${account ? ` --account ${account}` : ""}\` ` +
+        "once to grant Gmail access.",
     );
   }
 

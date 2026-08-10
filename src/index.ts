@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
-import { getAuth, hasModifyScope, activeAccount, sanitizeAccount } from "./auth.js";
+import { getAuth, hasModifyScope, activeAccount } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
@@ -31,36 +31,35 @@ function readAccountArg(args: string[]): string | undefined {
     if (v === undefined || v.startsWith("-")) {
       throw new Error("`--account` needs a value, e.g. `--account work`.");
     }
-    return sanitizeAccount(v);
+    return v;
   }
   const eq = args.find((a) => a.startsWith("--account="));
-  if (eq !== undefined) return sanitizeAccount(eq.slice("--account=".length)); // empty ⇒ sanitizeAccount throws
+  if (eq !== undefined) return eq.slice("--account=".length);
   return undefined;
 }
 
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
-  // Validate MAILWARDEN_TOOLS once at boot so a misconfigured value fails fast in every mode —
-  // including --http, where registration otherwise runs per-request and a bad value would hang the
-  // first request instead.
-  resolveEnabledTiers(process.env);
-
   // Resolve an explicit `--account <name>` once and make it the account for this WHOLE invocation
   // (so --auth, --check, --sweep and the running server all agree). Setting the env is the single
-  // source of truth downstream (activeAccount/tokenPath/getAuth/runDoctor all read it).
+  // source of truth downstream (activeAccount/tokenPath/getAuth/runDoctor all read it). The value
+  // is stored RAW and validated below — the doctor must be able to *report* a malformed name
+  // instead of being pre-empted by a throw.
   const accountArg = readAccountArg(args);
   if (accountArg !== undefined) process.env.MAILWARDEN_ACCOUNT = accountArg;
 
-  // Setup doctor: diagnose credentials/token/scopes/live-call and exit. Runs BEFORE the account
-  // env is validated for other modes, so a malformed MAILWARDEN_ACCOUNT is reported by the doctor
-  // (which tolerates it) rather than crashing the very command meant to diagnose it.
+  // Setup doctor first: it diagnoses a malformed MAILWARDEN_ACCOUNT / MAILWARDEN_TOOLS itself
+  // (with a formatted report) rather than crashing on the misconfiguration it exists to explain.
   if (args.includes("--check") || args.includes("--doctor")) {
     process.exitCode = await runDoctor();
     return;
   }
 
-  // Validate MAILWARDEN_ACCOUNT for the remaining (non-doctor) modes — fail fast on a bad value.
+  // Every other mode: fail fast on a misconfigured environment. MAILWARDEN_TOOLS must be validated
+  // here too — in --http, registration otherwise runs per-request and a bad value would hang the
+  // first request instead of failing at boot.
+  resolveEnabledTiers(process.env);
   const account = activeAccount();
 
   // One-time interactive OAuth consent. Named accounts go via `--account <name>` (→ token.<name>.json);
@@ -141,6 +140,10 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  console.error(err);
+  // These are user-facing CLI errors with actionable messages (bad flag, bad env, unauthorized) —
+  // print the message, not a stack trace. Set MAILWARDEN_DEBUG=1 to see the full error.
+  console.error(
+    err instanceof Error && !process.env.MAILWARDEN_DEBUG ? `mailwarden: ${err.message}` : err,
+  );
   process.exit(1);
 });

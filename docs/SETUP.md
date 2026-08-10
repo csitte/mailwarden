@@ -176,7 +176,7 @@ the last 2 days"* — you should get real thread summaries back.
 > **Start here:** `npx -y mailwarden --check` (add `--account <name>` for a named account). The
 > doctor diagnoses most of the cases below in one command and prints the fix.
 
-### "mailwarden is not authorized yet. Run `mailwarden --auth` once…"
+### "Not authorized yet for … (no token at …). Run `mailwarden --auth` once…"
 
 The server found no token file. Run step 5. If you *did* run it, the `--auth` run and the
 server are looking at **different files** — check both of these agree:
