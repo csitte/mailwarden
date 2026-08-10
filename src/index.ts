@@ -50,8 +50,10 @@ async function main(): Promise<void> {
   if (mode === "auth") {
     // A bare positional (e.g. `mailwarden --auth work`) is almost certainly a forgotten `--account`;
     // refuse it rather than silently authorizing — and overwriting — the DEFAULT token.
+    // `!== undefined`, not truthiness: an EMPTY positional (`--auth "$UNSET"`) is present
+    // and must be refused — the same falsy-empty accident fixed in readAccountArg.
     const stray = findStrayPositional(args);
-    if (stray) {
+    if (stray !== undefined) {
       throw new CliError(
         `Unexpected argument '${stray}'. To authorize a named account use: mailwarden --auth --account <name>.`,
       );
@@ -125,12 +127,16 @@ async function main(): Promise<void> {
 main().catch((err) => {
   // Errors written for the user (bad flag, bad env, not authorized) print as a plain line; an
   // internal fault keeps its stack, because a bare one-liner is not a usable bug report.
-  const actionable = err instanceof CliError;
-  if (actionable && !debugEnabled(process.env)) {
-    console.error(`mailwarden: ${(err as Error).message}`);
-    console.error("(set MAILWARDEN_DEBUG=1 for the full error)");
+  if (debugEnabled(process.env) || !(err instanceof Error)) {
+    console.error(err); // full object + stack
   } else {
-    console.error(err);
+    console.error(`mailwarden: ${err.message}`);
+    // An unexpected fault needs its stack to be reportable; say how to get it either way.
+    console.error(
+      err instanceof CliError
+        ? "(set MAILWARDEN_DEBUG=1 for the full error)"
+        : "(unexpected error — set MAILWARDEN_DEBUG=1 for the stack trace)",
+    );
   }
   process.exit(1);
 });

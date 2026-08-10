@@ -98,4 +98,47 @@ describe("multi-account", () => {
     const { discoverAccounts } = await freshAuth(tmp);
     expect(discoverAccounts()).toEqual(["personal", "work"]);
   });
+  it("readGrantedScopes never throws and names WHY the scopes are unreadable", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-acct-"));
+    const { readGrantedScopes } = await freshAuth(tmp);
+
+    // No token at all.
+    expect(await readGrantedScopes()).toEqual({ known: false, reason: "no-token" });
+
+    // A token file containing literal `null` used to crash --check with a raw TypeError.
+    await fs.writeFile(path.join(tmp, "token.json"), "null");
+    expect(await readGrantedScopes()).toEqual({ known: false, reason: "unrecorded" });
+
+    // Present but no scope field.
+    await fs.writeFile(path.join(tmp, "token.json"), JSON.stringify({ type: "authorized_user" }));
+    expect(await readGrantedScopes()).toEqual({ known: false, reason: "unrecorded" });
+
+    // Recorded scopes are split.
+    await fs.writeFile(
+      path.join(tmp, "token.json"),
+      JSON.stringify({ type: "authorized_user", scope: "https://a  https://b" }),
+    );
+    expect(await readGrantedScopes()).toEqual({ known: true, scopes: ["https://a", "https://b"] });
+  });
+
+  it("distinguishes a locked encrypted token from a wrong passphrase", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-acct-"));
+    const { encryptToken } = await freshAuth(tmp);
+    const envelope = encryptToken(JSON.stringify({ scope: "https://a" }), "right");
+    await fs.writeFile(path.join(tmp, "token.json"), JSON.stringify(envelope));
+
+    const locked = await freshAuth(tmp); // no passphrase in env
+    expect(await locked.readGrantedScopes()).toEqual({ known: false, reason: "locked" });
+
+    vi.stubEnv("MAILWARDEN_TOKEN_PASSPHRASE", "wrong");
+    const bad = await import("../src/auth.js");
+    expect(await bad.readGrantedScopes()).toEqual({ known: false, reason: "bad-key" });
+  });
+
+  it("discoverAccounts keeps the real on-disk names (a Linux mixed-case file must stay visible)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-acct-"));
+    await fs.writeFile(path.join(tmp, "token.work.json"), "{}");
+    const { discoverAccounts } = await freshAuth(tmp);
+    expect(discoverAccounts()).toEqual(["work"]);
+  });
 });

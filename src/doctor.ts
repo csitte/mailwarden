@@ -17,6 +17,7 @@ import {
   discoverAccounts,
   checkCredentials,
   readGrantedScopes,
+  type ScopeRead,
   tokenFileState,
   getAuth,
   type CredCheck,
@@ -40,8 +41,8 @@ export interface DoctorInputs {
   tokenState: "missing" | "plaintext" | "encrypted" | "invalid";
   /** Whether MAILWARDEN_TOKEN_PASSPHRASE is set (only relevant for an encrypted token). */
   passphraseSet: boolean;
-  /** Recorded granted scopes, or null when unknown (old/encrypted token). */
-  grantedScopes: string[] | null;
+  /** Granted scopes, or the reason they could not be read (see auth.ScopeRead). */
+  grantedScopes: ScopeRead;
   enabledTiers: Set<ToolTier>;
   requiredScopes: string[];
   /** Live getProfile result; null when it was not attempted (no usable token). */
@@ -105,24 +106,41 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
 
   // 3. Granted scopes vs. what the enabled tiers need.
   const tiers = [...i.enabledTiers].join(", ");
-  if (i.grantedScopes === null) {
-    // Genuinely unknown: a token written before scopes were recorded, or an encrypted one whose
-    // passphrase is missing (that case already fails the Token check above with its own fix).
-    // Never report unknown scopes as "ok" — that would green-light a token that lacks one.
-    if (i.tokenState === "plaintext" || i.tokenState === "encrypted") {
+  const need = `Enabled tiers (${tiers}) need: ${i.requiredScopes.map(SCOPE_SHORT).join(", ")}.`;
+  if (!i.grantedScopes.known) {
+    // Each reason gets its OWN remediation. Telling a merely *locked* token to "re-run --auth to
+    // record scopes" is both false and destructive: re-authorizing without the passphrase in the
+    // environment replaces the encrypted token with a plaintext one.
+    const reason = i.grantedScopes.reason;
+    if (reason === "no-token" || reason === "unreadable") {
+      // The Token check already reported this with its fix; a second line would just repeat it.
+    } else if (reason === "locked") {
       checks.push({
         name: "Scopes",
         status: "warn",
         detail:
-          `Enabled tiers (${tiers}) need: ${i.requiredScopes.map(SCOPE_SHORT).join(", ")}. ` +
-          `The stored token records no scopes (authorized before scope-recording) — cannot verify; ` +
-          `re-run \`${authCmd}\` to record them.`,
+          `${need} Recorded inside the encrypted token, which cannot be read without ` +
+          "MAILWARDEN_TOKEN_PASSPHRASE — set it and re-run `--check`. " +
+          "(Do NOT re-run `--auth` without it: that would replace the encrypted token with a plaintext one.)",
+      });
+    } else if (reason === "bad-key") {
+      checks.push({
+        name: "Scopes",
+        status: "warn",
+        detail: `${need} Cannot verify — MAILWARDEN_TOKEN_PASSPHRASE does not decrypt this token (see the Token check).`,
+      });
+    } else {
+      // "unrecorded": genuinely written before scopes were recorded — here --auth does fix it.
+      checks.push({
+        name: "Scopes",
+        status: "warn",
+        detail: `${need} The stored token records no scopes (authorized before scope-recording) — cannot verify; re-run \`${authCmd}\` to record them.`,
       });
     }
   } else {
     // Capability containment, not string equality: gmail.modify covers gmail.readonly, so a
     // full-surface token must not be reported as broken for a read-only deployment.
-    const missing = missingScopes(i.grantedScopes, i.requiredScopes);
+    const missing = missingScopes(i.grantedScopes.scopes, i.requiredScopes);
     checks.push(
       missing.length === 0
         ? {
@@ -135,7 +153,13 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
             status: "fail",
             detail:
               `Enabled tiers (${tiers}) need ${missing.map(SCOPE_SHORT).join(", ")}, which the token lacks. ` +
-              `Re-run \`${authCmd}\` with those tiers enabled (MAILWARDEN_TOOLS).`,
+              `Re-run \`${authCmd}\` with those tiers enabled (MAILWARDEN_TOOLS).` +
+              // The running server gates tools on the SYNC scope read, which cannot decrypt — so
+              // for an encrypted token it advertises everything and fails only at call time.
+              // Say so, or --check and the live tool list look like they disagree.
+              (i.tokenState === "encrypted"
+                ? " Note: with an encrypted token the server cannot read scopes at startup, so it still advertises those tools — they will fail when called."
+                : ""),
           },
     );
   }
@@ -208,7 +232,9 @@ export async function runDoctor(): Promise<number> {
     console.error("\n✗ Setup has problems — fix the account name (`--account` / MAILWARDEN_ACCOUNT) and re-run.");
     return 1;
   }
-  const others = discoverAccounts().filter((a) => a !== account);
+  // Compare case-insensitively: on Windows/macOS `token.Work.json` IS the active `work`
+  // account, while on Linux it is a different file and stays listed under its real name.
+  const others = discoverAccounts().filter((a) => a.toLowerCase() !== account);
   console.error(`  Account: ${account ?? "(default)"}`);
   if (others.length) console.error(`  Other accounts found: ${others.join(", ")}`);
   console.error("");

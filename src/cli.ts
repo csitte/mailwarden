@@ -16,10 +16,10 @@ export class CliError extends Error {
   }
 }
 
-/** Whether the debug escape hatch is on. `MAILWARDEN_DEBUG=0`/`false`/empty means OFF. */
+/** Whether the debug escape hatch is on. `0`/`false`/`no`/`off`/empty all mean OFF. */
 export function debugEnabled(env: NodeJS.ProcessEnv): boolean {
   const v = env.MAILWARDEN_DEBUG?.trim().toLowerCase();
-  return v !== undefined && v !== "" && v !== "0" && v !== "false" && v !== "no";
+  return v !== undefined && !["", "0", "false", "no", "off"].includes(v);
 }
 
 /** Which run mode the argv selects. Order matters: the doctor is checked before everything else. */
@@ -61,7 +61,13 @@ export function readAccountArg(args: string[]): string | undefined {
     // An EMPTY value must throw too, not read as "absent": `--account "$ACCT"` with an unset
     // variable would otherwise resolve to the default account and let --auth overwrite the
     // default token — the very accident this flag prevents.
-    if (v === undefined || v.startsWith("-") || v.trim() === "") missing();
+    // `--account --http` is the next FLAG, i.e. the value was forgotten…
+    if (v === undefined || v.trim() === "" || v.startsWith("--")) missing();
+    // …whereas `--account -work` is a value that is present but malformed. Saying "needs a
+    // value" there would send the user to add one they already typed.
+    if (v.startsWith("-")) {
+      throw new CliError(`Invalid account name "${v}" — it must not start with "-".`);
+    }
     return v;
   }
   const eq = args.find((a) => a.startsWith("--account="));

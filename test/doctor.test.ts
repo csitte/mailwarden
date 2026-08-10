@@ -19,7 +19,7 @@ function inputs(over: Partial<DoctorInputs> = {}): DoctorInputs {
     account: null,
     tokenState: "plaintext",
     passphraseSet: false,
-    grantedScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
+    grantedScopes: { known: true, scopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC] },
     enabledTiers: tiers("read", "manage", "filters"),
     requiredScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
     profile: { ok: true, email: "me@example.com" },
@@ -43,7 +43,7 @@ describe("buildReport", () => {
   });
 
   it("fails when no token exists and tells the user to run --auth", () => {
-    const r = buildReport(inputs({ tokenState: "missing", grantedScopes: null, profile: null }));
+    const r = buildReport(inputs({ tokenState: "missing", grantedScopes: { known: false, reason: "no-token" }, profile: null }));
     expect(check(r, "Token")).toMatchObject({ status: "fail" });
     expect(check(r, "Token").detail).toMatch(/--auth/);
     // No scope/live checks piled on top of a missing token.
@@ -53,7 +53,7 @@ describe("buildReport", () => {
   });
 
   it("fails an encrypted token when no passphrase is set", () => {
-    const r = buildReport(inputs({ tokenState: "encrypted", passphraseSet: false, grantedScopes: null, profile: null }));
+    const r = buildReport(inputs({ tokenState: "encrypted", passphraseSet: false, grantedScopes: { known: false, reason: "no-token" }, profile: null }));
     expect(check(r, "Token")).toMatchObject({ status: "fail" });
     expect(check(r, "Token").detail).toMatch(/MAILWARDEN_TOKEN_PASSPHRASE/);
   });
@@ -70,7 +70,7 @@ describe("buildReport", () => {
 
   it("fails when granted scopes don't cover the enabled tiers", () => {
     const r = buildReport(
-      inputs({ grantedScopes: [GMAIL_READONLY], requiredScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC] }),
+      inputs({ grantedScopes: { known: true, scopes: [GMAIL_READONLY] }, requiredScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC] }),
     );
     const scopes = check(r, "Scopes");
     expect(scopes.status).toBe("fail");
@@ -80,7 +80,7 @@ describe("buildReport", () => {
   });
 
   it("warns (not fails) when scopes are unknown but a token exists", () => {
-    const r = buildReport(inputs({ grantedScopes: null }));
+    const r = buildReport(inputs({ grantedScopes: { known: false, reason: "unrecorded" } }));
     expect(check(r, "Scopes")).toMatchObject({ status: "warn" });
     expect(reportExitCode(r)).toBe(0); // unknown scopes must not be a hard failure
   });
@@ -90,7 +90,7 @@ describe("buildReport", () => {
     // just because MAILWARDEN_TOOLS=read narrows the required scope list.
     const r = buildReport(
       inputs({
-        grantedScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
+        grantedScopes: { known: true, scopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC] },
         requiredScopes: [GMAIL_READONLY],
         enabledTiers: tiers("read"),
       }),
@@ -103,8 +103,44 @@ describe("buildReport", () => {
     // runDoctor decrypts (readGrantedScopes), so unknown here means genuinely unknown. Calling
     // that "ok" would green-light a token that lacks a required scope: the doctor would print
     // "Setup looks good" and the very next create_filter call would fail on insufficient scope.
-    const r = buildReport(inputs({ tokenState: "encrypted", passphraseSet: true, grantedScopes: null }));
+    const r = buildReport(inputs({ tokenState: "encrypted", passphraseSet: true, grantedScopes: { known: false, reason: "unrecorded" } }));
     expect(check(r, "Scopes").status).toBe("warn");
+  });
+
+  it("never advises --auth for a LOCKED token — that would replace it with a plaintext one", () => {
+    // readGrantedScopes returns null for a missing passphrase too. Reusing the "records no
+    // scopes, re-run --auth" text there is both false and destructive: re-authorizing without
+    // the passphrase in the environment rewrites the encrypted token in plaintext.
+    const r = buildReport(
+      inputs({ tokenState: "encrypted", passphraseSet: false, grantedScopes: { known: false, reason: "locked" } }),
+    );
+    const scopes = check(r, "Scopes");
+    expect(scopes.status).toBe("warn");
+    expect(scopes.detail).toMatch(/MAILWARDEN_TOKEN_PASSPHRASE/);
+    expect(scopes.detail).not.toMatch(/records no scopes/);
+    expect(scopes.detail).toMatch(/Do NOT re-run/);
+  });
+
+  it("reports a wrong passphrase as such, not as a missing scope record", () => {
+    const r = buildReport(
+      inputs({ tokenState: "encrypted", passphraseSet: true, grantedScopes: { known: false, reason: "bad-key" } }),
+    );
+    expect(check(r, "Scopes").detail).toMatch(/does not decrypt/);
+    expect(check(r, "Scopes").detail).not.toMatch(/records no scopes/);
+  });
+
+  it("warns about the tool surface when an encrypted token lacks a scope", () => {
+    // Registration cannot decrypt, so the server advertises the tools anyway — say so, or
+    // --check and the live tool list look like they contradict each other.
+    const r = buildReport(
+      inputs({
+        tokenState: "encrypted",
+        passphraseSet: true,
+        grantedScopes: { known: true, scopes: [GMAIL_READONLY] },
+        requiredScopes: [GMAIL_MODIFY],
+      }),
+    );
+    expect(check(r, "Scopes").detail).toMatch(/still advertises those tools/);
   });
 
   it("checks the real scopes of an encrypted token once they are known", () => {
@@ -112,7 +148,7 @@ describe("buildReport", () => {
       inputs({
         tokenState: "encrypted",
         passphraseSet: true,
-        grantedScopes: [GMAIL_READONLY], // decrypted by readGrantedScopes
+        grantedScopes: { known: true, scopes: [GMAIL_READONLY] }, // decrypted by readGrantedScopes
         requiredScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
       }),
     );
@@ -121,7 +157,7 @@ describe("buildReport", () => {
   });
 
   it("names the account in remediation so a named-account user can't clobber the default token", () => {
-    const r = buildReport(inputs({ account: "work", tokenState: "missing", grantedScopes: null, profile: null }));
+    const r = buildReport(inputs({ account: "work", tokenState: "missing", grantedScopes: { known: false, reason: "no-token" }, profile: null }));
     expect(check(r, "Token").detail).toMatch(/mailwarden --auth --account work/);
   });
 

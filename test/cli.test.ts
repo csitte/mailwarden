@@ -42,6 +42,10 @@ describe("readAccountArg", () => {
     );
   });
 
+  it("says a dash-prefixed value is malformed, not missing", () => {
+    expect(() => readAccountArg(["--auth", "--account", "-work"])).toThrow(/must not start with/);
+  });
+
   it("returns a non-empty value RAW, without validating the name", () => {
     // A malformed name must survive to --check, whose job is to report it; name validation is
     // sanitizeAccount's, applied by the modes that should fail fast.
@@ -83,6 +87,12 @@ describe("findStrayPositional", () => {
   it("does not flag the value of --account", () => {
     expect(findStrayPositional(["--auth", "--account", "work"])).toBeUndefined();
     expect(findStrayPositional(["--auth", "--account=work"])).toBeUndefined();
+  });
+
+  it("returns an EMPTY positional as present, so the caller cannot treat it as absent", () => {
+    // `mailwarden --auth "$UNSET"` yields "": the guard must fire, or the consent silently
+    // overwrites the DEFAULT account's token. Callers compare `!== undefined`, not truthiness.
+    expect(findStrayPositional(["--auth", ""])).toBe("");
   });
 
   it("does not flag flag-only argv", () => {

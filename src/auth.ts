@@ -72,13 +72,15 @@ export function tokenPath(account: string | null = activeAccount()): string {
  */
 export function discoverAccounts(): string[] {
   try {
-    // Normalize + dedupe: names are lower-cased (see sanitizeAccount), so a legacy
-    // `token.Work.json` is the SAME account as `work` — listing it raw would report one
-    // account as two and invent a second account that does not exist.
-    const names = readdirSync(CONFIG_DIR)
-      .map((f) => /^token\.(.+)\.json$/.exec(f)?.[1]?.toLowerCase())
-      .filter((n): n is string => Boolean(n));
-    return [...new Set(names)].sort();
+    // Names are returned EXACTLY as they appear on disk. Lower-casing them here would hide a
+    // real `token.Work.json` on a case-sensitive filesystem (Linux), where it is a genuinely
+    // different file from `token.work.json` — and the raw filename is the user's only clue that
+    // an unreachable token exists. Callers that need to match the active account compare
+    // case-insensitively instead (see runDoctor).
+    return readdirSync(CONFIG_DIR)
+      .map((f) => /^token\.(.+)\.json$/.exec(f)?.[1])
+      .filter((n): n is string => Boolean(n))
+      .sort();
   } catch {
     return [];
   }
@@ -160,43 +162,54 @@ export function decryptToken(enc: EncryptedToken, passphrase: string): string {
  */
 export function persistedScopes(): string[] | null {
   try {
-    const parsed = JSON.parse(readFileSync(tokenPath(), "utf8")) as { type?: unknown; scope?: unknown };
-    if (parsed.type === ENC_TYPE) return null; // encrypted → scope not readable without the key
-    return typeof parsed.scope === "string" && parsed.scope.trim()
-      ? parsed.scope.trim().split(/\s+/)
-      : null;
+    const parsed: unknown = JSON.parse(readFileSync(tokenPath(), "utf8"));
+    if (isEncrypted(parsed)) return null; // encrypted → scope not readable without the key
+    return scopesOf(parsed);
   } catch {
     return null; // missing / unreadable / not JSON
   }
 }
 
+/** Pull the recorded scopes out of a parsed token payload; null when absent or the wrong shape. */
+function scopesOf(parsed: unknown): string[] | null {
+  const scope = (parsed as { scope?: unknown } | null)?.scope;
+  return typeof scope === "string" && scope.trim() ? scope.trim().split(/\s+/) : null;
+}
+
 /**
- * Granted scopes for the active account — the async counterpart of `persistedScopes`, which stays
- * synchronous and deliberately never decrypts because it runs while the tool surface is built.
- * Here (the `--check` doctor) we may decrypt: the passphrase is at hand and the doctor already
- * loads the token for its live call, so an encrypted token's scopes are genuinely knowable.
- * Reporting them as "unknown" would let `--check` green-light a token that lacks a required scope.
- * Returns null only when the scopes really cannot be determined (no token, unreadable, no
- * passphrase for an encrypted one, or a token written before scopes were recorded).
+ * Why the granted scopes could not be read — `--check` must tell these apart. Collapsing them
+ * into one "unknown" produced a false "token records no scopes, re-run `--auth`" for a merely
+ * locked token, and following that advice re-authorizes WITHOUT the passphrase, replacing an
+ * encrypted token with a plaintext one.
  */
-export async function readGrantedScopes(): Promise<string[] | null> {
+export type ScopeRead =
+  | { known: true; scopes: string[] } // recorded and readable
+  | { known: false; reason: "no-token" | "unrecorded" | "locked" | "bad-key" | "unreadable" };
+
+/**
+ * Granted scopes for the active account, decrypting when the passphrase is available. The async
+ * counterpart of `persistedScopes`, which stays synchronous and never decrypts because it runs
+ * while the tool surface is built. Never throws: every failure is a `reason`, so the doctor can
+ * report the real cause instead of crashing or guessing.
+ */
+export async function readGrantedScopes(): Promise<ScopeRead> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(await fs.readFile(tokenPath(), "utf8"));
-  } catch {
-    return null;
+  } catch (err) {
+    return { known: false, reason: (err as NodeJS.ErrnoException).code === "ENOENT" ? "no-token" : "unreadable" };
   }
   if (isEncrypted(parsed)) {
     const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
-    if (!key) return null; // can't read it — the Token check reports this with its fix
+    if (!key) return { known: false, reason: "locked" };
     try {
       parsed = JSON.parse(decryptToken(parsed, key));
     } catch {
-      return null;
+      return { known: false, reason: "bad-key" };
     }
   }
-  const scope = (parsed as { scope?: unknown }).scope;
-  return typeof scope === "string" && scope.trim() ? scope.trim().split(/\s+/) : null;
+  const scopes = scopesOf(parsed);
+  return scopes ? { known: true, scopes } : { known: false, reason: "unrecorded" };
 }
 
 /**
@@ -416,7 +429,7 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
       throw new CliError(
-        `Cannot read ${CRED_PATH} — it exists but could not be read (${code}). Check file permissions. See docs/SETUP.md.`,
+        `Cannot read ${CRED_PATH} — it exists but could not be read (${code ?? "unknown error"}). Check file permissions. See docs/SETUP.md.`,
       );
     }
     raw = null;
