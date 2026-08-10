@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The dependency tree used in development now matches what users get.** A `uuid` override was
+  forcing a patched version locally; npm `overrides` apply only to the root project, so it cleared
+  our `npm audit` while every user still resolved the original version — and we were testing a tree
+  nobody runs. Removed. `SECURITY.md` now documents the resulting googleapis-chain advisories and
+  why they are not reachable (`uuid.v4()` is called without the affected `buf` argument).
+
 ## [0.7.0] - 2026-08-10
 
 Multiple Gmail accounts, a setup doctor, and a published threat model. All additive — an existing

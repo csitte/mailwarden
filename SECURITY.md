@@ -95,6 +95,26 @@ A crafted attachment filename tries to escape the download directory.
   (realpath-canonicalized, symlink-aware) and never overwrite an existing file (collisions get a
   numeric suffix).
 
+## Dependency advisories
+
+`npm audit` reports **4 moderate advisories** in mailwarden's production tree. They all trace to one
+upstream issue, and we would rather explain it than hide it:
+
+- **What it is.** `uuid` below 11.1.1 is missing a buffer bounds check — but only in `v3`/`v5`/`v6`
+  *when the caller supplies a `buf` argument*
+  ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)). It reaches us through
+  Google's own client chain: `googleapis` → `googleapis-common` / `gaxios` → `uuid`.
+- **Why it is not reachable here.** Both `gaxios` and `googleapis-common` call `uuid.v4()` only, with
+  no `buf` argument. `v4` is not among the affected functions, so no code path in mailwarden can
+  trigger the bug.
+- **Why we do not silence it.** An npm `overrides` entry would force a patched `uuid` — but overrides
+  apply only to the *root* project, so it would clear the advisory in **our** checkout while every
+  user still resolved the original version. That buys a clean report at the cost of testing a
+  dependency tree nobody actually runs. We removed such an override for exactly this reason: our
+  tree now matches what `npm install mailwarden` produces.
+- **Status.** No upstream fix is available (the advisory covers `googleapis` up to 149.0.0). We track
+  it and will pick up a fixed `googleapis` release when one ships.
+
 ## Explicit non-goals (what mailwarden does NOT defend against)
 
 Stating these plainly is part of the threat model:
