@@ -59,6 +59,7 @@ mailwarden", Kommando mit dem Pfad, der auf diesem Gerät existiert:
 `bash C:/gitwork/session-broker/watch-bridge.sh mailwarden` (Notebook).
 Jede Notification = neue Bridge-Nachricht an diese Session → Datei lesen, im Chat
 melden, gemäß Bridge-Protokoll reagieren. Der Watcher liest nur und ergänzt den
-Start-Scan; write-once bleibt. **Nur ein Watcher pro Session:** vor `/clear` per
-`TaskStop` beenden, sonst armt der frische Kontext einen zweiten und jede Nachricht
-kommt doppelt. Betriebsdoku: WATCHER.md neben dem Script.
+Start-Scan; write-once bleibt. **Watcher nicht entwaffnen:** er überlebt `/clear` und
+stellt weiter zu; ein zweiter Arm erkennt den laufenden und tritt zur Seite.
+`TaskStop` nur, wenn die Zustellung *sofort* aufhören soll. Zustand prüfen mit
+`bash D:/gitwork/session-broker/watch-bridge.sh --status mailwarden`. Betriebsdoku: WATCHER.md neben dem Script.
