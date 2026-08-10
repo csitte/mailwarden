@@ -7,44 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-08-10
+
+Multiple Gmail accounts, a setup doctor, and a published threat model. All additive — an existing
+single-account setup keeps working untouched, with no re-authorization.
+
 ### Added
-- **Multiple accounts.** `MAILWARDEN_ACCOUNT=<name>` selects a named account whose token lives in
-  `token.<name>.json`; `mailwarden --auth --account <name>` provisions it. One shared `credentials.json`
-  authorizes several Gmail accounts; run them side by side by registering the server once per account.
-  Fully backward compatible — unset means the default `token.json` as before.
-- **`mailwarden --check` (setup doctor).** Diagnoses the OAuth setup end to end — `credentials.json`
-  shape, token presence/encryption, whether the granted scopes cover the enabled tiers, and one live
-  Gmail call — printing a concrete fix for anything wrong and exiting non-zero on failure (usable in
-  CI/health checks). `--doctor` is an alias.
+- **Multiple accounts.** `MAILWARDEN_ACCOUNT=<name>` selects a named account whose refresh token
+  lives in `token.<name>.json`; `mailwarden --auth --account <name>` provisions it. One shared
+  `credentials.json` authorizes several Gmail accounts — run them side by side by registering the
+  server once per account, each instance fully isolated (own token, own granted scopes, own tool
+  surface). Account names are case-insensitive and stored lower-cased, so a name always maps to
+  exactly one mailbox on every filesystem. Unset means the default `token.json`, exactly as before.
+- **`mailwarden --check` (setup doctor).** Diagnoses the OAuth setup end to end and prints a
+  concrete fix for anything wrong, instead of failing cryptically on the first Gmail call: the
+  `credentials.json` shape (telling an unreadable file apart from a missing one), whether a token
+  exists and whether it is encrypted, whether the granted scopes cover the enabled tiers (by
+  capability — `gmail.modify` satisfies a read-only deployment), and one live Gmail call. Reports
+  the active account and any others it finds, and names the matching `--account` in every
+  remediation. Exits non-zero on failure, so it works as a CI/health check. `--doctor` is an alias.
+- **[`SECURITY.md`](SECURITY.md) — a published threat model.** Trust boundary, data flow, the
+  mitigations for seven threat classes (prompt-injection exfiltration, destructive actions, stale
+  state, token theft, the HTTP listener, path traversal), explicit non-goals, and a private
+  vulnerability-reporting path.
 - **Runnable re-verification demo** (`scripts/demo-reverify.mjs`). Credential-free proof that
-  `search()` drops the Gmail index's `is:unread` false positives; asserts its outcome and is linked
-  from the README.
+  `search()` drops the Gmail index's `is:unread` false positives — it drives the real `search()`
+  against a deliberately loose fake index, asserts the outcome, and runs as part of the test suite.
+- **README: a named comparison against other Gmail MCP servers**, plus a worked example of why
+  live re-verification matters.
+
+### Changed
+- **CLI errors print one actionable line instead of a stack trace.** Unexpected faults still say
+  how to get the full error; `MAILWARDEN_DEBUG=1` forces it for everything.
 
 ### Fixed
-- **Account names are case-insensitive** and stored lower-cased (`--account Work` →
-  `token.work.json`), so `Work` and `work` can no longer map to one token file on Windows/macOS
-  (where the second `--auth` would silently overwrite the first account's token and the server would
-  act on the wrong mailbox). `--check` lists discovered accounts normalized, so one account is never
-  reported as two.
-- **An empty `--account` value is rejected** instead of falling back to the default account —
-  `--account "$VAR"` with an unset variable no longer authorizes over the default token.
-- **`--check` never reports unknown scopes as OK.** An encrypted token's scopes are now read
-  (decrypted) for the check, so a token missing a required scope is reported instead of being
-  green-lit by a "Setup looks good".
-- **`--check` accepts a token that is *more* privileged than the enabled tiers.** The scope check
-  now compares capabilities instead of strings, so a `gmail.modify` grant satisfies a read-only
-  deployment's `gmail.readonly` instead of failing with exit 1 and advising a scope downgrade.
-- **Authorization errors name the account and its token file**, and the `--auth` command they
-  suggest carries the matching `--account` — a named-account user is no longer steered into
-  overwriting the default account's token.
-- **`--check` diagnoses configuration it used to crash on**: a malformed `MAILWARDEN_ACCOUNT`
-  (also when given as `--account`) or `MAILWARDEN_TOOLS` is now reported as a check line instead of
-  a raw stack trace. Other modes still fail fast.
-- **`--check` distinguishes an unreadable `credentials.json` from a missing one** (`EACCES`/`EISDIR`
-  no longer read as "not found — download it from Google Cloud").
-- **User-facing CLI errors print their message instead of a stack trace**; internal faults keep the
-  full stack, and `MAILWARDEN_DEBUG=1` forces it for everything (`MAILWARDEN_DEBUG=0` correctly
-  means off).
+- The "could not be read" message for an unreadable `credentials.json` no longer prints
+  `(undefined)` when the underlying error carries no errno.
 
 ## [0.6.1] - 2026-08-09
 
@@ -442,7 +440,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/csitte/mailwarden/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/csitte/mailwarden/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/csitte/mailwarden/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/csitte/mailwarden/compare/v0.4.0...v0.5.0
