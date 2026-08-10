@@ -1,3 +1,4 @@
+import { CliError } from "./cli.js";
 import { timingSafeEqual } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -35,7 +36,7 @@ export function parsePort(raw: string | undefined): number {
   if (raw === undefined || raw.trim() === "") return 8787;
   const n = Number(raw);
   if (!Number.isInteger(n) || n < 1 || n > 65535) {
-    throw new Error(`Invalid PORT "${raw}" — must be an integer between 1 and 65535.`);
+    throw new CliError(`Invalid PORT "${raw}" — must be an integer between 1 and 65535.`);
   }
   return n;
 }
@@ -60,7 +61,7 @@ export function isLoopbackHost(host: string): boolean {
 /** Throws with an actionable message when `--http` would expose an unauthenticated endpoint. */
 export function assertAuthConfigured(cfg: HttpConfig): void {
   if (!cfg.bearer && !cfg.allowNoToken) {
-    throw new Error(
+    throw new CliError(
       "Refusing to start --http without a bearer token — this would expose full Gmail access to any reachable client. " +
         "Set MAILWARDEN_TOKEN=<secret>, or set MAILWARDEN_ALLOW_NO_TOKEN=1 to run unauthenticated (only on a trusted, isolated network).",
     );

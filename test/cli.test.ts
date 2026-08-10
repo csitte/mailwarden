@@ -29,6 +29,19 @@ describe("readAccountArg", () => {
     expect(() => readAccountArg(["--auth", "--account="])).toThrow(/needs a value/);
   });
 
+  it("refuses two --account flags instead of silently picking one", () => {
+    // Taking either would authorize a mailbox the user did not mean to pick.
+    expect(() => readAccountArg(["--auth", "--account", "work", "--account", "personal"])).toThrow(
+      /more than once/,
+    );
+    expect(() => readAccountArg(["--auth", "--account=work", "--account=personal"])).toThrow(
+      /more than once/,
+    );
+    expect(() => readAccountArg(["--auth", "--account", "work", "--account=personal"])).toThrow(
+      /more than once/,
+    );
+  });
+
   it("returns a non-empty value RAW, without validating the name", () => {
     // A malformed name must survive to --check, whose job is to report it; name validation is
     // sanitizeAccount's, applied by the modes that should fail fast.

@@ -253,7 +253,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
     // "not authorized" so the user fixes the passphrase instead of pointlessly re-running --auth.
     const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
     if (!key) {
-      throw new Error(
+      throw new CliError(
         `${tp} is encrypted, but MAILWARDEN_TOKEN_PASSPHRASE is not set. Set it to the passphrase ` +
           "you used when authorizing, or re-run `mailwarden --auth` to store a fresh token.",
       );
@@ -265,7 +265,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
     try {
       decrypted = decryptToken(parsed, key);
     } catch {
-      throw new Error(
+      throw new CliError(
         `Could not decrypt ${tp} — MAILWARDEN_TOKEN_PASSPHRASE is wrong or the file is corrupted. ` +
           "Fix the passphrase, or re-run `mailwarden --auth` to store a fresh token.",
       );
@@ -415,14 +415,14 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code !== "ENOENT") {
-      throw new Error(
+      throw new CliError(
         `Cannot read ${CRED_PATH} — it exists but could not be read (${code}). Check file permissions. See docs/SETUP.md.`,
       );
     }
     raw = null;
   }
   const cred = checkCredentials(raw, CRED_PATH);
-  if (!cred.ok) throw new Error(cred.message);
+  if (!cred.ok) throw new CliError(cred.message);
 
   // `mailwarden --auth`: always run the browser consent flow. We deliberately do NOT return a
   // previously saved token here — a stale/expired token.json (e.g. the 7-day refresh-token expiry
@@ -431,7 +431,7 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
   const scopes = authScopesForTiers(resolveEnabledTiers(process.env));
   const client = (await authenticate({ scopes, keyfilePath: CRED_PATH })) as OAuth2Client;
   if (!client.credentials.refresh_token) {
-    throw new Error(
+    throw new CliError(
       "Consent completed but Google returned no refresh token — the old token was left untouched. " +
         "Revoke mailwarden's access at https://myaccount.google.com/permissions (or delete token.json), " +
         "then run `mailwarden --auth` again.",

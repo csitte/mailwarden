@@ -49,6 +49,12 @@ export function readAccountArg(args: string[]): string | undefined {
   const missing = () => {
     throw new CliError("`--account` needs a value, e.g. `--account work`.");
   };
+  // Two accounts in one command is a contradiction, not a preference: silently taking either
+  // would authorize a mailbox the user did not mean to pick. Refuse instead of guessing.
+  const given = args.filter((a) => a === "--account" || a.startsWith("--account="));
+  if (given.length > 1) {
+    throw new CliError("`--account` was given more than once — specify exactly one account.");
+  }
   const i = args.indexOf("--account");
   if (i !== -1) {
     const v = args[i + 1];
