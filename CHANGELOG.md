@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   crash on it. It runs in CI and — crucially — as the last gate before the irreversible `npm
   publish`. The `uuid` override below is exactly the class of defect it exists to catch: invisible
   to a test suite that runs against this repo's own `node_modules`.
+- **`SECURITY.md` documents why the account is not a tool parameter** (new threat class 8: acting on
+  the wrong mailbox). A process serves exactly one account, fixed by `MAILWARDEN_ACCOUNT` in the
+  server configuration and therefore outside the model's reach — so a prompt-injected call cannot
+  switch mailbox, and tool tiers and scopes stay resolved per instance (a read-only work account
+  next to a full-access private one). The cost — one server entry per account — is stated too.
 - **CI on every push and pull request to `main`** (Node 20 and 22). The only workflow before this
   fired on a version tag, so a broken commit stayed invisible until release — when the tag was
   already pushed.

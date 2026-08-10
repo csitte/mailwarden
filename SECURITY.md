@@ -95,6 +95,26 @@ A crafted attachment filename tries to escape the download directory.
   (realpath-canonicalized, symlink-aware) and never overwrite an existing file (collisions get a
   numeric suffix).
 
+### 8. Acting on the *wrong* mailbox (multi-account setups)
+Someone runs two accounts — say a read-only work mailbox alongside a full-access private one — and a
+prompt-injected instruction tries to reach the other one: *"archive everything in the work inbox."*
+
+- **The account is not a tool parameter.** No tool takes an `account` argument. A process serves
+  **exactly one** account, chosen by `MAILWARDEN_ACCOUNT` in the MCP server's configuration — that is,
+  outside the model's reach. There is no call the model can emit that switches mailbox, so a
+  compromised model is confined to the account whose server entry invoked it.
+- **Per-account authority stays distinct.** Because the account is fixed before any tool is
+  registered, tool tiers and OAuth scopes are resolved **per instance**: the work entry can run
+  `MAILWARDEN_TOOLS=read` against a `gmail.readonly` token while the private entry has the full
+  surface. Each account has its own token file, its own granted scopes, and its own tool surface.
+  Selecting the account per call would instead force one tool surface across mailboxes of differing
+  authority — the read-only mailbox would inherit the write tools of the other.
+
+The deliberate cost: one server entry per account, which is more configuration than a per-call
+account argument. That is the trade being made — configuration effort for a boundary the model
+cannot cross. It does **not** defend against misuse of an account *within* the authority that
+account's own token and tier grant it.
+
 ## Dependency advisories
 
 `npm audit` reports **4 moderate advisories** in mailwarden's production tree. They all trace to one
