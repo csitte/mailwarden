@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { buildReport, reportExitCode, type DoctorInputs } from "../src/doctor.js";
+import {
+  buildReport,
+  classifyCredRead,
+  reportExitCode,
+  shouldLiveCheck,
+  type DoctorInputs,
+} from "../src/doctor.js";
 import { GMAIL_MODIFY, GMAIL_SETTINGS_BASIC, GMAIL_READONLY, type ToolTier } from "../src/tiers.js";
 
 const tiers = (...t: ToolTier[]) => new Set(t);
@@ -111,5 +117,51 @@ describe("buildReport", () => {
     );
     expect(check(r, "Live Gmail call")).toMatchObject({ status: "fail" });
     expect(reportExitCode(r)).toBe(1);
+  });
+});
+
+describe("classifyCredRead — absent vs unreadable", () => {
+  const P = "/cfg/credentials.json";
+
+  it("passes a successful read through to checkCredentials", () => {
+    const ok = classifyCredRead(
+      { ok: true, raw: JSON.stringify({ installed: { client_id: "i", client_secret: "s" } }) },
+      P,
+    );
+    expect(ok).toMatchObject({ ok: true, kind: "installed" });
+  });
+
+  it("reports ENOENT as 'not found' with the download instructions", () => {
+    const r = classifyCredRead({ ok: false, code: "ENOENT" }, P);
+    expect(r.ok).toBe(false);
+    expect((r as { message: string }).message).toMatch(/No OAuth credentials found/);
+  });
+
+  it("reports a present-but-unreadable file as a permissions problem, not as missing", () => {
+    // Telling an EACCES/EISDIR user to re-download the file sends them in circles.
+    for (const code of ["EACCES", "EISDIR", "EPERM"]) {
+      const r = classifyCredRead({ ok: false, code }, P);
+      expect(r.ok).toBe(false);
+      const msg = (r as { message: string }).message;
+      expect(msg).toMatch(new RegExp(code));
+      expect(msg).toMatch(/could not be read/);
+      expect(msg).not.toMatch(/No OAuth credentials found/);
+    }
+  });
+});
+
+describe("shouldLiveCheck", () => {
+  it("tries a live call for a usable token", () => {
+    expect(shouldLiveCheck("plaintext", false)).toBe(true);
+    expect(shouldLiveCheck("plaintext", true)).toBe(true);
+    expect(shouldLiveCheck("encrypted", true)).toBe(true);
+  });
+
+  it("skips it when the token cannot be loaded at all", () => {
+    // Encrypted without a passphrase: the Token check already reports it — a live call would
+    // only duplicate that failure. Missing/invalid have nothing to call with.
+    expect(shouldLiveCheck("encrypted", false)).toBe(false);
+    expect(shouldLiveCheck("missing", true)).toBe(false);
+    expect(shouldLiveCheck("invalid", true)).toBe(false);
   });
 });

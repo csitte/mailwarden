@@ -9,6 +9,7 @@ import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { runDoctor } from "./doctor.js";
+import { findStrayPositional, readAccountArg, resolveMode } from "./cli.js";
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
@@ -16,26 +17,6 @@ function makeServer(): McpServer {
   const server = new McpServer({ name: "mailwarden", version: VERSION });
   registerTools(server);
   return server;
-}
-
-/**
- * Read an explicit `--account <name>` / `--account=<name>` from argv (undefined if absent), and
- * validate the name. Throws — rather than silently defaulting — on a value-less `--account` (last
- * arg, or immediately followed by another flag), so a dropped name never lands auth in the wrong
- * token file.
- */
-function readAccountArg(args: string[]): string | undefined {
-  const i = args.indexOf("--account");
-  if (i !== -1) {
-    const v = args[i + 1];
-    if (v === undefined || v.startsWith("-")) {
-      throw new Error("`--account` needs a value, e.g. `--account work`.");
-    }
-    return v;
-  }
-  const eq = args.find((a) => a.startsWith("--account="));
-  if (eq !== undefined) return eq.slice("--account=".length);
-  return undefined;
 }
 
 async function main(): Promise<void> {
@@ -49,9 +30,11 @@ async function main(): Promise<void> {
   const accountArg = readAccountArg(args);
   if (accountArg !== undefined) process.env.MAILWARDEN_ACCOUNT = accountArg;
 
+  const mode = resolveMode(args);
+
   // Setup doctor first: it diagnoses a malformed MAILWARDEN_ACCOUNT / MAILWARDEN_TOOLS itself
   // (with a formatted report) rather than crashing on the misconfiguration it exists to explain.
-  if (args.includes("--check") || args.includes("--doctor")) {
+  if (mode === "check") {
     process.exitCode = await runDoctor();
     return;
   }
@@ -64,10 +47,10 @@ async function main(): Promise<void> {
 
   // One-time interactive OAuth consent. Named accounts go via `--account <name>` (→ token.<name>.json);
   // otherwise MAILWARDEN_ACCOUNT / the default token.json.
-  if (args.includes("--auth")) {
+  if (mode === "auth") {
     // A bare positional (e.g. `mailwarden --auth work`) is almost certainly a forgotten `--account`;
     // refuse it rather than silently authorizing — and overwriting — the DEFAULT token.
-    const stray = args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--account");
+    const stray = findStrayPositional(args);
     if (stray) {
       throw new Error(
         `Unexpected argument '${stray}'. To authorize a named account use: mailwarden --auth --account <name>.`,
@@ -97,7 +80,7 @@ async function main(): Promise<void> {
   }
 
   // Cron-friendly: resurface due snoozes and exit.
-  if (args.includes("--sweep")) {
+  if (mode === "sweep") {
     if (hasModifyScope() === false) {
       console.error(
         "mailwarden: the stored token is read-only (no gmail.modify) — snooze sweeping writes labels. " +
@@ -110,7 +93,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (args.includes("--http")) {
+  if (mode === "http") {
     await startHttp(makeServer);
     return;
   }

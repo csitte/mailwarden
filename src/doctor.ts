@@ -161,6 +161,36 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
   return checks;
 }
 
+/**
+ * Classify the outcome of reading credentials.json. Pure, so the distinction that matters can be
+ * tested: a file that is *absent* needs "download it from Google Cloud", while one that exists but
+ * cannot be read (EACCES after a restore, EISDIR from a path pointing at a folder) needs a
+ * permissions fix — telling that user to re-download sends them in circles.
+ */
+export function classifyCredRead(
+  outcome: { ok: true; raw: string } | { ok: false; code?: string },
+  credPath: string,
+): CredCheck {
+  if (outcome.ok) return checkCredentials(outcome.raw, credPath);
+  if (outcome.code === "ENOENT") return checkCredentials(null, credPath);
+  return {
+    ok: false,
+    message: `Cannot read ${credPath} — it exists but could not be read (${outcome.code}). Check file permissions.`,
+  };
+}
+
+/**
+ * Whether attempting a live Gmail call is worthwhile. Pure. An encrypted token with no passphrase
+ * cannot be loaded at all: the Token check already reports that with its fix, so calling anyway
+ * would only repeat the same failure as a second ✗ line.
+ */
+export function shouldLiveCheck(
+  tokenState: DoctorInputs["tokenState"],
+  passphraseSet: boolean,
+): boolean {
+  return tokenState === "plaintext" || (tokenState === "encrypted" && passphraseSet);
+}
+
 /** Worst status present, which maps to the process exit code (fail → 1). */
 export function reportExitCode(checks: DoctorCheck[]): number {
   return checks.some((c) => c.status === "fail") ? 1 : 0;
@@ -193,16 +223,9 @@ export async function runDoctor(): Promise<number> {
   // it from Google Cloud" sends the user to re-download a file that was there all along.
   let cred: CredCheck;
   try {
-    cred = checkCredentials(await fs.readFile(CRED_PATH, "utf8"), CRED_PATH);
+    cred = classifyCredRead({ ok: true, raw: await fs.readFile(CRED_PATH, "utf8") }, CRED_PATH);
   } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    cred =
-      code === "ENOENT"
-        ? checkCredentials(null, CRED_PATH)
-        : {
-            ok: false,
-            message: `Cannot read ${CRED_PATH} — it exists but could not be read (${code}). Check file permissions.`,
-          };
+    cred = classifyCredRead({ ok: false, code: (err as NodeJS.ErrnoException).code }, CRED_PATH);
   }
 
   const tokenState = tokenFileState();
@@ -219,10 +242,9 @@ export async function runDoctor(): Promise<number> {
   }
   const requiredScopes = authScopesForTiers(enabledTiers);
 
-  // Live smoke test — only when the token is plausibly usable. Skip an encrypted token with no
-  // passphrase: the Token check already fails with the fix, and the live call would just repeat it.
+  // Live smoke test — only when the token is plausibly usable (see shouldLiveCheck).
   let profile: DoctorInputs["profile"] = null;
-  if (tokenState === "plaintext" || (tokenState === "encrypted" && passphraseSet)) {
+  if (shouldLiveCheck(tokenState, passphraseSet)) {
     try {
       const { emailAddress } = await new Gmail(await getAuth(false)).getProfile();
       profile = { ok: true, email: emailAddress };
