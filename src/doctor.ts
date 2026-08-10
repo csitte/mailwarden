@@ -16,7 +16,7 @@ import {
   activeAccount,
   discoverAccounts,
   checkCredentials,
-  persistedScopes,
+  readGrantedScopes,
   tokenFileState,
   getAuth,
   type CredCheck,
@@ -97,8 +97,8 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
         name: "Token",
         status: i.passphraseSet ? "warn" : "ok",
         detail: i.passphraseSet
-          ? "Stored in plaintext while a passphrase is set — re-run `mailwarden --auth` to encrypt it at rest."
-          : "Present (plaintext). Set MAILWARDEN_TOKEN_PASSPHRASE + re-run --auth to encrypt at rest (optional).",
+          ? `Stored in plaintext while a passphrase is set — re-run \`${authCmd}\` to encrypt it at rest.`
+          : `Present (plaintext). Set MAILWARDEN_TOKEN_PASSPHRASE + re-run \`${authCmd}\` to encrypt at rest (optional).`,
       });
       break;
   }
@@ -106,19 +106,10 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
   // 3. Granted scopes vs. what the enabled tiers need.
   const tiers = [...i.enabledTiers].join(", ");
   if (i.grantedScopes === null) {
-    if (i.tokenState === "encrypted") {
-      // Scopes live inside the ciphertext and are deliberately not decrypted here, so they can
-      // never be read for an encrypted token. Reporting that as a warning with a "re-run --auth"
-      // fix would be permanently unfixable noise — re-authorizing just re-encrypts them.
-      checks.push({
-        name: "Scopes",
-        status: "ok",
-        detail:
-          `Not recorded for an encrypted token (by design) — cannot verify against the enabled tiers (${tiers}). ` +
-          "A genuinely missing scope surfaces as an actionable insufficient-scope error on first use.",
-      });
-    } else if (i.tokenState === "plaintext") {
-      // Old token written before scopes were recorded — here --auth genuinely fixes it.
+    // Genuinely unknown: a token written before scopes were recorded, or an encrypted one whose
+    // passphrase is missing (that case already fails the Token check above with its own fix).
+    // Never report unknown scopes as "ok" — that would green-light a token that lacks one.
+    if (i.tokenState === "plaintext" || i.tokenState === "encrypted") {
       checks.push({
         name: "Scopes",
         status: "warn",
@@ -175,7 +166,9 @@ export function classifyCredRead(
   if (outcome.code === "ENOENT") return checkCredentials(null, credPath);
   return {
     ok: false,
-    message: `Cannot read ${credPath} — it exists but could not be read (${outcome.code}). Check file permissions.`,
+    message:
+      `Cannot read ${credPath} — it exists but could not be read (${outcome.code ?? "unknown error"}). ` +
+      "Check file permissions. See docs/SETUP.md.",
   };
 }
 
@@ -210,7 +203,9 @@ export async function runDoctor(): Promise<number> {
     account = activeAccount();
   } catch (err) {
     console.error(`  ✗ Account: ${err instanceof Error ? err.message : String(err)}`);
-    console.error("\n✗ Setup has problems — fix MAILWARDEN_ACCOUNT and re-run.");
+    // Name both knobs: the CLI stores a `--account` value into MAILWARDEN_ACCOUNT, so pointing
+    // only at the env var sends a user who typed the flag hunting for a variable they never set.
+    console.error("\n✗ Setup has problems — fix the account name (`--account` / MAILWARDEN_ACCOUNT) and re-run.");
     return 1;
   }
   const others = discoverAccounts().filter((a) => a !== account);
@@ -260,7 +255,7 @@ export async function runDoctor(): Promise<number> {
     cred,
     tokenState,
     passphraseSet,
-    grantedScopes: persistedScopes(),
+    grantedScopes: await readGrantedScopes(),
     enabledTiers,
     requiredScopes,
     profile,

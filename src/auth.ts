@@ -7,6 +7,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
+import { CliError } from "./cli.js";
 
 /**
  * The OAuth scopes to request are derived from the enabled tool tiers (see tiers.ts):
@@ -46,7 +47,7 @@ export function sanitizeAccount(name: string): string {
   // ACCOUNT_RE requires an alphanumeric first char, so "", ".", ".." and any path separator
   // ("/", "\") are already rejected — no dot/traversal special-casing needed.
   if (!ACCOUNT_RE.test(t)) {
-    throw new Error(
+    throw new CliError(
       `Invalid account name "${name}" — use letters, digits, dot, dash or underscore ` +
         "(must start alphanumeric, no path separators). Names are case-insensitive.",
     );
@@ -71,10 +72,13 @@ export function tokenPath(account: string | null = activeAccount()): string {
  */
 export function discoverAccounts(): string[] {
   try {
-    return readdirSync(CONFIG_DIR)
-      .map((f) => /^token\.(.+)\.json$/.exec(f)?.[1])
-      .filter((n): n is string => Boolean(n))
-      .sort();
+    // Normalize + dedupe: names are lower-cased (see sanitizeAccount), so a legacy
+    // `token.Work.json` is the SAME account as `work` — listing it raw would report one
+    // account as two and invent a second account that does not exist.
+    const names = readdirSync(CONFIG_DIR)
+      .map((f) => /^token\.(.+)\.json$/.exec(f)?.[1]?.toLowerCase())
+      .filter((n): n is string => Boolean(n));
+    return [...new Set(names)].sort();
   } catch {
     return [];
   }
@@ -164,6 +168,35 @@ export function persistedScopes(): string[] | null {
   } catch {
     return null; // missing / unreadable / not JSON
   }
+}
+
+/**
+ * Granted scopes for the active account — the async counterpart of `persistedScopes`, which stays
+ * synchronous and deliberately never decrypts because it runs while the tool surface is built.
+ * Here (the `--check` doctor) we may decrypt: the passphrase is at hand and the doctor already
+ * loads the token for its live call, so an encrypted token's scopes are genuinely knowable.
+ * Reporting them as "unknown" would let `--check` green-light a token that lacks a required scope.
+ * Returns null only when the scopes really cannot be determined (no token, unreadable, no
+ * passphrase for an encrypted one, or a token written before scopes were recorded).
+ */
+export async function readGrantedScopes(): Promise<string[] | null> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(tokenPath(), "utf8"));
+  } catch {
+    return null;
+  }
+  if (isEncrypted(parsed)) {
+    const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
+    if (!key) return null; // can't read it — the Token check reports this with its fix
+    try {
+      parsed = JSON.parse(decryptToken(parsed, key));
+    } catch {
+      return null;
+    }
+  }
+  const scope = (parsed as { scope?: unknown }).scope;
+  return typeof scope === "string" && scope.trim() ? scope.trim().split(/\s+/) : null;
 }
 
 /**
@@ -364,7 +397,7 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
     // A bare `mailwarden --auth` writes the DEFAULT token.json — telling a named-account user to
     // run it would overwrite their default account's token and leave this error unchanged.
     const account = activeAccount();
-    throw new Error(
+    throw new CliError(
       `Not authorized yet for ${account ? `account '${account}'` : "the default account"} ` +
         `(no token at ${tokenPath(account)}). Run \`mailwarden --auth${account ? ` --account ${account}` : ""}\` ` +
         "once to grant Gmail access.",

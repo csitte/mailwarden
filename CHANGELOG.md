@@ -21,9 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the README.
 
 ### Fixed
-- **Account names are case-insensitive.** They are lower-cased before becoming a filename, so
-  `Work` and `work` can no longer map to one token file on Windows/macOS (where the second `--auth`
-  would silently overwrite the first account's token and the server would act on the wrong mailbox).
+- **Account names are case-insensitive** and stored lower-cased (`--account Work` →
+  `token.work.json`), so `Work` and `work` can no longer map to one token file on Windows/macOS
+  (where the second `--auth` would silently overwrite the first account's token and the server would
+  act on the wrong mailbox). `--check` lists discovered accounts normalized, so one account is never
+  reported as two.
+- **An empty `--account` value is rejected** instead of falling back to the default account —
+  `--account "$VAR"` with an unset variable no longer authorizes over the default token.
+- **`--check` never reports unknown scopes as OK.** An encrypted token's scopes are now read
+  (decrypted) for the check, so a token missing a required scope is reported instead of being
+  green-lit by a "Setup looks good".
 - **`--check` accepts a token that is *more* privileged than the enabled tiers.** The scope check
   now compares capabilities instead of strings, so a `gmail.modify` grant satisfies a read-only
   deployment's `gmail.readonly` instead of failing with exit 1 and advising a scope downgrade.
@@ -35,11 +42,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a raw stack trace. Other modes still fail fast.
 - **`--check` distinguishes an unreadable `credentials.json` from a missing one** (`EACCES`/`EISDIR`
   no longer read as "not found — download it from Google Cloud").
-- **No more unfixable scope warning for encrypted tokens.** Scopes are not readable from an
-  encrypted envelope by design, so `--check` reports that as expected rather than advising a
-  re-authorization that cannot change it.
-- CLI errors print their message instead of a stack trace (`MAILWARDEN_DEBUG=1` restores the full
-  error).
+- **User-facing CLI errors print their message instead of a stack trace**; internal faults keep the
+  full stack, and `MAILWARDEN_DEBUG=1` forces it for everything (`MAILWARDEN_DEBUG=0` correctly
+  means off).
 
 ## [0.6.1] - 2026-08-09
 

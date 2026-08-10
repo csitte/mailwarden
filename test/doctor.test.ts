@@ -99,11 +99,25 @@ describe("buildReport", () => {
     expect(reportExitCode(r)).toBe(0);
   });
 
-  it("does not nag about unreadable scopes on an encrypted token (re-auth can't fix it)", () => {
+  it("never reports unknown scopes as ok — not even for an encrypted token", () => {
+    // runDoctor decrypts (readGrantedScopes), so unknown here means genuinely unknown. Calling
+    // that "ok" would green-light a token that lacks a required scope: the doctor would print
+    // "Setup looks good" and the very next create_filter call would fail on insufficient scope.
     const r = buildReport(inputs({ tokenState: "encrypted", passphraseSet: true, grantedScopes: null }));
-    const scopes = check(r, "Scopes");
-    expect(scopes.status).toBe("ok"); // a permanent, unfixable warning would be noise
-    expect(scopes.detail).not.toMatch(/--auth/);
+    expect(check(r, "Scopes").status).toBe("warn");
+  });
+
+  it("checks the real scopes of an encrypted token once they are known", () => {
+    const r = buildReport(
+      inputs({
+        tokenState: "encrypted",
+        passphraseSet: true,
+        grantedScopes: [GMAIL_READONLY], // decrypted by readGrantedScopes
+        requiredScopes: [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC],
+      }),
+    );
+    expect(check(r, "Scopes").status).toBe("fail");
+    expect(reportExitCode(r)).toBe(1);
   });
 
   it("names the account in remediation so a named-account user can't clobber the default token", () => {

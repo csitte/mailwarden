@@ -252,6 +252,10 @@ own tool surface — so nothing can act on the wrong mailbox:
 }
 ```
 
+Account names are **case-insensitive** — they become filenames, so `Work` and `work` would be the
+same file on Windows/macOS. mailwarden lower-cases them (`--account Work` → `token.work.json`) so a
+name always maps to exactly one mailbox.
+
 `mailwarden --check` shows the active account and lists the others it finds. With no
 `MAILWARDEN_ACCOUNT` set, everything uses the default `token.json` exactly as before — this is fully
 backward compatible.
@@ -270,12 +274,13 @@ node dist/index.js --auth
 |---|---|
 | `MAILWARDEN_DIR` | config dir (default `~/.mailwarden`) |
 | `MAILWARDEN_CREDENTIALS` | path to `credentials.json` |
-| `MAILWARDEN_ACCOUNT` | select a named account (its token is `token.<name>.json`); unset = the default `token.json`. See [Multiple accounts](#multiple-accounts) |
+| `MAILWARDEN_ACCOUNT` | select a named account (its token is `token.<name>.json`; names are lower-cased); unset = the default `token.json`. See [Multiple accounts](#multiple-accounts) |
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
+| `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |
 | `PORT` | HTTP port (default 8787) |
 | `MAILWARDEN_HOST` | HTTP bind address (default `127.0.0.1`; set e.g. `0.0.0.0` for remote hosting) |
 | `MAILWARDEN_TOKEN` | bearer token for the HTTP endpoint — **required** for `--http` unless overridden |

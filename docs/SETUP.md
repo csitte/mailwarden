@@ -116,7 +116,9 @@ it keeps, and you never have to do this again on this machine.
 
 > **Optional — a second Gmail account.** Authorize it under a name of its own:
 > `npx -y mailwarden --auth --account work`. That stores `~/.mailwarden/token.work.json` instead of
-> the default `token.json` (the same `credentials.json` is reused). **The server only picks that
+> the default `token.json` (the same `credentials.json` is reused). Names are **case-insensitive**
+> and stored lower-cased (`--account Work` → `token.work.json`), because on Windows/macOS two
+> casings would otherwise be one file. **The server only picks that
 > account up when you also set `MAILWARDEN_ACCOUNT=work` in its environment** — the `--account` flag
 > alone affects the `--auth` run, not the running server. See *Multiple accounts* in the README.
 

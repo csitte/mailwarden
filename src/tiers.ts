@@ -2,6 +2,7 @@
  * Tool tiers + the OAuth scopes each needs. A neutral module (no imports from
  * tools/auth) so both can depend on it without a cycle.
  */
+import { CliError } from "./cli.js";
 
 export type ToolTier = "read" | "manage" | "filters";
 export const ALL_TIERS: readonly ToolTier[] = ["read", "manage", "filters"];
@@ -26,7 +27,7 @@ export function resolveEnabledTiers(env: NodeJS.ProcessEnv): Set<ToolTier> {
     const requested = configured.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
     const unknown = requested.filter((t) => !ALL_TIERS.includes(t as ToolTier));
     if (requested.length === 0 || unknown.length) {
-      throw new Error(
+      throw new CliError(
         `MAILWARDEN_TOOLS is invalid (${unknown.length ? `unknown: ${unknown.join(", ")}` : "empty"}). ` +
           `Set it to a comma-separated subset of: ${ALL_TIERS.join(", ")}.`,
       );

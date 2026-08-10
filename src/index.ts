@@ -9,7 +9,7 @@ import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { runDoctor } from "./doctor.js";
-import { findStrayPositional, readAccountArg, resolveMode } from "./cli.js";
+import { CliError, debugEnabled, findStrayPositional, readAccountArg, resolveMode } from "./cli.js";
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     // refuse it rather than silently authorizing — and overwriting — the DEFAULT token.
     const stray = findStrayPositional(args);
     if (stray) {
-      throw new Error(
+      throw new CliError(
         `Unexpected argument '${stray}'. To authorize a named account use: mailwarden --auth --account <name>.`,
       );
     }
@@ -123,10 +123,14 @@ async function main(): Promise<void> {
 }
 
 main().catch((err) => {
-  // These are user-facing CLI errors with actionable messages (bad flag, bad env, unauthorized) —
-  // print the message, not a stack trace. Set MAILWARDEN_DEBUG=1 to see the full error.
-  console.error(
-    err instanceof Error && !process.env.MAILWARDEN_DEBUG ? `mailwarden: ${err.message}` : err,
-  );
+  // Errors written for the user (bad flag, bad env, not authorized) print as a plain line; an
+  // internal fault keeps its stack, because a bare one-liner is not a usable bug report.
+  const actionable = err instanceof CliError;
+  if (actionable && !debugEnabled(process.env)) {
+    console.error(`mailwarden: ${(err as Error).message}`);
+    console.error("(set MAILWARDEN_DEBUG=1 for the full error)");
+  } else {
+    console.error(err);
+  }
   process.exit(1);
 });

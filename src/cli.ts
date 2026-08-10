@@ -4,6 +4,24 @@
  * *wrong* token file when they are wrong — they need to be unit-testable, not smoke-tested by hand.
  */
 
+/**
+ * An error with a message written *for the user* (bad flag, bad env, not authorized). The CLI
+ * prints these as a plain line; anything else is an internal fault and keeps its stack, because a
+ * one-line `Cannot read properties of undefined` is not a usable bug report.
+ */
+export class CliError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "CliError";
+  }
+}
+
+/** Whether the debug escape hatch is on. `MAILWARDEN_DEBUG=0`/`false`/empty means OFF. */
+export function debugEnabled(env: NodeJS.ProcessEnv): boolean {
+  const v = env.MAILWARDEN_DEBUG?.trim().toLowerCase();
+  return v !== undefined && v !== "" && v !== "0" && v !== "false" && v !== "no";
+}
+
 /** Which run mode the argv selects. Order matters: the doctor is checked before everything else. */
 export type CliMode = "check" | "auth" | "sweep" | "http" | "serve";
 
@@ -28,16 +46,24 @@ export function resolveMode(args: string[]): CliMode {
  * overwrite the default token — the exact accident this flag exists to prevent.
  */
 export function readAccountArg(args: string[]): string | undefined {
+  const missing = () => {
+    throw new CliError("`--account` needs a value, e.g. `--account work`.");
+  };
   const i = args.indexOf("--account");
   if (i !== -1) {
     const v = args[i + 1];
-    if (v === undefined || v.startsWith("-")) {
-      throw new Error("`--account` needs a value, e.g. `--account work`.");
-    }
+    // An EMPTY value must throw too, not read as "absent": `--account "$ACCT"` with an unset
+    // variable would otherwise resolve to the default account and let --auth overwrite the
+    // default token — the very accident this flag prevents.
+    if (v === undefined || v.startsWith("-") || v.trim() === "") missing();
     return v;
   }
   const eq = args.find((a) => a.startsWith("--account="));
-  if (eq !== undefined) return eq.slice("--account=".length);
+  if (eq !== undefined) {
+    const v = eq.slice("--account=".length);
+    if (v.trim() === "") missing(); // `--account=` alone
+    return v;
+  }
   return undefined;
 }
 
