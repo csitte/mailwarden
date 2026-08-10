@@ -16,14 +16,15 @@ importantly — what it deliberately does **not** protect against.
   OS keychain/filesystem permissions.
 
 `mailwarden` is a stateless capability layer. It keeps **no mailbox mirror and no search index** —
-every operation hits the live Gmail API. The only local state is the OAuth token in `~/.mailwarden/`.
+every operation hits the live Gmail API. The only local state is the OAuth token in `~/.mailwarden/`
+(`token.json`, plus one `token.<account>.json` per named account when multiple accounts are used).
 
 ## Data flow
 
 ```
 AI client ──stdio/loopback HTTP──▶ mailwarden ──HTTPS──▶ Gmail API
                                        │
-                                       └── ~/.mailwarden/{credentials.json, token.json}
+                                       └── ~/.mailwarden/{credentials.json, token[.<account>].json}
 ```
 
 Nothing else is contacted. No telemetry, no analytics, no crash reporting, no third-party host.
@@ -69,7 +70,8 @@ An action fires against mail that has since changed — or against the search in
 - **Live re-verification.** `search` re-checks read-state/category predicates against each hit's
   **true** labels and drops the index's false positives (Gmail's `threads.list` silently drops
   `is:unread` in some operator combinations). Snooze/sweep act on live labels at run time. See the
-  runnable proof: `node scripts/demo-reverify.mjs`.
+  runnable proof (from a repo clone, after `npm install && npm run build`):
+  `node scripts/demo-reverify.mjs`.
 
 ### 5. Token theft (file at rest)
 A backup, a synced folder, or another machine exposes `token.json`.
@@ -112,9 +114,12 @@ Stating these plainly is part of the threat model:
 
 Please report suspected vulnerabilities **privately** — do not open a public issue.
 
-- Preferred: open a private security advisory at
-  <https://github.com/csitte/mailwarden/security/advisories/new>.
-- Alternatively, email the maintainer (see `package.json` / the GitHub profile).
+- **Preferred:** open a private security advisory at
+  <https://github.com/csitte/mailwarden/security/advisories/new>. This is a private channel — the
+  report is visible only to the maintainer until a fix is published, and it needs no prior contact.
+- **No GitHub account?** Reach the maintainer through the contact form at
+  <https://www.csitte.at/> and ask for a private channel — please do **not** put vulnerability
+  details in a public issue.
 
 Include repro steps and the affected version (the installed `npm` version, e.g. from
 `npm ls mailwarden`). You'll get an acknowledgement, and a fix or mitigation will be released before

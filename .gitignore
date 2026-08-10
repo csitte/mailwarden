@@ -7,3 +7,4 @@ coverage/
 .mailwarden/
 credentials.json
 token.json
+token.*.json

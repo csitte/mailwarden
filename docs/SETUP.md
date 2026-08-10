@@ -114,6 +114,23 @@ it keeps, and you never have to do this again on this machine.
 > needs the same `MAILWARDEN_TOKEN_PASSPHRASE` set at runtime to read it. This guards against a stolen
 > *file*, not against malware running as your own user. See *Security & privacy* in the README.
 
+> **Optional — a second Gmail account.** Authorize it under a name of its own:
+> `npx -y mailwarden --auth --account work`. That stores `~/.mailwarden/token.work.json` instead of
+> the default `token.json` (the same `credentials.json` is reused). **The server only picks that
+> account up when you also set `MAILWARDEN_ACCOUNT=work` in its environment** — the `--account` flag
+> alone affects the `--auth` run, not the running server. See *Multiple accounts* in the README.
+
+### Verify it worked
+
+```bash
+npx -y mailwarden --check
+```
+
+The built-in doctor checks `credentials.json`, whether a token exists (and whether it's encrypted),
+whether the granted scopes cover your enabled tiers, and makes one live Gmail call — printing a
+concrete fix for anything wrong and exiting non-zero if so. Add `--account <name>` to check a named
+account. **Run this first whenever something doesn't work** — it usually names the exact problem.
+
 ### The "unverified app" warning is normal
 
 Because `gmail.modify` is a restricted scope and your app hasn't gone through Google's
@@ -156,12 +173,20 @@ the last 2 days"* — you should get real thread summaries back.
 
 ## Troubleshooting
 
+> **Start here:** `npx -y mailwarden --check` (add `--account <name>` for a named account). The
+> doctor diagnoses most of the cases below in one command and prints the fix.
+
 ### "mailwarden is not authorized yet. Run `mailwarden --auth` once…"
 
-Exactly what it says: the server found no `token.json`. Run step 5. If you *did* run it,
-check that the server and the `--auth` run agree on the config dir — a custom
-`MAILWARDEN_DIR` must be set for **both**, or one of them looks in `~/.mailwarden` while
-the other wrote elsewhere.
+The server found no token file. Run step 5. If you *did* run it, the `--auth` run and the
+server are looking at **different files** — check both of these agree:
+
+- **Config dir:** a custom `MAILWARDEN_DIR` must be set for **both**, or one looks in
+  `~/.mailwarden` while the other wrote elsewhere.
+- **Account:** if the server has `MAILWARDEN_ACCOUNT=work` it needs `token.work.json`, which is
+  only written by `mailwarden --auth --account work`. A plain `mailwarden --auth` writes the
+  *default* `token.json` — running it here does **not** fix the error and overwrites your default
+  account's token. `mailwarden --check` prints which account and file are actually in use.
 
 ### Help, it worked for a week, then died with `invalid_grant`
 
@@ -198,8 +223,13 @@ stored in plaintext.
 The passphrase in the environment doesn't match the one the token was encrypted with (or the file
 was truncated/edited). There is **no recovery** of the refresh token without the exact passphrase —
 that's the point of the encryption. Options: fix `MAILWARDEN_TOKEN_PASSPHRASE` to the value you used
-at `--auth` time, or if it's lost, delete `~/.mailwarden/token.json` and run `npx -y mailwarden --auth`
-again (optionally revoke the old grant at <https://myaccount.google.com/permissions> first).
+at `--auth` time, or if it's lost, delete the affected token file and run `--auth` again
+(optionally revoke the old grant at <https://myaccount.google.com/permissions> first).
+
+**Delete the right file.** With named accounts the file is `~/.mailwarden/token.<account>.json`, not
+`token.json` — deleting the latter destroys a healthy *default* grant and leaves the broken one in
+place. `mailwarden --check` names the exact file in use; re-authorize with the matching
+`--account <name>`.
 
 ### "Cannot read OAuth credentials at …"
 
@@ -224,11 +254,17 @@ section for how tiers map to tools and scopes.
 ### Authorized the wrong Google account
 
 Revoke the token at <https://myaccount.google.com/permissions> for the wrong account (or
-just delete `~/.mailwarden/token.json`), then `npx -y mailwarden --auth` and pick the right
+just delete the token file — `~/.mailwarden/token.json`, or `token.<account>.json` if you used
+`--account`), then run `--auth` again (with the same `--account <name>`, if any) and pick the right
 account in the browser.
+
+Want **both** mailboxes instead of replacing one? Keep the first and authorize the second under its
+own name: `npx -y mailwarden --auth --account work`, then register a second server entry with
+`MAILWARDEN_ACCOUNT=work` in its env. See *Multiple accounts* in the README.
 
 ### Where's my data? How do I uninstall?
 
-Local state is one directory: `~/.mailwarden/` (`credentials.json`, `token.json`). Delete
-it and revoke access at <https://myaccount.google.com/permissions> — that's a complete
-uninstall. mailwarden keeps no mailbox copy, index, or cache anywhere.
+Local state is one directory: `~/.mailwarden/` — `credentials.json`, `token.json`, and one
+`token.<account>.json` per named account. Delete the directory and revoke access at
+<https://myaccount.google.com/permissions> — that's a complete uninstall (revoke **each** account
+you authorized). mailwarden keeps no mailbox copy, index, or cache anywhere.

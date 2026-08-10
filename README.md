@@ -58,13 +58,16 @@ Ask an assistant to *"archive the unread promotional mail that's already skipped
 
 `mailwarden` fetches every hit live anyway, so `search` re-checks the unambiguous predicates (`is:unread`, `is:read`, `in:inbox`, `category:…`, with negation) against each thread's **true** labels and drops the index's false positives before any tool sees them. The bulk action then runs on exactly the set you asked for. This is the difference between acting on what Gmail *indexed* and acting on what's *actually in the mailbox right now* — and it's why snooze/sweep are safe to hand to an assistant: the sweep resurfaces only threads whose snooze is genuinely due, verified against live labels at run time.
 
-**See it yourself — no Gmail account needed:**
+**See it yourself — no Gmail account needed.** From a clone of the repo (the demo is a repo-only
+verification script, not part of the npm package):
 
 ```bash
-npm run build && node scripts/demo-reverify.mjs
+git clone https://github.com/csitte/mailwarden && cd mailwarden
+npm install && npm run build
+node scripts/demo-reverify.mjs
 ```
 
-The demo drives the real `search()` against a fake Gmail API whose index is deliberately loose (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it also fails loudly if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
+The demo drives the real `search()` against a fake Gmail API whose index is deliberately loose (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
 
 ## Tools
 
