@@ -1,0 +1,61 @@
+# mailwarden — Projektinstruktionen
+
+Native Gmail-MCP-Server (TypeScript, Node ≥20). Veröffentlicht als npm-Paket `mailwarden`
+und in der MCP-Registry als `io.github.csitte/mailwarden`.
+
+## Harte Design-Regeln (nicht ohne Rücksprache ändern)
+
+- **Kein Senden — by design.** Es gibt keine compose/reply/forward/send-Tools, und die
+  angeforderten OAuth-Scopes (`gmail.modify`, optional `gmail.settings.basic`) **können**
+  nicht senden. Das ist die zentrale Sicherheitszusage gegen Prompt-Injection-Exfiltration
+  und der wichtigste Differenzierer — siehe `SECURITY.md`. Auch `create_filter` erzeugt
+  **nie** eine Forwarding-Regel.
+- **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
+- **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
+  `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
+- **Suchtreffer werden re-verifiziert.** Gmails `threads.list`-Index ist bei
+  Read-State-Operatoren unzuverlässig (`is:unread` fällt in manchen Kombinationen weg);
+  `search()` prüft jeden Treffer gegen die echten Labels. Beweis-Demo:
+  `node scripts/demo-reverify.mjs`.
+
+## Architektur-Muster
+
+- `src/` — `auth.ts` (OAuth/Token/Accounts), `gmail.ts` (API-Wrapper), `tools.ts`
+  (MCP-Tool-Registrierung), `tiers.ts` (Tool-Tiers → Scopes), `snooze.ts`, `digest.ts`,
+  `doctor.ts` (`--check`), `http.ts`, `index.ts` (CLI).
+- **Reine Logik von IO trennen.** Testbare pure Funktionen (z. B. `buildReport`,
+  `resolveSnoozeDate`, `deriveLabelFilters`) + dünne IO-Schicht drumherum. Neue Features
+  folgen diesem Muster.
+- **Tool-Tiers** (`read`/`manage`/`filters`, via `MAILWARDEN_TOOLS`) bestimmen sowohl die
+  registrierten Tools als auch die bei `--auth` angeforderten Scopes. Scope-Gating nicht
+  aufweichen.
+
+## Arbeitsweise
+
+- **Tests sind Pflicht** für neue Logik (`npx vitest run`, aktuell 267). Vor jedem Commit
+  `npm run build` + Tests grün.
+- **Ein Feature = ein Commit**, Conventional Commits (`feat:`, `fix:`, `docs:`).
+- **Doku mitziehen:** README, `CHANGELOG.md` (`[Unreleased]`), bei Setup-relevanten
+  Änderungen `docs/SETUP.md`, bei Sicherheitsaussagen `SECURITY.md`.
+- **Release** (nur auf Ansage): `npm version <patch|minor>` (synct `server.json`), CHANGELOG
+  `[Unreleased]` → Version + Link-Ref, Commit + Tag `vX.Y.Z` pushen → CI publisht npm und
+  MCP-Registry automatisch; danach `gh release create`.
+
+## Session-Bridge
+
+Diese Session nimmt an der Session-Bridge teil unter der Id **`mailwarden`**.
+Beim Session-Start `<drive>/_session-bridge/threads/*/msgs/` falten (PC:
+`D:/etc/Google Drive/_session-bridge`, Notebook: `F:/Meine Ablage/_session-bridge`) und
+Threads mit `owner: mailwarden` und Status ≠ `DONE` melden. Antworten **immer** als neue
+Datei (write-once, temp-then-rename); nie eine bestehende Nachricht ändern.
+Protokoll: `_session-bridge/README.md`.
+
+**Nie direkt in fremde Repos committen** (z. B. `csitte.at`) — nur über die Bridge informieren.
+
+**Bridge-Push (Watcher):** Beim Session-Start (nach dem Bridge-Start-Scan) das
+Monitor-Tool armen — persistent: true, Kommando:
+`bash D:/gitwork/session-broker/watch-bridge.sh mailwarden`
+(Beschreibung: "Session-Bridge: neue Nachrichten an mailwarden").
+Jede Notification = neue Bridge-Nachricht an diese Session → Datei lesen, im Chat
+melden, gemäß Bridge-Protokoll reagieren. Der Watcher liest nur und ergänzt den
+Start-Scan; write-once bleibt. Betriebsdoku: D:/gitwork/session-broker/WATCHER.md
