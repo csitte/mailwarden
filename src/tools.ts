@@ -4,6 +4,7 @@ import { Gmail, filterCriteriaToQuery } from "./gmail.js";
 import { getAuth, hasFilterScope } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
+import { inspectUnsubscribe, unsubscribeThread } from "./unsubscribe.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { fenceOutput } from "./sanitize.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
@@ -98,6 +99,12 @@ const filterAppliedSchema = z.object({
 });
 
 const okOutput = { ok: z.boolean() };
+
+const unsubscribeOptionsSchema = z.object({
+  oneClick: z.boolean(),
+  httpsUrls: z.array(z.string()),
+  mailtos: z.array(z.string()),
+});
 
 export function registerTools(server: McpServer): void {
   const tiers = resolveEnabledTiers(process.env);
@@ -265,6 +272,29 @@ function registerReadTools(server: McpServer): void {
       const hasMore = result.nextPageToken != null || result.threads.length >= max;
       return ok({ query, hasMore, ...digest });
     },
+  );
+
+  server.registerTool(
+    "list_unsubscribe",
+    {
+      description:
+        "Report the opt-out options a thread's newest message advertises (List-Unsubscribe / RFC 8058), without contacting anyone. " +
+        "`oneClick` means the sender supports the automatable one-click opt-out — the `unsubscribe` tool can perform it. " +
+        "`httpsUrls` without oneClick are links for a human to open in a browser; `mailtos` would require sending mail, which mailwarden never does. " +
+        "USE WHEN: checking whether a newsletter can be unsubscribed from, or showing the user the link to click. " +
+        "SIDE EFFECTS: none — no request is made to the sender.",
+      inputSchema: { threadId: z.string() },
+      outputSchema: {
+        threadId: z.string(),
+        messageId: z.string(),
+        from: z.string(),
+        subject: z.string(),
+        hasUnsubscribe: z.boolean(),
+        ...unsubscribeOptionsSchema.shape,
+      },
+      annotations: { title: "List unsubscribe options", ...readOnly },
+    },
+    async ({ threadId }) => ok(await inspectUnsubscribe(await client(), threadId)),
   );
 
 }
@@ -465,6 +495,43 @@ function registerManageTools(server: McpServer): void {
     },
     async ({ messageId, attachmentId, destPath }) =>
       ok({ saved: await (await client()).downloadAttachment(messageId, attachmentId, destPath) }),
+  );
+
+  server.registerTool(
+    "unsubscribe",
+    {
+      description:
+        "Unsubscribe from the mailing list a thread came from, via the sender's RFC 8058 one-click endpoint. " +
+        "There is deliberately no URL parameter: the endpoint is taken from the message's own List-Unsubscribe header and nowhere else. " +
+        "Only https one-click endpoints are called (fixed request body, response body discarded); a plain link is reported for the user to open, " +
+        "and a mailto: opt-out is never performed because mailwarden cannot send mail. " +
+        "If the sender offers nothing automatable this returns unsubscribed:false with the alternatives in `options` — it is not an error. " +
+        "USE WHEN: the user wants off a newsletter. Pair with archive/trash or create_filter to deal with mail already in the mailbox. " +
+        "DO NOT USE: to check whether unsubscribing is possible (use list_unsubscribe — it contacts nobody). " +
+        "SIDE EFFECTS: makes ONE outbound HTTPS request to the sender's unsubscribe endpoint — the only non-Google host mailwarden ever contacts. " +
+        "This confirms to the sender that the address is live, and it cannot be undone. The mailbox itself is not changed.",
+      inputSchema: { threadId: z.string() },
+      outputSchema: {
+        threadId: z.string(),
+        messageId: z.string(),
+        from: z.string(),
+        unsubscribed: z.boolean(),
+        url: z.string().optional(),
+        status: z.number().optional(),
+        reason: z.string().optional(),
+        options: unsubscribeOptionsSchema,
+      },
+      // openWorld: this is the one tool that reaches beyond the Gmail account.
+      // Not idempotent in effect (each call is another request to the sender).
+      annotations: {
+        title: "Unsubscribe from mailing list",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ threadId }) => ok(await unsubscribeThread(await client(), threadId)),
   );
 
   // ---- Snooze (mailwarden's differentiator) ----

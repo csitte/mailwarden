@@ -43,6 +43,15 @@ export interface LabelInfo {
   type?: string | null;
 }
 
+/** The raw headers needed to evaluate a mailing list's opt-out options. */
+export interface UnsubscribeHeaders {
+  messageId: string;
+  from: string;
+  subject: string;
+  listUnsubscribe: string;
+  listUnsubscribePost: string;
+}
+
 /** Minimal handle on a message: its id plus the thread it belongs to. */
 export interface MessageRef {
   id: string;
@@ -679,6 +688,35 @@ export class Gmail {
     );
     const headers = res.data.messages?.[0]?.payload?.headers ?? [];
     return decodeRfc2047(headers.find((h) => h.name?.toLowerCase() === "subject")?.value ?? "");
+  }
+
+  /**
+   * The List-Unsubscribe headers of a thread's MOST RECENT message, via a
+   * metadata-only fetch. The newest message is the right one: opt-out endpoints
+   * are per-mailing and older ones in the same thread may already be dead.
+   */
+  async getUnsubscribeHeaders(threadId: string): Promise<UnsubscribeHeaders> {
+    const res = await this.req(() =>
+      this.api.users.threads.get({
+        userId: "me",
+        id: threadId,
+        format: "metadata",
+        metadataHeaders: ["List-Unsubscribe", "List-Unsubscribe-Post", "From", "Subject"],
+      }),
+    );
+    const messages = res.data.messages ?? [];
+    const last = messages[messages.length - 1];
+    if (!last) throw new Error(`Thread ${threadId} has no messages.`);
+    // Raw for the two List-* headers: they carry URIs, not RFC 2047 encoded words.
+    const raw = (n: string) =>
+      last.payload?.headers?.find((h) => h.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+    return {
+      messageId: last.id!,
+      from: decodeRfc2047(raw("From")),
+      subject: decodeRfc2047(raw("Subject")),
+      listUnsubscribe: raw("List-Unsubscribe"),
+      listUnsubscribePost: raw("List-Unsubscribe-Post"),
+    };
   }
 
   async getThread(threadId: string, full = true): Promise<{ threadId: string; messages: ParsedMessage[] }> {

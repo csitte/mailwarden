@@ -26,10 +26,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 21 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 23 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(21);
+    expect(tools).toHaveLength(23);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -45,6 +45,7 @@ describe("registerTools — tool surface", () => {
       "get_thread",
       "list_labels",
       "list_snoozed",
+      "list_unsubscribe",
       "search",
       "triage_digest",
     ]);
@@ -59,7 +60,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("create_filter"); // filters tier
     expect(names).not.toContain("archive"); // manage tier excluded
     expect(names).not.toContain("snooze");
-    expect(names).toHaveLength(9); // 6 read + 3 filters
+    expect(names).toHaveLength(10); // 7 read + 3 filters
   });
 
   it("MAILWARDEN_TOOLS can register a single tier on its own", async () => {
@@ -69,7 +70,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("snooze");
     expect(names).not.toContain("search"); // no read tier
     expect(names).not.toContain("list_filters"); // no filters tier
-    expect(names).toHaveLength(12);
+    expect(names).toHaveLength(13);
   });
 
   it("hides the filters tier when the stored token is known to lack settings.basic", async () => {
@@ -79,7 +80,7 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("list_filters");
     expect(names).not.toContain("create_filter");
     expect(names).not.toContain("delete_filter");
-    expect(names).toHaveLength(18); // 21 - 3 filter tools
+    expect(names).toHaveLength(20); // 23 - 3 filter tools
   });
 });
 

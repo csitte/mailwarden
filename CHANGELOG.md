@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Unsubscribe from mailing lists — two new tools.** `list_unsubscribe` (read tier) reports what
+  opt-out options a thread's newest message advertises via its `List-Unsubscribe` header, contacting
+  nobody. `unsubscribe` (manage tier) performs the RFC 8058 one-click opt-out. This is the only code
+  path in mailwarden that reaches a host other than Google, so it is fenced accordingly (new threat
+  class 9 in `SECURITY.md`): **the URL is never a tool parameter** — it comes from the addressed
+  message's own header, so an injected mail cannot smuggle mailbox content into a query string; the
+  request body is fixed and the response body is discarded unread, so the endpoint cannot answer with
+  instructions; only senders who opted in via `List-Unsubscribe-Post` are automated, a bare link is
+  handed back for a human, and a `mailto:` opt-out is never performed because mailwarden cannot send.
+  SSRF guards on every hop: https and default port only, no credentials in the URL, at most three
+  redirects, and each host must resolve exclusively to public addresses (loopback, RFC 1918, CGNAT,
+  link-local incl. `169.254.169.254`, multicast and reserved space are refused; IPv4-mapped and NAT64
+  IPv6 unwrapped first). A sender offering nothing automatable yields `unsubscribed:false` plus the
+  alternatives — not an error.
 - **Every release is now verified as an installed package, not just as a source tree.** `npm run
   smoke` packs the tarball, installs it into a clean project with no credentials, and drives the
   real MCP handshake against it: all runtime imports must resolve, `initialize` must report the

@@ -183,7 +183,11 @@ try {
   console.log("\nMCP handshake (MAILWARDEN_TOOLS=read):");
   const readOnly = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig, MAILWARDEN_TOOLS: "read" });
   check("read tier still registers search", readOnly.tools.includes("search"));
-  const writeTools = readOnly.tools.filter((t) => ["archive", "trash", "modify_labels", "create_filter"].includes(t));
+  // `unsubscribe` is in this list for a second reason: it is the only tool that makes an
+  // outbound request to a non-Google host, and a read-only deployment must never be able to.
+  const writeTools = readOnly.tools.filter((t) =>
+    ["archive", "trash", "modify_labels", "create_filter", "unsubscribe"].includes(t),
+  );
   check("read tier registers no write tools", writeTools.length === 0, writeTools.join(",") || "none");
 
   console.log("\nSetup doctor against an empty config dir:");

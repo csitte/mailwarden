@@ -27,7 +27,9 @@ AI client ──stdio/loopback HTTP──▶ mailwarden ──HTTPS──▶ Gma
                                        └── ~/.mailwarden/{credentials.json, token[.<account>].json}
 ```
 
-Nothing else is contacted. No telemetry, no analytics, no crash reporting, no third-party host.
+One exception, and only when the `unsubscribe` tool is called: a single HTTPS request to the opt-out
+endpoint named in the addressed message's own `List-Unsubscribe` header (threat 9 below). Otherwise
+nothing else is contacted — no telemetry, no analytics, no crash reporting, no third-party host.
 
 ## Threats considered & mitigations
 
@@ -114,6 +116,34 @@ The deliberate cost: one server entry per account, which is more configuration t
 account argument. That is the trade being made — configuration effort for a boundary the model
 cannot cross. It does **not** defend against misuse of an account *within* the authority that
 account's own token and tier grant it.
+
+### 9. The outbound unsubscribe request (SSRF / exfiltration via a URL)
+`unsubscribe` performs the RFC 8058 one-click opt-out — the **only** code path that contacts a host
+other than Google. An attacker's mail controls the header it reads, so two abuses have to be closed:
+smuggling mailbox content *out* through a chosen URL, and steering the request *inward* at a service
+only this machine can reach.
+
+- **The URL is never a tool parameter.** Same reasoning as the account in threat 8: the endpoint is
+  read from the addressed message's `List-Unsubscribe` header and nowhere else. The model cannot
+  choose, edit, or append to it, so there is no way to place mailbox content in a query string. An
+  injected mail can only offer *its own* opt-out endpoint — the one a human unsubscribing would hit
+  anyway.
+- **Fixed request, discarded response.** The body is always `List-Unsubscribe=One-Click`; the response
+  body is cancelled unread and only the status code reaches the model. The endpoint cannot answer with
+  instructions, and it cannot become a return channel.
+- **Only what the sender opted into.** Automation requires the sender's `List-Unsubscribe-Post`
+  header. A bare link is handed back for a human to open; a `mailto:` opt-out is **never** performed —
+  that would require sending mail, which no requested scope permits (threat 1).
+- **SSRF guards on every hop.** https only, default port only (a public host can still front an
+  internal service on another port), no credentials in the URL, at most 3 redirects, and each hop's
+  host must resolve **exclusively** to public addresses — loopback, RFC 1918, CGNAT, link-local
+  (including `169.254.169.254`), multicast and reserved space are refused, IPv4-mapped and NAT64 IPv6
+  forms unwrapped first.
+- **Tier-gated.** `unsubscribe` lives in the `manage` tier; a `read` deployment gets only
+  `list_unsubscribe`, which reports the options and contacts nobody.
+
+Residual, and stated plainly: a successful opt-out confirms to that sender that the address is live,
+and it cannot be taken back. That is inherent to unsubscribing, not to this implementation.
 
 ## Dependency advisories
 
