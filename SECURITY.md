@@ -142,8 +142,15 @@ only this machine can reach.
 - **Tier-gated.** `unsubscribe` lives in the `manage` tier; a `read` deployment gets only
   `list_unsubscribe`, which reports the options and contacts nobody.
 
-Residual, and stated plainly: a successful opt-out confirms to that sender that the address is live,
-and it cannot be taken back. That is inherent to unsubscribing, not to this implementation.
+Two residuals, stated plainly:
+
+- **A successful opt-out confirms to that sender that the address is live**, and it cannot be taken
+  back. That is inherent to unsubscribing, not to this implementation.
+- **The address check is not rebinding-proof.** `fetch` resolves the hostname again when it connects,
+  so a resolver that answers with a public address for our check and an internal one a moment later
+  is not caught. Pinning the verified address would require a custom connector, which `fetch` does not
+  expose. What survives that gap is narrow: a **blind** POST with a fixed body to a URL the attacker
+  already controls the DNS for, whose response is never read — no data leaves, and nothing comes back.
 
 ## Dependency advisories
 

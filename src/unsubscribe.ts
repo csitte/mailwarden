@@ -138,10 +138,18 @@ export function isBlockedAddress(ip: string): boolean {
   }
 
   if (!addr.includes(":")) return true; // not an address we can reason about
-  // Unwrap IPv4-mapped (::ffff:a.b.c.d) and NAT64 (64:ff9b::a.b.c.d) forms.
-  const embedded = addr.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (embedded && (addr.startsWith("::ffff:") || addr.startsWith("64:ff9b:") || addr.startsWith("::"))) {
-    return isBlockedAddress(embedded[1]);
+  // An IPv6 address may carry an IPv4 one inside it — as a dotted quad
+  // (`::ffff:127.0.0.1`, NAT64, or an unabbreviated `0:0:…:ffff:127.0.0.1`) or
+  // hex-encoded (`::ffff:7f00:1`). Check the embedded address whatever the form,
+  // and deliberately do NOT return its verdict: a public inner address must still
+  // face the prefix checks below, or `fd00::8.8.8.8` would slip through as public.
+  const dotted = addr.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted && isBlockedAddress(dotted[1])) return true;
+  const hex = addr.match(/^(?:::(?:ffff:)?|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
+  if (hex) {
+    const hi = parseInt(hex[1], 16);
+    const lo = parseInt(hex[2], 16);
+    if (isBlockedAddress(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`)) return true;
   }
   if (addr === "::" || addr === "::1") return true;
   if (/^f[cd]/.test(addr)) return true; // fc00::/7 unique local
@@ -165,7 +173,15 @@ export const defaultUnsubscribeDeps: UnsubscribeDeps = {
   },
 };
 
-/** Reject a hop whose host resolves to anything non-public (all answers must pass). */
+/**
+ * Reject a hop whose host resolves to anything non-public (all answers must pass).
+ *
+ * Known residual: `fetch` resolves the name again when it connects, so a resolver
+ * that answers differently the second time (DNS rebinding) is not caught here.
+ * Closing that would mean pinning the checked address through a custom connector,
+ * which `fetch` does not expose. What survives the gap is a *blind* POST with a
+ * fixed body whose response is never read — see SECURITY.md.
+ */
 async function assertPublicHost(url: URL, deps: UnsubscribeDeps): Promise<void> {
   const host = url.hostname.replace(/^\[|\]$/g, "");
   let addresses: string[];
@@ -213,6 +229,9 @@ export async function oneClickUnsubscribe(
 ): Promise<OneClickResult> {
   let url = validateUnsubscribeUrl(rawUrl);
   let method: "POST" | "GET" = "POST";
+  // ONE budget for the whole chain, not per hop — a per-hop timeout would let a
+  // redirecting endpoint stall the tool call for MAX_REDIRECTS × TIMEOUT_MS.
+  const deadline = AbortSignal.timeout(TIMEOUT_MS);
 
   for (let redirects = 0; ; redirects++) {
     await assertPublicHost(url, deps);
@@ -224,7 +243,7 @@ export async function oneClickUnsubscribe(
           ? { "content-type": "application/x-www-form-urlencoded", "user-agent": USER_AGENT }
           : { "user-agent": USER_AGENT },
       body: method === "POST" ? "List-Unsubscribe=One-Click" : undefined,
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: deadline,
     });
     // Discard the body unread — it must not reach the model, and an unconsumed
     // stream would keep the socket open.
@@ -318,7 +337,28 @@ export async function unsubscribeThread(
     return { ...base, unsubscribed: false, reason };
   }
 
-  const res = await oneClickUnsubscribe(info.httpsUrls[0], deps);
+  // A header may list several https URIs. Take the first the vetting accepts —
+  // throwing because URI #1 has a stray port while #2 is fine would strand a
+  // perfectly good opt-out. All of them unusable is a refusal, not an error.
+  const usable = info.httpsUrls.find((u) => {
+    try {
+      validateUnsubscribeUrl(u);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  if (!usable) {
+    return {
+      ...base,
+      unsubscribed: false,
+      reason:
+        "The sender's one-click endpoint did not pass vetting (https and the default port only, " +
+        "no credentials in the URL). The advertised URLs are listed in `options.httpsUrls`.",
+    };
+  }
+
+  const res = await oneClickUnsubscribe(usable, deps);
   return {
     ...base,
     unsubscribed: res.ok,

@@ -691,9 +691,13 @@ export class Gmail {
   }
 
   /**
-   * The List-Unsubscribe headers of a thread's MOST RECENT message, via a
-   * metadata-only fetch. The newest message is the right one: opt-out endpoints
-   * are per-mailing and older ones in the same thread may already be dead.
+   * The List-Unsubscribe headers of a thread's most recent message that actually
+   * carries one, via a metadata-only fetch. Newest-first because opt-out endpoints
+   * are per-mailing and older ones may already be dead — but skipping messages
+   * without the header matters: a reply you sent sits at the end of the thread and
+   * advertises nothing, which would otherwise read as "this list has no opt-out".
+   * With no such message anywhere, the newest one is used so From/Subject still
+   * describe the thread.
    */
   async getUnsubscribeHeaders(threadId: string): Promise<UnsubscribeHeaders> {
     const res = await this.req(() =>
@@ -705,11 +709,15 @@ export class Gmail {
       }),
     );
     const messages = res.data.messages ?? [];
-    const last = messages[messages.length - 1];
-    if (!last) throw new Error(`Thread ${threadId} has no messages.`);
+    if (!messages.length) throw new Error(`Thread ${threadId} has no messages.`);
+    const headerOf = (m: gmail_v1.Schema$Message, n: string) =>
+      m.payload?.headers?.find((h) => h.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+    // Newest first, preferring one that advertises an opt-out at all.
+    const last =
+      [...messages].reverse().find((m) => headerOf(m, "List-Unsubscribe").trim() !== "") ??
+      messages[messages.length - 1];
     // Raw for the two List-* headers: they carry URIs, not RFC 2047 encoded words.
-    const raw = (n: string) =>
-      last.payload?.headers?.find((h) => h.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+    const raw = (n: string) => headerOf(last, n);
     return {
       messageId: last.id!,
       from: decodeRfc2047(raw("From")),

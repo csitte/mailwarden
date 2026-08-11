@@ -143,6 +143,54 @@ describe("tool results — structured content + fenced text", () => {
     expect(text).toContain('"name": "INBOX"');
   });
 
+  it("list_unsubscribe surfaces the opt-out options through the tool's outputSchema", async () => {
+    // The tool layer is where an outputSchema/structuredContent mismatch would
+    // surface — the unit tests exercise the logic, this exercises the wiring.
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  payload: {
+                    headers: [
+                      { name: "From", value: "News <news@example.com>" },
+                      { name: "Subject", value: "Weekly" },
+                      {
+                        name: "List-Unsubscribe",
+                        value: "<https://a.example/u>, <mailto:u@example.com>",
+                      },
+                      { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "list_unsubscribe",
+      arguments: { threadId: "t1" },
+    });
+
+    expect(res.structuredContent).toEqual({
+      threadId: "t1",
+      messageId: "m1",
+      from: "News <news@example.com>",
+      subject: "Weekly",
+      oneClick: true,
+      httpsUrls: ["https://a.example/u"],
+      mailtos: ["mailto:u@example.com"],
+      hasUnsubscribe: true,
+    });
+    expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
+  });
+
   it("get_profile returns the account address and mailbox totals", async () => {
     (getAuth as Mock).mockResolvedValue({
       users: {

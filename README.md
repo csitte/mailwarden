@@ -147,7 +147,9 @@ it is the **only** place mailwarden ever talks to a host that isn't Google, so t
 - **Fixed request, discarded response.** The body is always `List-Unsubscribe=One-Click`; only the
   status code returns to the model, so the endpoint cannot answer with instructions.
 - **SSRF guards.** https only, default port only, no credentials in the URL, and every hop — including
-  redirects, followed at most 3 times — must resolve exclusively to public addresses.
+  redirects, followed at most 3 times — must resolve exclusively to public addresses. The whole chain
+  shares one 10-second budget. Not rebinding-proof (`fetch` resolves again when it connects) — see
+  [SECURITY.md](SECURITY.md); what survives that gap is a blind POST whose response is never read.
 
 What it can't undo: the request tells the sender your address is live. A sender that ignores its own
 opt-out is beyond any client's reach — pair `unsubscribe` with `create_filter` or `trash` for those.

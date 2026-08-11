@@ -139,6 +139,20 @@ describe("isBlockedAddress", () => {
     expect(isBlockedAddress("::ffff:8.8.8.8")).toBe(false);
   });
 
+  it("also unwraps the HEX-encoded mapped form, not just the dotted one", () => {
+    expect(isBlockedAddress("::ffff:7f00:1")).toBe(true); // ::ffff:127.0.0.1
+    expect(isBlockedAddress("::ffff:a9fe:a9fe")).toBe(true); // 169.254.169.254
+    expect(isBlockedAddress("::7f00:1")).toBe(true); // IPv4-compatible loopback
+    expect(isBlockedAddress("::ffff:808:808")).toBe(false); // 8.8.8.8
+  });
+
+  it("still applies the prefix rules when the embedded IPv4 is public", () => {
+    // The inner address is public, but the address itself is unique-local —
+    // returning the inner verdict outright would wave this through.
+    expect(isBlockedAddress("fd00::8.8.8.8")).toBe(true);
+    expect(isBlockedAddress("fe80::8.8.8.8")).toBe(true);
+  });
+
   it("allows public IPv6", () => {
     expect(isBlockedAddress("2606:4700:4700::1111")).toBe(false);
   });
@@ -261,32 +275,29 @@ describe("oneClickUnsubscribe", () => {
 
 // ---- IO layer against a fake Gmail API ----
 
-/** A gmail_v1-shaped double returning one thread with the given headers. */
-function gmailWith(headers: Record<string, string>, messageIds = ["m1", "m2"]) {
+/** A gmail_v1-shaped double over an explicit list of messages (oldest first, m1…mN). */
+function gmailThread(messages: Record<string, string>[]) {
   const api: any = {
     users: {
       threads: {
         get: vi.fn(async () => ({
           data: {
-            messages: [
-              // Older message: a stale endpoint that must NOT be picked.
-              {
-                id: messageIds[0],
-                payload: { headers: [{ name: "List-Unsubscribe", value: "<https://old.example/u>" }] },
-              },
-              {
-                id: messageIds[1],
-                payload: {
-                  headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
-                },
-              },
-            ],
+            messages: messages.map((h, i) => ({
+              id: `m${i + 1}`,
+              payload: { headers: Object.entries(h).map(([name, value]) => ({ name, value })) },
+            })),
           },
         })),
       },
     },
   };
   return { gmail: new Gmail(api), api };
+}
+
+/** The common shape: an older message with a stale endpoint, then `headers`, then `extra`. */
+function gmailWith(headers: Record<string, string>, extra: Record<string, string>[] = []) {
+  // m1's endpoint must never be the one picked — it belongs to an earlier mailing.
+  return gmailThread([{ "List-Unsubscribe": "<https://old.example/u>" }, headers, ...extra]);
 }
 
 describe("inspectUnsubscribe", () => {
@@ -322,9 +333,31 @@ describe("inspectUnsubscribe", () => {
     expect(info.httpsUrls).toEqual(["https://new.example/u/=?x?"]);
   });
 
-  it("reports hasUnsubscribe:false when the message advertises nothing", async () => {
-    const { gmail } = gmailWith({ From: "a@b.c", Subject: "hi" });
+  it("skips a newer message that advertises nothing — e.g. your own reply", async () => {
+    // Gmail threads a reply onto the newsletter; taking the literal last message
+    // would report "this list has no opt-out".
+    const { gmail } = gmailWith(
+      {
+        From: "Newsletter <news@example.com>",
+        "List-Unsubscribe": "<https://new.example/u/xyz>",
+        "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      },
+      [{ From: "me@example.com", Subject: "Re: Weekly" }],
+    );
     const info = await inspectUnsubscribe(gmail, "t1");
+    expect(info.messageId).toBe("m2");
+    expect(info.httpsUrls).toEqual(["https://new.example/u/xyz"]);
+    expect(info.oneClick).toBe(true);
+  });
+
+  it("falls back to the newest message when nothing in the thread advertises", async () => {
+    const { gmail } = gmailThread([
+      { From: "a@b.c", Subject: "hi" },
+      { From: "me@example.com", Subject: "Re: hi" },
+    ]);
+    const info = await inspectUnsubscribe(gmail, "t1");
+    expect(info.messageId).toBe("m2"); // the literal last one, so From/Subject still fit
+    expect(info.subject).toBe("Re: hi");
     expect(info.hasUnsubscribe).toBe(false);
     expect(info.oneClick).toBe(false);
   });
@@ -356,6 +389,30 @@ describe("unsubscribeThread", () => {
     expect(calls.map((c) => c.url)).toEqual(["https://new.example/u/xyz"]);
   });
 
+  it("skips an unusable URI and takes the next one the vetting accepts", async () => {
+    const { gmail } = gmailWith({
+      "List-Unsubscribe": "<https://new.example:8080/u>, <https://new.example/u/ok>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const res = await unsubscribeThread(gmail, "t1", deps);
+    expect(res.unsubscribed).toBe(true);
+    expect(calls.map((c) => c.url)).toEqual(["https://new.example/u/ok"]);
+  });
+
+  it("refuses (not throws) when every advertised URI fails vetting", async () => {
+    const { gmail } = gmailWith({
+      "List-Unsubscribe": "<https://new.example:8080/u>, <https://u:p@new.example/u>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const res = await unsubscribeThread(gmail, "t1", deps);
+    expect(res.unsubscribed).toBe(false);
+    expect(res.reason).toMatch(/did not pass vetting/);
+    expect(res.options.httpsUrls).toHaveLength(2);
+    expect(calls).toHaveLength(0);
+  });
+
   it("refuses a link-only sender and hands the link back instead", async () => {
     const { gmail } = gmailWith({ "List-Unsubscribe": "<https://new.example/u/xyz>" });
     const { deps, calls } = fakeDeps([{ status: 200 }]);
@@ -380,7 +437,7 @@ describe("unsubscribeThread", () => {
   });
 
   it("reports 'nothing advertised' rather than failing", async () => {
-    const { gmail } = gmailWith({ From: "a@b.c" });
+    const { gmail } = gmailThread([{ From: "a@b.c", Subject: "hi" }]);
     const { deps, calls } = fakeDeps([{ status: 200 }]);
     const res = await unsubscribeThread(gmail, "t1", deps);
     expect(res).toMatchObject({ unsubscribed: false });
