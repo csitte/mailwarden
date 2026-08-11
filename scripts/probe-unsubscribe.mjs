@@ -61,7 +61,7 @@ if (!threads.length) {
   process.exit(0);
 }
 
-const stats = { total: 0, none: 0, oneClick: 0, linkOnly: 0, mailtoOnly: 0, odd: 0 };
+const stats = { total: 0, none: 0, postOnly: 0, oneClick: 0, linkOnly: 0, mailtoOnly: 0, odd: 0 };
 const oddities = [];
 const refused = [];
 
@@ -90,7 +90,13 @@ for (const t of threads) {
   stats.total++;
 
   const kind = !h.listUnsubscribe.trim()
-    ? "none"
+    // A `List-Unsubscribe-Post` with no `List-Unsubscribe` to go with it is
+    // RFC-wise nonsense but occurs in the field (transactional mail from at least
+    // one ESP). Counted apart from "no header at all" — the parse result is the
+    // same (nothing to offer) but the sender's intent plainly was not.
+    ? h.listUnsubscribePost.trim()
+      ? "postOnly"
+      : "none"
     : parsed.oneClick
       ? "oneClick"
       : parsed.httpsUrls.length
@@ -122,7 +128,8 @@ for (const t of threads) {
 console.log("─".repeat(60));
 console.log(
   `${stats.total} threads: ${stats.oneClick} one-click, ${stats.linkOnly} link-only, ` +
-    `${stats.mailtoOnly} mailto-only, ${stats.none} no header, ${stats.odd} unparsed`,
+    `${stats.mailtoOnly} mailto-only, ${stats.none} no header, ${stats.postOnly} Post-header only, ` +
+    `${stats.odd} unparsed`,
 );
 if (vet) {
   const checked = stats.oneClick;

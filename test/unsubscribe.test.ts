@@ -69,6 +69,10 @@ describe("parseListUnsubscribe", () => {
   });
 
   it("returns empty options for a missing or empty header", () => {
+    // Note the Post header is set in every case: a `List-Unsubscribe-Post` with no
+    // `List-Unsubscribe` beside it is RFC-wise nonsense, but it does occur in the
+    // field (observed on transactional mail via Adobe Campaign). It must not
+    // produce oneClick:true — there is no URI to click.
     for (const v of [undefined, "", "   ", "<>"]) {
       const o = parseListUnsubscribe(v, POST);
       expect(o).toEqual({ oneClick: false, httpsUrls: [], mailtos: [] });
