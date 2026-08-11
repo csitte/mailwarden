@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an IPv6 — mapped, translated, NAT64 or 6to4 — is judged on its own account too; anything that does
   not parse as an address is refused. DNS resolution shares the request's 10-second budget. A sender
   offering nothing automatable yields `unsubscribed:false` plus the alternatives — not an error.
+- **`scripts/probe-unsubscribe.mjs` — hold the List-Unsubscribe parser against real mail.** Prints
+  each real header from your own mailbox next to what the parser made of it; `--vet` additionally
+  runs the endpoint through the URL vetting and the address guard, so you also see whether the
+  guards would let a genuine opt-out through rather than only that they block a hostile one.
+  Strictly read-only — no sender is ever contacted and nothing in the mailbox changes. Repo-only,
+  like the re-verification demo.
 - **Every release is now verified as an installed package, not just as a source tree.** `npm run
   smoke` packs the tarball, installs it into a clean project with no credentials, and drives the
   real MCP handshake against it: all runtime imports must resolve, `initialize` must report the
