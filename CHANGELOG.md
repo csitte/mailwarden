@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-11
+
+Unsubscribe from mailing lists, and a release pipeline that verifies the artifact rather than the
+source tree. All additive — nothing existing changes behaviour, and no re-authorization is needed.
+
 ### Added
 - **Unsubscribe from mailing lists — two new tools.** `list_unsubscribe` (read tier) reports what
   opt-out options a thread advertises via its `List-Unsubscribe` header, contacting nobody — reading
@@ -488,7 +493,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/csitte/mailwarden/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/csitte/mailwarden/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/csitte/mailwarden/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/csitte/mailwarden/compare/v0.5.0...v0.6.0

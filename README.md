@@ -22,7 +22,11 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   `structuredContent` alongside fenced JSON text — no parsing guesswork for clients.
 - **Small attack surface.** No send tools (no exfiltration path for prompt-injected mail),
   optional read-only mode, no telemetry, no open ports by default, symlink-safe download fencing,
-  injection-fenced output. Details under [Security & privacy](#security--privacy).
+  injection-fenced output. **One deliberate exception:** `unsubscribe` (manage tier) contacts the
+  opt-out endpoint named in a message's own header — the only non-Google host mailwarden ever
+  reaches, and a `read`-tier deployment makes no outbound request at all. Details under
+  [Security & privacy](#security--privacy) and
+  [Unsubscribing](#unsubscribing--the-one-outbound-request).
 - **Correct with real-world mail.** RFC 2047 headers decoded (`=?UTF-8?B?…?=` → readable text),
   bodies decoded in their *declared* charset (no mojibake for ISO-8859-1/Shift_JIS mail),
   429/5xx retried with exponential backoff.
@@ -342,7 +346,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (430 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (433 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
