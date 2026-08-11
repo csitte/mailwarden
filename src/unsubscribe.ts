@@ -99,62 +99,149 @@ export function validateUnsubscribeUrl(raw: string): URL {
   return url;
 }
 
-function parseIpv4(s: string): number[] | null {
+/**
+ * IPv4 dotted quad → its 4 bytes, or null. Deliberately strict: octal (`0177.0.0.1`),
+ * hex (`0x7f.0.0.1`), integer (`2130706433`) and short (`127.1`) notations all return
+ * null and therefore fail closed at the caller, rather than being decoded into an
+ * address we might then mis-classify.
+ */
+function parseIpv4Bytes(s: string): number[] | null {
   const parts = s.split(".");
   if (parts.length !== 4) return null;
-  const nums: number[] = [];
+  const out: number[] = [];
   for (const p of parts) {
     if (!/^\d{1,3}$/.test(p)) return null;
     const n = Number(p);
     if (n > 255) return null;
-    nums.push(n);
+    out.push(n);
   }
-  return nums;
+  return out;
 }
+
+/**
+ * IPv6 literal → its 16 bytes, or null. Handles `::` elision anywhere and a
+ * trailing dotted quad (`::ffff:127.0.0.1`).
+ *
+ * Parsing to bytes is the whole point: matching prefixes as *text* only works for
+ * whatever spelling the resolver happens to emit, and `0:0:0:0:0:0:0:1` is the same
+ * address as `::1`. Every spelling collapses to the same 16 bytes here.
+ */
+function parseIpv6Bytes(s: string): number[] | null {
+  if (!s.includes(":")) return null;
+  let text = s;
+  // Fold a trailing dotted quad into the two hex groups it stands for.
+  const dotted = text.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (dotted) {
+    const v4 = parseIpv4Bytes(dotted[1]);
+    if (!v4) return null;
+    const hi = ((v4[0] << 8) | v4[1]).toString(16);
+    const lo = ((v4[2] << 8) | v4[3]).toString(16);
+    text = text.slice(0, -dotted[1].length) + `${hi}:${lo}`;
+  }
+  const halves = text.split("::");
+  if (halves.length > 2) return null; // `::` may appear at most once
+  const toGroups = (part: string): number[] =>
+    part === "" ? [] : part.split(":").map((g) => (/^[0-9a-f]{1,4}$/.test(g) ? parseInt(g, 16) : NaN));
+  const left = toGroups(halves[0]);
+  const right = halves.length === 2 ? toGroups(halves[1]) : [];
+  if ([...left, ...right].some(Number.isNaN)) return null;
+  const missing = 8 - left.length - right.length;
+  // Without `::` the address must already be complete; with it, at least one group elided.
+  if (halves.length === 2 ? missing < 1 : missing !== 0) return null;
+  const groups = [...left, ...Array<number>(halves.length === 2 ? missing : 0).fill(0), ...right];
+  const bytes: number[] = [];
+  for (const g of groups) bytes.push(g >> 8, g & 0xff);
+  return bytes;
+}
+
+/** True when `bytes` falls inside the CIDR block `prefix`/`bits`. */
+function inCidr(bytes: number[], prefix: number[], bits: number): boolean {
+  const whole = bits >> 3;
+  for (let i = 0; i < whole; i++) if (bytes[i] !== prefix[i]) return false;
+  const rest = bits & 7;
+  if (rest) {
+    const mask = (0xff << (8 - rest)) & 0xff;
+    if ((bytes[whole] & mask) !== (prefix[whole] & mask)) return false;
+  }
+  return true;
+}
+
+const cidrs = (v4: boolean, list: [string, number][]) =>
+  list.map(([addr, bits]) => {
+    const bytes = v4 ? parseIpv4Bytes(addr) : parseIpv6Bytes(addr);
+    if (!bytes) throw new Error(`mailwarden: unparsable blocked CIDR ${addr}`); // build-time typo guard
+    return [bytes, bits] as const;
+  });
+
+/** IPv4 blocks that are not globally reachable (IANA IPv4 Special-Purpose registry). */
+const BLOCKED_V4 = cidrs(true, [
+  ["0.0.0.0", 8], // "this host on this network"
+  ["10.0.0.0", 8], // private
+  ["100.64.0.0", 10], // CGNAT / shared address space
+  ["127.0.0.0", 8], // loopback
+  ["169.254.0.0", 16], // link-local — includes 169.254.169.254 (cloud metadata)
+  ["172.16.0.0", 12], // private
+  ["192.0.0.0", 24], // IETF protocol assignments
+  ["192.0.2.0", 24], // TEST-NET-1
+  ["192.88.99.0", 24], // 6to4 relay anycast (deprecated)
+  ["192.168.0.0", 16], // private
+  ["198.18.0.0", 15], // benchmarking
+  ["198.51.100.0", 24], // TEST-NET-2
+  ["203.0.113.0", 24], // TEST-NET-3
+  ["224.0.0.0", 4], // multicast
+  ["240.0.0.0", 4], // reserved, incl. 255.255.255.255 broadcast
+]);
+
+/** IPv6 blocks that are not globally reachable (IANA IPv6 Special-Purpose registry). */
+const BLOCKED_V6 = cidrs(false, [
+  ["::", 128], // unspecified
+  ["::1", 128], // loopback
+  ["64:ff9b:1::", 48], // local-use IPv4/IPv6 translation
+  ["100::", 64], // discard-only
+  ["2001::", 32], // Teredo
+  ["2001:2::", 48], // benchmarking
+  ["2001:10::", 28], // ORCHID (deprecated)
+  ["2001:20::", 28], // ORCHIDv2
+  ["2001:db8::", 32], // documentation — the v6 twin of TEST-NET
+  ["2002::", 16], // 6to4 (deprecated), and it embeds an arbitrary IPv4
+  ["5f00::", 16], // SRv6 SIDs
+  ["fc00::", 7], // unique local
+  ["fe80::", 10], // link-local
+  ["ff00::", 8], // multicast
+]);
+
+/** IPv6 blocks carrying an IPv4 address in their last 4 bytes — judge that too. */
+const V4_IN_V6 = cidrs(false, [
+  ["::", 96], // IPv4-compatible (deprecated) + the unspecified/loopback corner
+  ["::ffff:0:0", 96], // IPv4-mapped
+  ["::ffff:0:0:0", 96], // IPv4-translated (RFC 2765, deprecated — still spells out an IPv4)
+  ["64:ff9b::", 96], // NAT64
+]);
 
 /**
  * True for addresses an unsubscribe request must never reach: loopback, private
  * and shared ranges, link-local (incl. the cloud metadata address), multicast,
- * and reserved space. Both families; IPv4-mapped/NAT64 IPv6 is unwrapped first
- * so `::ffff:127.0.0.1` cannot slip through.
+ * documentation and reserved space — in either family, in any spelling.
+ *
+ * Anything that does not parse as an address is blocked: the input is a resolver's
+ * answer, so an unparsable one means we cannot reason about where the request would
+ * go, and that is not a reason to let it through.
  */
 export function isBlockedAddress(ip: string): boolean {
   const addr = ip.trim().replace(/^\[|\]$/g, "").split("%")[0].toLowerCase();
 
-  const v4 = parseIpv4(addr);
-  if (v4) {
-    const [a, b] = v4;
-    if (a === 0 || a === 10 || a === 127) return true;
-    if (a === 169 && b === 254) return true; // link-local + 169.254.169.254 metadata
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 100 && b >= 64 && b <= 127) return true; // CGNAT
-    if (a === 198 && (b === 18 || b === 19)) return true; // benchmarking
-    if (a === 192 && b === 0 && v4[2] <= 2) return true; // IETF protocol assignments … TEST-NET-1
-    if (a === 198 && b === 51 && v4[2] === 100) return true; // TEST-NET-2
-    if (a === 203 && b === 0 && v4[2] === 113) return true; // TEST-NET-3
-    if (a >= 224) return true; // multicast + reserved + broadcast
-    return false;
-  }
+  const v4 = parseIpv4Bytes(addr);
+  if (v4) return BLOCKED_V4.some(([prefix, bits]) => inCidr(v4, prefix, bits));
 
-  if (!addr.includes(":")) return true; // not an address we can reason about
-  // An IPv6 address may carry an IPv4 one inside it — as a dotted quad
-  // (`::ffff:127.0.0.1`, NAT64, or an unabbreviated `0:0:…:ffff:127.0.0.1`) or
-  // hex-encoded (`::ffff:7f00:1`). Check the embedded address whatever the form,
-  // and deliberately do NOT return its verdict: a public inner address must still
-  // face the prefix checks below, or `fd00::8.8.8.8` would slip through as public.
-  const dotted = addr.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
-  if (dotted && isBlockedAddress(dotted[1])) return true;
-  const hex = addr.match(/^(?:::(?:ffff:)?|64:ff9b::)([0-9a-f]{1,4}):([0-9a-f]{1,4})$/);
-  if (hex) {
-    const hi = parseInt(hex[1], 16);
-    const lo = parseInt(hex[2], 16);
-    if (isBlockedAddress(`${hi >> 8}.${hi & 0xff}.${lo >> 8}.${lo & 0xff}`)) return true;
+  const v6 = parseIpv6Bytes(addr);
+  if (!v6) return true;
+  if (BLOCKED_V6.some(([prefix, bits]) => inCidr(v6, prefix, bits))) return true;
+  // An embedded IPv4 must clear the IPv4 rules as well — but only ever to BLOCK.
+  // A public inner address does not excuse the outer prefix (`fd00::8.8.8.8`).
+  if (V4_IN_V6.some(([prefix, bits]) => inCidr(v6, prefix, bits))) {
+    const inner = v6.slice(12);
+    if (BLOCKED_V4.some(([prefix, bits]) => inCidr(inner, prefix, bits))) return true;
   }
-  if (addr === "::" || addr === "::1") return true;
-  if (/^f[cd]/.test(addr)) return true; // fc00::/7 unique local
-  if (/^fe[89ab]/.test(addr)) return true; // fe80::/10 link-local
-  if (/^ff/.test(addr)) return true; // ff00::/8 multicast
   return false;
 }
 
@@ -182,11 +269,24 @@ export const defaultUnsubscribeDeps: UnsubscribeDeps = {
  * which `fetch` does not expose. What survives the gap is a *blind* POST with a
  * fixed body whose response is never read — see SECURITY.md.
  */
-async function assertPublicHost(url: URL, deps: UnsubscribeDeps): Promise<void> {
+async function assertPublicHost(url: URL, deps: UnsubscribeDeps, deadline?: AbortSignal): Promise<void> {
+  // `url.hostname` is already punycode for an IDN, so a homograph domain resolves
+  // as the name it really is — the check sees what the connection will see.
   const host = url.hostname.replace(/^\[|\]$/g, "");
   let addresses: string[];
   try {
-    addresses = await deps.resolveHost(host);
+    // The deadline covers resolution too. `AbortSignal` cannot cancel a
+    // `dns.lookup` in flight, but racing it means a stalled resolver returns
+    // control on time instead of holding the tool call open indefinitely.
+    addresses = await (deadline
+      ? Promise.race([
+          deps.resolveHost(host),
+          new Promise<never>((_, reject) => {
+            if (deadline.aborted) reject(new Error("timed out"));
+            deadline.addEventListener("abort", () => reject(new Error("timed out")), { once: true });
+          }),
+        ])
+      : deps.resolveHost(host));
   } catch (err) {
     throw new Error(
       `Could not resolve the unsubscribe host ${host}: ${err instanceof Error ? err.message : String(err)}`,
@@ -226,15 +326,16 @@ const USER_AGENT = "mailwarden (+https://github.com/csitte/mailwarden)";
 export async function oneClickUnsubscribe(
   rawUrl: string,
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+  timeoutMs = TIMEOUT_MS,
 ): Promise<OneClickResult> {
   let url = validateUnsubscribeUrl(rawUrl);
   let method: "POST" | "GET" = "POST";
   // ONE budget for the whole chain, not per hop — a per-hop timeout would let a
   // redirecting endpoint stall the tool call for MAX_REDIRECTS × TIMEOUT_MS.
-  const deadline = AbortSignal.timeout(TIMEOUT_MS);
+  const deadline = AbortSignal.timeout(timeoutMs);
 
   for (let redirects = 0; ; redirects++) {
-    await assertPublicHost(url, deps);
+    await assertPublicHost(url, deps, deadline);
     const res = await deps.fetch(url.toString(), {
       method,
       redirect: "manual",

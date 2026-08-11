@@ -9,8 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Unsubscribe from mailing lists — two new tools.** `list_unsubscribe` (read tier) reports what
-  opt-out options a thread's newest message advertises via its `List-Unsubscribe` header, contacting
-  nobody. `unsubscribe` (manage tier) performs the RFC 8058 one-click opt-out. This is the only code
+  opt-out options a thread advertises via its `List-Unsubscribe` header, contacting nobody — reading
+  the newest message that actually carries the header, so a reply threaded onto a newsletter does not
+  hide it. `unsubscribe` (manage tier) performs the RFC 8058 one-click opt-out. This is the only code
   path in mailwarden that reaches a host other than Google, so it is fenced accordingly (new threat
   class 9 in `SECURITY.md`): **the URL is never a tool parameter** — it comes from the addressed
   message's own header, so an injected mail cannot smuggle mailbox content into a query string; the
@@ -18,10 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instructions; only senders who opted in via `List-Unsubscribe-Post` are automated, a bare link is
   handed back for a human, and a `mailto:` opt-out is never performed because mailwarden cannot send.
   SSRF guards on every hop: https and default port only, no credentials in the URL, at most three
-  redirects, and each host must resolve exclusively to public addresses (loopback, RFC 1918, CGNAT,
-  link-local incl. `169.254.169.254`, multicast and reserved space are refused; IPv4-mapped and NAT64
-  IPv6 unwrapped first). A sender offering nothing automatable yields `unsubscribed:false` plus the
-  alternatives — not an error.
+  redirects, and each host must resolve exclusively to globally reachable addresses. Addresses are
+  matched as **bytes** against the IANA special-purpose registries rather than as text, so every
+  spelling of one address gets one verdict (`::1` and `0:0:0:0:0:0:0:1` alike) and an IPv4 embedded in
+  an IPv6 — mapped, translated, NAT64 or 6to4 — is judged on its own account too; anything that does
+  not parse as an address is refused. DNS resolution shares the request's 10-second budget. A sender
+  offering nothing automatable yields `unsubscribed:false` plus the alternatives — not an error.
 - **Every release is now verified as an installed package, not just as a source tree.** `npm run
   smoke` packs the tarball, installs it into a clean project with no credentials, and drives the
   real MCP handshake against it: all runtime imports must resolve, `initialize` must report the

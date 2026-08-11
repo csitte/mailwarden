@@ -69,10 +69,38 @@ describe("parseListUnsubscribe", () => {
   });
 
   it("returns empty options for a missing or empty header", () => {
-    for (const v of [undefined, "", "   "]) {
+    for (const v of [undefined, "", "   ", "<>"]) {
       const o = parseListUnsubscribe(v, POST);
       expect(o).toEqual({ oneClick: false, httpsUrls: [], mailtos: [] });
     }
+  });
+
+  // The shapes real senders actually emit, as a table — same reasoning as the
+  // address corpus below: the risk is a form nobody thought to write down.
+  const FORMS: [string, string | undefined, string[], string[], boolean, string][] = [
+    ["<mailto:u@a.example>, <https://a.example/u>", POST, ["https://a.example/u"], ["mailto:u@a.example"], true, "mailto listed first"],
+    ["<https://a.example/u>,\r\n\t<mailto:u@a.example>", POST, ["https://a.example/u"], ["mailto:u@a.example"], true, "CRLF + tab folding"],
+    ["<HTTPS://A.EXAMPLE/U>", POST, ["HTTPS://A.EXAMPLE/U"], [], true, "uppercase scheme"],
+    ["<https://a.example/u><https://b.example/u>", undefined, ["https://a.example/u", "https://b.example/u"], [], false, "no separator between URIs"],
+    ["<https://a.example/u?a=1&b=2>", undefined, ["https://a.example/u?a=1&b=2"], [], false, "query string survives"],
+    ["<https://a.example/u?q=a%20b>", undefined, ["https://a.example/u?q=a%20b"], [], false, "percent-encoding survives"],
+    ["<ftp://a.example/u>", POST, [], [], false, "unknown scheme dropped"],
+    ["<https://a.example/u>", "list-unsubscribe = one-click", ["https://a.example/u"], [], true, "spaces around ="],
+    ["<https://a.example/u>", "List-Unsubscribe=One-Click\r\n", ["https://a.example/u"], [], true, "trailing CRLF on the Post header"],
+    ["<https://a.example/u>", "One-Click", ["https://a.example/u"], [], false, "Post value without its key"],
+  ];
+
+  it.each(FORMS)("handles %s / %s (%#)", (lu, post, httpsUrls, mailtos, oneClick) => {
+    expect(parseListUnsubscribe(lu, post)).toEqual({ oneClick, httpsUrls, mailtos });
+  });
+
+  it("strips whitespace inside a URI — folding artefact, not a raw space", () => {
+    // A folded header leaves whitespace mid-URI and there is no way to tell it
+    // from a (already invalid) raw space, so both are removed. Documented because
+    // it is a real behaviour, not an accident.
+    expect(parseListUnsubscribe("<https://a.example/u?q=a b>").httpsUrls).toEqual([
+      "https://a.example/u?q=ab",
+    ]);
   });
 });
 
@@ -98,68 +126,113 @@ describe("validateUnsubscribeUrl", () => {
   });
 });
 
+/**
+ * Table-driven on purpose. The two defects this guard has already had were both
+ * *spelling* bugs — an address form nobody had thought to write down — so the unit
+ * of coverage is the IANA special-purpose registry crossed with every notation the
+ * same address can be written in, not a handful of illustrative examples.
+ */
+const BLOCKED: [string, string][] = [
+  // IPv4 special-purpose registry
+  ["0.0.0.0", "this host on this network"],
+  ["0.1.2.3", "0.0.0.0/8"],
+  ["10.0.0.1", "private"],
+  ["100.64.0.1", "CGNAT lower bound"],
+  ["100.127.255.255", "CGNAT upper bound"],
+  ["127.0.0.1", "loopback"],
+  ["127.255.255.254", "loopback upper bound"],
+  ["169.254.169.254", "cloud metadata"],
+  ["172.16.0.1", "private lower bound"],
+  ["172.31.255.255", "private upper bound"],
+  ["192.0.0.1", "IETF protocol assignments"],
+  ["192.0.2.1", "TEST-NET-1"],
+  ["192.88.99.1", "6to4 relay anycast"],
+  ["192.168.1.1", "private"],
+  ["198.18.0.1", "benchmarking lower bound"],
+  ["198.19.255.255", "benchmarking upper bound"],
+  ["198.51.100.1", "TEST-NET-2"],
+  ["203.0.113.1", "TEST-NET-3"],
+  ["224.0.0.1", "multicast"],
+  ["240.0.0.1", "reserved"],
+  ["255.255.255.255", "broadcast"],
+  // Notations that must fail closed rather than be decoded
+  ["localhost", "not an address at all"],
+  ["2130706433", "127.0.0.1 as a decimal integer"],
+  ["0177.0.0.1", "octal octet"],
+  ["0x7f.0.0.1", "hex octet"],
+  ["127.1", "short form"],
+  ["999.1.1.1", "octet out of range"],
+  ["", "empty"],
+  // IPv6 special-purpose registry
+  ["::", "unspecified"],
+  ["::1", "loopback"],
+  ["64:ff9b:1::1", "local-use translation"],
+  ["100::1", "discard-only"],
+  ["2001::1", "Teredo"],
+  ["2001:2::1", "benchmarking"],
+  ["2001:db8::1", "documentation — the v6 twin of TEST-NET"],
+  ["2002:7f00:1::1", "6to4 embedding 127.0.0.1"],
+  ["2002:a00:1::1", "6to4 embedding 10.0.0.1"],
+  ["fc00::1", "unique local"],
+  ["fd12:3456::1", "unique local"],
+  ["fe80::1", "link-local"],
+  ["febf::1", "link-local upper bound"],
+  ["ff02::1", "multicast"],
+  // The SAME addresses, spelled differently — where both past defects lived
+  ["0:0:0:0:0:0:0:1", "loopback, unabbreviated"],
+  ["0000:0000:0000:0000:0000:0000:0000:0001", "loopback, fully padded"],
+  ["0:0:0:0:0:0:0:0", "unspecified, unabbreviated"],
+  ["::ffff:127.0.0.1", "IPv4-mapped loopback, dotted"],
+  ["::ffff:7f00:1", "IPv4-mapped loopback, hex"],
+  ["0:0:0:0:0:ffff:7f00:1", "IPv4-mapped loopback, unabbreviated hex"],
+  ["0000:0000:0000:0000:0000:ffff:127.0.0.1", "IPv4-mapped loopback, unabbreviated dotted"],
+  ["::ffff:0:127.0.0.1", "IPv4-translated (RFC 2765)"],
+  ["::ffff:a9fe:a9fe", "IPv4-mapped metadata, hex"],
+  ["::10.0.0.1", "IPv4-compatible, dotted"],
+  ["::a00:1", "IPv4-compatible, hex"],
+  ["0:0:0:0:0:0:0a00:0001", "IPv4-compatible, unabbreviated"],
+  ["64:ff9b::127.0.0.1", "NAT64, dotted"],
+  ["64:ff9b::7f00:1", "NAT64, hex"],
+  ["FE80::1", "link-local, uppercase"],
+  ["fe80::1%eth0", "link-local with a zone id"],
+  ["[::1]", "bracketed"],
+  // A public IPv4 inside a private IPv6 must NOT excuse the outer prefix
+  ["fd00::8.8.8.8", "unique local wrapping a public IPv4"],
+  ["fe80::8.8.8.8", "link-local wrapping a public IPv4"],
+];
+
+const ALLOWED: [string, string][] = [
+  ["1.1.1.1", "public"],
+  ["8.8.8.8", "public"],
+  ["93.184.216.34", "public"],
+  ["100.63.255.255", "just below CGNAT"],
+  ["100.128.0.1", "just above CGNAT"],
+  ["172.15.255.255", "just below private"],
+  ["172.32.0.1", "just above private"],
+  ["192.167.255.255", "just below 192.168/16"],
+  ["192.169.0.1", "just above 192.168/16"],
+  ["198.17.255.255", "just below benchmarking"],
+  ["198.20.0.1", "just above benchmarking"],
+  ["223.255.255.255", "just below multicast"],
+  ["2606:4700:4700::1111", "public IPv6"],
+  ["2a00:1450:4001::200e", "public IPv6"],
+  ["::ffff:8.8.8.8", "IPv4-mapped public address"],
+  ["::ffff:808:808", "IPv4-mapped public address, hex"],
+];
+
 describe("isBlockedAddress", () => {
-  it("blocks loopback, private, shared and link-local IPv4", () => {
-    for (const ip of [
-      "0.0.0.0",
-      "127.0.0.1",
-      "10.1.2.3",
-      "172.16.0.1",
-      "172.31.255.255",
-      "192.168.1.1",
-      "169.254.169.254", // cloud metadata
-      "100.64.0.1", // CGNAT
-      "198.18.0.1",
-      "192.0.2.5",
-      "198.51.100.5",
-      "203.0.113.5",
-      "224.0.0.1",
-      "255.255.255.255",
-    ]) {
-      expect(isBlockedAddress(ip), ip).toBe(true);
-    }
+  it.each(BLOCKED)("blocks %s (%s)", (ip) => {
+    expect(isBlockedAddress(ip)).toBe(true);
   });
 
-  it("allows ordinary public IPv4", () => {
-    for (const ip of ["1.1.1.1", "8.8.8.8", "172.32.0.1", "192.167.1.1", "99.99.99.99"]) {
-      expect(isBlockedAddress(ip), ip).toBe(false);
-    }
+  it.each(ALLOWED)("allows %s (%s)", (ip) => {
+    expect(isBlockedAddress(ip)).toBe(false);
   });
 
-  it("blocks IPv6 loopback, ULA, link-local and multicast", () => {
-    for (const ip of ["::", "::1", "fc00::1", "fd12:3456::1", "fe80::1", "ff02::1", "[::1]"]) {
-      expect(isBlockedAddress(ip), ip).toBe(true);
-    }
-  });
-
-  it("unwraps IPv4-mapped and NAT64 IPv6 instead of waving them through", () => {
-    expect(isBlockedAddress("::ffff:127.0.0.1")).toBe(true);
-    expect(isBlockedAddress("::ffff:169.254.169.254")).toBe(true);
-    expect(isBlockedAddress("64:ff9b::10.0.0.1")).toBe(true);
-    expect(isBlockedAddress("::ffff:8.8.8.8")).toBe(false);
-  });
-
-  it("also unwraps the HEX-encoded mapped form, not just the dotted one", () => {
-    expect(isBlockedAddress("::ffff:7f00:1")).toBe(true); // ::ffff:127.0.0.1
-    expect(isBlockedAddress("::ffff:a9fe:a9fe")).toBe(true); // 169.254.169.254
-    expect(isBlockedAddress("::7f00:1")).toBe(true); // IPv4-compatible loopback
-    expect(isBlockedAddress("::ffff:808:808")).toBe(false); // 8.8.8.8
-  });
-
-  it("still applies the prefix rules when the embedded IPv4 is public", () => {
-    // The inner address is public, but the address itself is unique-local —
-    // returning the inner verdict outright would wave this through.
-    expect(isBlockedAddress("fd00::8.8.8.8")).toBe(true);
-    expect(isBlockedAddress("fe80::8.8.8.8")).toBe(true);
-  });
-
-  it("allows public IPv6", () => {
-    expect(isBlockedAddress("2606:4700:4700::1111")).toBe(false);
-  });
-
-  it("blocks anything it cannot parse as an address", () => {
-    expect(isBlockedAddress("localhost")).toBe(true);
-    expect(isBlockedAddress("999.1.1.1")).toBe(true);
+  it("collapses every spelling of one address to the same verdict", () => {
+    // The invariant the table above is really asserting, stated once.
+    const loopback = ["::1", "0:0:0:0:0:0:0:1", "[::1]", " ::1 ", "::0:0:1"];
+    expect(loopback.map(isBlockedAddress)).toEqual(loopback.map(() => true));
   });
 });
 
@@ -262,6 +335,18 @@ describe("oneClickUnsubscribe", () => {
     await expect(oneClickUnsubscribe("https://a.example/u", deps)).rejects.toThrow(
       /redirected more than 3 times/,
     );
+  });
+
+  it("gives up on a stalled resolver instead of holding the call open", async () => {
+    // A hostile endpoint can also attack by never answering DNS. The request
+    // deadline has to cover resolution, not just the fetch.
+    const deps: UnsubscribeDeps = {
+      resolveHost: () => new Promise(() => {}), // never settles
+      fetch: (async () => {
+        throw new Error("must not be reached");
+      }) as unknown as typeof globalThis.fetch,
+    };
+    await expect(oneClickUnsubscribe("https://a.example/u", deps, 20)).rejects.toThrow(/timed out/);
   });
 
   it("stops at a 3xx without a Location header", async () => {

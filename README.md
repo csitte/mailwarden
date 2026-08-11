@@ -78,7 +78,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders, label and age buckets, unread + attachment counts — instead of a raw thread list |
-| `list_unsubscribe` | What opt-out options a thread's newest message advertises (`List-Unsubscribe`) — contacts nobody |
+| `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`) — contacts nobody |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
 | **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total) |
@@ -133,8 +133,9 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
 
 ### Unsubscribing — the one outbound request
 
-`list_unsubscribe` (read tier) reads the `List-Unsubscribe` header of a thread's **newest** message and
-reports what the sender offers, without contacting anyone. `unsubscribe` (manage tier) acts on it — and
+`list_unsubscribe` (read tier) reports what the sender offers, without contacting anyone. It reads the
+newest message that actually carries a `List-Unsubscribe` header — a reply threaded onto a newsletter
+sits at the end and advertises nothing, which would otherwise read as "this list has no opt-out". `unsubscribe` (manage tier) acts on it — and
 it is the **only** place mailwarden ever talks to a host that isn't Google, so the rules are tight:
 
 - **There is no URL parameter.** The endpoint comes from the message's own header and nowhere else.
@@ -144,12 +145,30 @@ it is the **only** place mailwarden ever talks to a host that isn't Google, so t
   A plain `https:` link is meant for a human in a browser and is handed back, not fetched.
 - **`mailto:` opt-outs are never performed.** They would require sending mail, which mailwarden cannot
   do. The address is reported so you can act on it yourself.
-- **Fixed request, discarded response.** The body is always `List-Unsubscribe=One-Click`; only the
-  status code returns to the model, so the endpoint cannot answer with instructions.
+- **Fixed request, discarded response.** The POST body is always `List-Unsubscribe=One-Click` and is
+  never derived from anything; the response body is cancelled unread. What returns to the model is the
+  status code and the URL actually called — no content from the endpoint, so it cannot answer with
+  instructions. (A 301/302/303 redirect is followed as a GET, i.e. with no body at all.)
 - **SSRF guards.** https only, default port only, no credentials in the URL, and every hop — including
-  redirects, followed at most 3 times — must resolve exclusively to public addresses. The whole chain
-  shares one 10-second budget. Not rebinding-proof (`fetch` resolves again when it connects) — see
-  [SECURITY.md](SECURITY.md); what survives that gap is a blind POST whose response is never read.
+  redirects, followed at most 3 times — must resolve exclusively to globally reachable addresses. The
+  check parses each address to its bytes and matches it against the IANA special-purpose registry, so
+  every spelling of the same address gets the same verdict (`::1` and `0:0:0:0:0:0:0:1` alike); an
+  address that does not parse is refused. DNS resolution and all hops share one 10-second budget. Not
+  rebinding-proof (`fetch` resolves again when it connects) — see [SECURITY.md](SECURITY.md); what
+  survives that gap is a blind POST whose response is never read.
+
+**Check it against your own mail before you trust it.** From a repo clone (repo-only, not in the
+npm package), after `npm run build` and `mailwarden --auth`:
+
+```bash
+node scripts/probe-unsubscribe.mjs --vet          # category:promotions, 25 threads
+node scripts/probe-unsubscribe.mjs "from:substack.com" --max 50 --vet
+```
+
+It prints each real `List-Unsubscribe` header next to what the parser made of it, and `--vet` also
+runs the endpoint through the URL vetting and the address guard — so you see both whether the parser
+understood the header *and* whether the guards would have let that opt-out through. Strictly
+read-only: no request is ever made to a sender, and nothing in the mailbox changes.
 
 What it can't undo: the request tells the sender your address is live. A sender that ignores its own
 opt-out is beyond any client's reach — pair `unsubscribe` with `create_filter` or `trash` for those.

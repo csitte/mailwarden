@@ -27,9 +27,10 @@ AI client ──stdio/loopback HTTP──▶ mailwarden ──HTTPS──▶ Gma
                                        └── ~/.mailwarden/{credentials.json, token[.<account>].json}
 ```
 
-One exception, and only when the `unsubscribe` tool is called: a single HTTPS request to the opt-out
-endpoint named in the addressed message's own `List-Unsubscribe` header (threat 9 below). Otherwise
-nothing else is contacted — no telemetry, no analytics, no crash reporting, no third-party host.
+One exception, and only when the `unsubscribe` tool is called: an HTTPS request (plus up to three
+redirects) to the opt-out endpoint named in the addressed message's own `List-Unsubscribe` header
+(threat 9 below). Otherwise nothing else is contacted — no telemetry, no analytics, no crash
+reporting, no third-party host.
 
 ## Threats considered & mitigations
 
@@ -128,17 +129,26 @@ only this machine can reach.
   choose, edit, or append to it, so there is no way to place mailbox content in a query string. An
   injected mail can only offer *its own* opt-out endpoint — the one a human unsubscribing would hit
   anyway.
-- **Fixed request, discarded response.** The body is always `List-Unsubscribe=One-Click`; the response
-  body is cancelled unread and only the status code reaches the model. The endpoint cannot answer with
-  instructions, and it cannot become a return channel.
+- **Fixed request, discarded response.** The POST body is always `List-Unsubscribe=One-Click` and is
+  derived from nothing; a 301/302/303 redirect is followed as a GET, i.e. with no body at all. The
+  response body is cancelled unread — what reaches the model is the status code and the URL actually
+  called, never content from the endpoint. It cannot answer with instructions or become a return
+  channel. (The final URL is attacker-influenced text via `Location`, so it arrives inside the same
+  `<untrusted-tool-output>` fence as mail content — see threat 3.)
 - **Only what the sender opted into.** Automation requires the sender's `List-Unsubscribe-Post`
   header. A bare link is handed back for a human to open; a `mailto:` opt-out is **never** performed —
   that would require sending mail, which no requested scope permits (threat 1).
 - **SSRF guards on every hop.** https only, default port only (a public host can still front an
   internal service on another port), no credentials in the URL, at most 3 redirects, and each hop's
-  host must resolve **exclusively** to public addresses — loopback, RFC 1918, CGNAT, link-local
-  (including `169.254.169.254`), multicast and reserved space are refused, IPv4-mapped and NAT64 IPv6
-  forms unwrapped first.
+  host must resolve **exclusively** to globally reachable addresses. Each address is parsed to its
+  bytes and matched against the IANA special-purpose registries for both families — loopback, RFC 1918,
+  CGNAT, link-local (including `169.254.169.254`), unique-local, multicast, documentation and reserved
+  space; an IPv4 embedded in an IPv6 (mapped, translated, NAT64, 6to4) is judged on its own account as
+  well, and can only ever add a block, never excuse the outer prefix. Matching on bytes rather than on
+  text is deliberate: `::1` and `0:0:0:0:0:0:0:1` are the same address, and a guard that compares
+  spellings only defends against the spellings someone thought of. Anything that does not parse as an
+  address is refused. DNS resolution shares the request's 10-second budget, so a resolver that never
+  answers cannot hold the tool call open.
 - **Tier-gated.** `unsubscribe` lives in the `manage` tier; a `read` deployment gets only
   `list_unsubscribe`, which reports the options and contacts nobody.
 

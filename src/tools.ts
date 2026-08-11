@@ -278,7 +278,8 @@ function registerReadTools(server: McpServer): void {
     "list_unsubscribe",
     {
       description:
-        "Report the opt-out options a thread's newest message advertises (List-Unsubscribe / RFC 8058), without contacting anyone. " +
+        "Report the opt-out options a thread advertises (List-Unsubscribe / RFC 8058), without contacting anyone. " +
+        "Reads the newest message that carries the header, so a reply threaded onto a newsletter does not hide it. " +
         "`oneClick` means the sender supports the automatable one-click opt-out — the `unsubscribe` tool can perform it. " +
         "`httpsUrls` without oneClick are links for a human to open in a browser; `mailtos` would require sending mail, which mailwarden never does. " +
         "USE WHEN: checking whether a newsletter can be unsubscribed from, or showing the user the link to click. " +
@@ -508,7 +509,7 @@ function registerManageTools(server: McpServer): void {
         "If the sender offers nothing automatable this returns unsubscribed:false with the alternatives in `options` — it is not an error. " +
         "USE WHEN: the user wants off a newsletter. Pair with archive/trash or create_filter to deal with mail already in the mailbox. " +
         "DO NOT USE: to check whether unsubscribing is possible (use list_unsubscribe — it contacts nobody). " +
-        "SIDE EFFECTS: makes ONE outbound HTTPS request to the sender's unsubscribe endpoint — the only non-Google host mailwarden ever contacts. " +
+        "SIDE EFFECTS: makes an outbound HTTPS request to the sender's unsubscribe endpoint (plus up to 3 redirects) — the only non-Google host mailwarden ever contacts. " +
         "This confirms to the sender that the address is live, and it cannot be undone. The mailbox itself is not changed.",
       inputSchema: { threadId: z.string() },
       outputSchema: {
