@@ -13,13 +13,21 @@
  *   2. the MCP server boots and completes an `initialize` + `tools/list` handshake over stdio,
  *   3. the version it reports is the one in package.json,
  *   4. tool tiers still gate in the built artifact (read tier ⇒ no write tools),
- *   5. `--check` diagnoses a missing setup instead of crashing on it.
+ *   5. `--check` diagnoses a missing setup instead of crashing on it,
+ *   6. the SHIPPED documentation is not broken for the person who installed it — every relative
+ *      link resolves inside the package and every anchor points at a real heading.
+ *
+ * On (6): README once pointed npm users at a script that only exists in the repo. Checking it by
+ * hand is unreliable in a way this file exists to avoid — an ad-hoc grep for it found two of three
+ * bad links and invented two anchor failures by getting GitHub's slug rule wrong. The check reads
+ * the docs out of the INSTALLED package, so "is this file shipped?" is answered by the artifact
+ * rather than by reading `files` and hoping.
  *
  * Usage: `npm run smoke` (from the repo root). Exits non-zero on the first failed check.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync, mkdirSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -189,6 +197,48 @@ try {
     ["archive", "trash", "modify_labels", "create_filter", "unsubscribe"].includes(t),
   );
   check("read tier registers no write tools", writeTools.length === 0, writeTools.join(",") || "none");
+
+  console.log("\nShipped documentation:");
+  const installed = path.join(consumer, "node_modules", "mailwarden");
+  // GitHub's slug: lowercase, drop punctuation, then turn EACH remaining space into a hyphen —
+  // so "Security & privacy" is `security--privacy`, with two. Collapsing the run of spaces is the
+  // easy mistake, and it reports every such anchor as dead.
+  const slug = (heading) =>
+    heading.toLowerCase().replace(/[^\w\s-]/g, "").trim().replace(/ /g, "-");
+  for (const doc of ["README.md", "SECURITY.md"]) {
+    const text = readFileSync(path.join(installed, doc), "utf8");
+    // Matches `](target)` and `](target "title")`, including the target of a badge link.
+    const targets = [...text.matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map((m) => m[1]);
+
+    const relative = targets.filter((t) => !/^(https?:|mailto:|#|data:)/.test(t));
+    const missing = relative.filter((t) => !existsSync(path.join(installed, t.split("#")[0])));
+    check(
+      `${doc}: relative links resolve inside the installed package`,
+      missing.length === 0,
+      missing.join(", ") || `${relative.length} checked`,
+    );
+
+    const headings = new Set(
+      [...text.matchAll(/^#{1,6}\s+(.+)$/gm)].map((m) => slug(m[1].trim())),
+    );
+    const anchors = targets.filter((t) => t.startsWith("#"));
+    const dead = anchors.filter((a) => !headings.has(a.slice(1)));
+    check(
+      `${doc}: anchors point at a real heading`,
+      dead.length === 0,
+      dead.join(", ") || `${anchors.length} checked`,
+    );
+  }
+  // Not in the tarball, but it is what the MCP registry publishes from — a mismatch here ships a
+  // registry entry for a version npm does not have.
+  const serverJsonVersion = createRequire(import.meta.url)(
+    path.join(repoRoot, "server.json"),
+  ).version;
+  check(
+    "server.json version matches package.json",
+    serverJsonVersion === expectedVersion,
+    `server.json=${serverJsonVersion}`,
+  );
 
   console.log("\nSetup doctor against an empty config dir:");
   const doctor = spawnSync(process.execPath, [cliPath, "--check"], {

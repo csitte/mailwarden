@@ -67,7 +67,7 @@ npm install && npm run build
 node scripts/demo-reverify.mjs
 ```
 
-The demo drives the real `search()` against a fake Gmail API whose index is deliberately loose (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
+The demo drives the real `search()` against a fake Gmail API whose index is deliberately loose (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
 
 ## Tools
 
@@ -237,7 +237,7 @@ That's the whole install — `npx` fetches and runs the published package, no cl
 
 ## Setup
 
-First time setting up a Google OAuth app? Follow the **[step-by-step setup guide](docs/SETUP.md)** — it walks through the Google Cloud Console with exact click paths, explains the "unverified app" screen, and covers the trap that makes tokens die after 7 days. The short version:
+First time setting up a Google OAuth app? Follow the **[step-by-step setup guide](https://github.com/csitte/mailwarden/blob/main/docs/SETUP.md)** — it walks through the Google Cloud Console with exact click paths, explains the "unverified app" screen, and covers the trap that makes tokens die after 7 days. The short version:
 
 1. **Google Cloud:** create a project → enable the **Gmail API** → configure the OAuth consent screen and **publish it to Production** (in *Testing* status, Google expires refresh tokens after 7 days) → create an **OAuth client ID** of type *Desktop app* → download it as `credentials.json`.
 2. Put `credentials.json` in `~/.mailwarden/` (or set `MAILWARDEN_CREDENTIALS=/path/to/credentials.json`).
@@ -342,7 +342,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (304 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (430 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
