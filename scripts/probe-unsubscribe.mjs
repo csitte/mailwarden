@@ -63,6 +63,11 @@ if (!threads.length) {
 
 const stats = { total: 0, none: 0, postOnly: 0, oneClick: 0, linkOnly: 0, mailtoOnly: 0, odd: 0 };
 const oddities = [];
+// Whether a folded header reaches us folded is a QUESTION, not a known: the Gmail API
+// usually unfolds, but not always (observed on Subject). Counting it turns that into a
+// measurement instead of something eyeballed in the output — a CR/LF/tab inside the value
+// is invisible at a glance once JSON.stringify has escaped it.
+const folded = [];
 const refused = [];
 
 /** Would the guards permit this endpoint? Vetting + DNS, never an HTTP request. */
@@ -109,6 +114,7 @@ for (const t of threads) {
   // A header that advertises something the parser turned into nothing is the
   // interesting case — that is a parsing assumption failing on real input.
   if (kind === "odd") oddities.push({ from: h.from, raw: h.listUnsubscribe });
+  if (/[\r\n\t]/.test(h.listUnsubscribe)) folded.push({ from: h.from, raw: h.listUnsubscribe });
 
   console.log(`── ${h.from || "(no From)"}`);
   console.log(`   subject : ${h.subject || "(none)"}`);
@@ -135,15 +141,19 @@ if (vet) {
   const checked = stats.oneClick;
   console.log(
     refused.length
-      ? `
-⚠ ${refused.length} of ${checked} real one-click endpoints would be REFUSED by the guards — ` +
-          `a false positive here silently breaks the feature for that sender:`
-      : `
-✓ all ${checked} real one-click endpoints would pass the guards (no false positives).`,
+      ? `\n⚠ ${refused.length} of ${checked} real one-click endpoints would be REFUSED by the ` +
+          `guards — a false positive here silently breaks the feature for that sender:`
+      : `\n✓ all ${checked} real one-click endpoints would pass the guards (no false positives).`,
   );
-  for (const r of refused) console.log(`   ${r.from}: ${r.problem}
-     ${r.url}`);
+  for (const r of refused) console.log(`   ${r.from}: ${r.problem}\n     ${r.url}`);
 }
+console.log(
+  folded.length
+    ? `\n${folded.length} header(s) arrived FOLDED (CR/LF/tab inside the value) — the parser is ` +
+        `expected to absorb this, and these are worth keeping as test cases:`
+    : `\nNo header arrived folded — the API unfolded every one in this sample.`,
+);
+for (const f of folded) console.log(`   ${f.from}: ${JSON.stringify(f.raw)}`);
 if (oddities.length) {
   console.log(
     `\n⚠ ${oddities.length} header(s) advertised something the parser dropped — these are the ` +

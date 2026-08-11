@@ -84,6 +84,13 @@ describe("parseListUnsubscribe", () => {
   const FORMS: [string, string | undefined, string[], string[], boolean, string][] = [
     ["<mailto:u@a.example>, <https://a.example/u>", POST, ["https://a.example/u"], ["mailto:u@a.example"], true, "mailto listed first"],
     ["<https://a.example/u>,\r\n\t<mailto:u@a.example>", POST, ["https://a.example/u"], ["mailto:u@a.example"], true, "CRLF + tab folding"],
+    // The Gmail API does NOT always hand headers over unfolded — a header value
+    // arriving with a leading or embedded newline is field-observed (on Subject; not
+    // yet seen on List-Unsubscribe in 200 sampled threads, but the API plainly can
+    // do it). These three shapes are what that would look like here.
+    ["\r\n <https://a.example/u>", POST, ["https://a.example/u"], [], true, "value starts with a fold"],
+    ["\nhttps://a.example/u", POST, ["https://a.example/u"], [], true, "leading newline, no brackets"],
+    ["<https://a.example/\r\n\tu/abc>", POST, ["https://a.example/u/abc"], [], true, "fold inside the URI"],
     ["<HTTPS://A.EXAMPLE/U>", POST, ["HTTPS://A.EXAMPLE/U"], [], true, "uppercase scheme"],
     ["<https://a.example/u><https://b.example/u>", undefined, ["https://a.example/u", "https://b.example/u"], [], false, "no separator between URIs"],
     ["<https://a.example/u?a=1&b=2>", undefined, ["https://a.example/u?a=1&b=2"], [], false, "query string survives"],
