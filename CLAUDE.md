@@ -32,8 +32,9 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 
 ## Arbeitsweise
 
-- **Tests sind Pflicht** für neue Logik (`npx vitest run`, aktuell 430). Vor jedem Commit
-  `npm run build` + Tests grün.
+- **Tests sind Pflicht** für neue Logik (`npx vitest run`). Vor jedem Commit `npm run build` +
+  Tests grün. (Keine Testanzahl hier — sie war schon zweimal veraltet; die aktuelle Zahl steht
+  im README-Status, der beim Release ohnehin angefasst wird.)
 - **Ein Feature = ein Commit**, Conventional Commits (`feat:`, `fix:`, `docs:`).
 - **Prüfrunden vor einem Release:** `docs/RELEASE-CHECKS.md` — fertige Prompts, ein Winkel
   je Runde. Zwei Runden sind das Budget; eine nötige dritte ist ein Design-Signal. Immer
