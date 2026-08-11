@@ -149,18 +149,29 @@ Gewinn: 27 echte Opt-out-Endpunkte, keiner fälschlich blockiert.
 
 ## Runde 6 — Das Artefakt, nicht der Quellbaum
 
+**Der mechanische Teil läuft inzwischen automatisch.** `npm run smoke` prüft gegen das
+*installierte* Paket: relative Links, Sprungmarken, Versionsgleichstand package.json ↔
+server.json, dazu Handshake, Tool-Oberfläche und `--check`. Nicht mehr per Prompt nachbauen —
+der Prompt fragt nur noch nach dem, was ein Skript nicht beurteilen kann:
+
 ```
-Prüfe, was der Nutzer bekommt, nicht den Quellbaum. `npm run smoke` deckt
-Handshake, Tool-Oberfläche und --check ab — such nach dem, was es NICHT deckt:
- - Verweist eine AUSGELIEFERTE Datei (README, SECURITY) auf etwas, das nicht im
-   Tarball liegt? Prüf `files` in package.json gegen jeden Pfad und jeden
-   relativen Link in den ausgelieferten Dokumenten.
- - Ist CHANGELOG [Unreleased] vollständig — steht dort jeder Commit seit dem
-   letzten Tag, der Nutzerverhalten ändert?
- - Stimmen die Versionen in package.json und server.json überein?
- - Zeigt ein Link in README/SECURITY ins Leere, Sprungmarken eingeschlossen?
- - Wird etwas zur Laufzeit gebraucht, das nicht in `files` steht?
+`npm run smoke` ist gelaufen und grün — es deckt relative Links, Sprungmarken,
+Versionsgleichstand, Handshake, Tool-Oberfläche und --check gegen das
+installierte Paket ab. Prüf das, was es NICHT beurteilen kann:
+ - Ist CHANGELOG [Unreleased] vollständig UND ehrlich? Steht dort jeder Commit
+   seit dem letzten Tag, der Nutzerverhalten ändert, und beschreibt der Text das
+   tatsächliche Verhalten statt der Absicht?
+ - Stimmen die Zahlen in den ausgelieferten Docs noch (Testanzahl, Tool-Anzahl,
+   Versionsangaben im Fließtext)?
+ - Ist die Versionsnummer die richtige Stufe — bringt der Release etwas, das
+   minor statt patch verlangt, oder umgekehrt?
+ - Behauptet ein Link zwar ein Ziel, das existiert, aber inhaltlich das Falsche?
 ```
+
+Warum automatisiert: dieselbe Runde von Hand ausgeführt fand zwei von drei kaputten Links,
+übersah den dritten und meldete zwei funktionierende Sprungmarken als tot — GitHub macht aus
+*jedem* Leerzeichen einen Bindestrich, „Security & privacy" wird also `security--privacy` mit
+zweien. Genau die Art Fehler, die ein Skript nicht macht.
 
 ---
 
