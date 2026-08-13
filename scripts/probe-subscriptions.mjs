@@ -17,7 +17,7 @@
  *   MISS  the tool says none/link, some other thread of that sender offers better
  *   EXTRA the tool's thread offers better than the rest (harmless, worth knowing)
  *
- * — plus how the grouping itself held up (senders parsed, dates parsed, perMonth).
+ * — plus how the grouping itself held up (senders parsed, dates parsed, sample spans).
  *
  * STRICTLY READ-ONLY. Message metadata only. No request is ever made to a sender,
  * no URL printed here is visited, nothing in the mailbox is modified. Running it
@@ -77,23 +77,29 @@ console.log(`unparsed dates   : ${undatedRows} of ${threads.length} rows`);
 console.log(
   `unparsed senders : ${unknownSender.length ? `${unknownSender[0].threads} rows under (unknown)` : "0"}`,
 );
-console.log(`with a rate      : ${groups.filter((g) => g.perMonth !== null).length} of ${groups.length}\n`);
+const spanOf = (g) =>
+  g.newestDate && g.oldestDate
+    ? (Date.parse(g.newestDate) - Date.parse(g.oldestDate)) / 86_400_000
+    : NaN;
+// How far back the sample actually reaches. `max` bounds this, so on a busy mailbox
+// it is days — the reason this tool reports no precomputed frequency.
+const spans = groups.map(spanOf).filter((d) => !Number.isNaN(d) && d > 0);
+console.log(
+  `sample spans     : ${spans.length ? `${Math.min(...spans).toFixed(1)}–${Math.max(...spans).toFixed(1)} days per sender` : "n/a"}\n`,
+);
 
 // ---- 2. What the tool reports (one fetch per sender) ----
 const { subscriptions, sendersFound } = await listSubscriptions(gmail, threads, { topN });
 console.log("── what list_subscriptions reports ───────────────────────");
 console.log(`sendersFound: ${sendersFound}   shown: ${subscriptions.length}\n`);
 for (const s of subscriptions) {
-  const rate = s.perMonth === null ? "  n/a  " : `${String(s.perMonth).padStart(5)}/m`;
-  // The span the rate was extrapolated FROM — a per-30-days figure derived from a
-  // two-day window is the number to distrust, and it is invisible without this.
-  const span =
-    s.newestDate && s.oldestDate
-      ? (Date.parse(s.newestDate) - Date.parse(s.oldestDate)) / 86_400_000
-      : NaN;
+  // Threads over the span they were seen in — the whole frequency story, with no
+  // extrapolation. A big thread count behind a window of hours is the thing to
+  // notice, and it is invisible unless both numbers stand next to each other.
+  const span = spanOf(s);
   const spanTxt = Number.isNaN(span) ? "    ?" : `${span.toFixed(1).padStart(5)}d`;
   console.log(
-    `${s.optOut.padEnd(9)} ${rate} over ${spanTxt}  ${String(s.threads).padStart(3)}t ${String(s.unread).padStart(3)}u  ${s.sender}`,
+    `${s.optOut.padEnd(9)} ${String(s.threads).padStart(3)}t over ${spanTxt}  ${String(s.unread).padStart(3)}u unread  ${s.sender}`,
   );
 }
 

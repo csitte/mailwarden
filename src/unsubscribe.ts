@@ -498,20 +498,15 @@ export interface SubscriptionGroup {
   unread: number;
   /** Newest thread from this sender in the sample: what to inspect or act on. */
   newestThreadId: string;
-  /** ISO dates of the sample's span for this sender; "" when nothing parsed. */
+  /**
+   * ISO bounds of what the SAMPLE saw of this sender; "" when no date parsed. Both
+   * ends are sample-bounded, not sender-bounded — a query capped at `max` threads
+   * only reaches back as far as those threads go, which on a busy mailbox is days.
+   * Frequency, if a caller wants it, is `threads` across this span, judged with that
+   * caveat in view. There is deliberately no precomputed rate: see the note below.
+   */
   newestDate: string;
   oldestDate: string;
-  /**
-   * Threads per 30 days across the observed span, or `null` when the sample cannot
-   * support a rate — fewer than two dated threads, or a span shorter than
-   * `MIN_RATE_SPAN_DAYS`. A single message says nothing about frequency, and neither
-   * do two of them a day apart.
-   *
-   * Note the span is bounded by the SAMPLE, not by the sender: a query capped at
-   * `max` threads only reaches back as far as those threads go. Widen the sample if
-   * you want rates for senders that write rarely.
-   */
-  perMonth: number | null;
 }
 
 /**
@@ -519,22 +514,20 @@ export interface SubscriptionGroup {
  *
  * Pure and API-free: it works off rows `search` already fetched, the same way
  * `buildDigest` does. The distinction from the digest is intent — the digest asks
- * "what is in this mailbox", this asks "who keeps writing, and how often".
+ * "what is in this mailbox", this asks "who keeps writing, and can I get off the
+ * list".
+ *
+ * **Why there is no `perMonth`.** There was one, and the field probe killed it.
+ * `scripts/probe-subscriptions.mjs` against a real mailbox produced eight rates,
+ * every one extrapolated from a window of 0.1 to 6.5 days; the worst turned two
+ * messages a day apart into "59.8/month". Raising the threshold to half the reported
+ * unit fixed the lie but exposed the real problem: the span is bounded by `max`
+ * (≤100 threads), and a busy mailbox produces 100 threads in days, so an honest rate
+ * was `null` for all 35 senders sampled. A field that is either absent or
+ * extrapolated is worse than no field — and `threads` with both dates says strictly
+ * more, without the false precision of a number the model will act on.
  */
 const DEFAULT_TOP_N = 10;
-
-/**
- * Shortest observed span that may be extrapolated to a per-30-days rate — half the
- * unit being reported. Anything less is guesswork wearing a number.
- *
- * Set from field data, not taste: `scripts/probe-subscriptions.mjs` over a real
- * mailbox produced eight rates, every one of them extrapolated from a window of 0.1
- * to 6.5 days. The worst turned two messages a day apart into "59.8/month" — the
- * exact overstatement the `null` case was meant to prevent, one step up. Overstating
- * frequency pushes a caller toward unsubscribing, which is the irreversible
- * direction, so the threshold errs toward saying nothing.
- */
-const MIN_RATE_SPAN_DAYS = 15;
 
 export function groupSubscriptions(
   threads: ThreadSummary[],
@@ -548,8 +541,6 @@ export function groupSubscriptions(
     newestThreadId: string;
     newestMs: number;
     oldestMs: number;
-    /** Threads whose Date header parsed — the denominator a rate may use. */
-    dated: number;
   }
   const groups = new Map<string, Acc>();
 
@@ -563,7 +554,6 @@ export function groupSubscriptions(
       newestThreadId: t.threadId,
       newestMs: Number.NEGATIVE_INFINITY,
       oldestMs: Number.POSITIVE_INFINITY,
-      dated: 0,
     };
     acc.threads++;
     if (t.labelIds.includes("UNREAD")) acc.unread++;
@@ -571,7 +561,6 @@ export function groupSubscriptions(
 
     const ms = Date.parse(t.date);
     if (!Number.isNaN(ms)) {
-      acc.dated++;
       // The newest DATED thread identifies the group: an undated row would give
       // the caller a thread whose opt-out headers are of unknown vintage.
       if (ms > acc.newestMs) {
@@ -586,24 +575,15 @@ export function groupSubscriptions(
   const iso = (ms: number) => (Number.isFinite(ms) ? new Date(ms).toISOString() : "");
 
   return [...groups.entries()]
-    .map(([sender, a]) => {
-      const spanDays = Number.isFinite(a.newestMs) && Number.isFinite(a.oldestMs)
-        ? (a.newestMs - a.oldestMs) / 86_400_000
-        : 0;
-      return {
-        sender,
-        name: a.name,
-        threads: a.threads,
-        unread: a.unread,
-        newestThreadId: a.newestThreadId,
-        newestDate: iso(a.newestMs),
-        oldestDate: iso(a.oldestMs),
-        perMonth:
-          a.dated >= 2 && spanDays >= MIN_RATE_SPAN_DAYS
-            ? Math.round((a.dated / spanDays) * 30 * 10) / 10
-            : null,
-      };
-    })
+    .map(([sender, a]) => ({
+      sender,
+      name: a.name,
+      threads: a.threads,
+      unread: a.unread,
+      newestThreadId: a.newestThreadId,
+      newestDate: iso(a.newestMs),
+      oldestDate: iso(a.oldestMs),
+    }))
     .sort((x, y) => y.threads - x.threads || x.sender.localeCompare(y.sender))
     .slice(0, topN);
 }

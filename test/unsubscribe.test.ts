@@ -622,47 +622,38 @@ describe("groupSubscriptions", () => {
     expect(g[0].newestThreadId).toBe("dated");
   });
 
-  it("computes perMonth from the dated span", () => {
-    // 5 threads across exactly 30 days -> 5 per 30 days.
+  it("reports the raw span and leaves the frequency judgement to the caller", () => {
+    // There is deliberately no rate field. A precomputed one was removed after the
+    // field probe showed every value was extrapolated from a window of days — see
+    // the note on groupSubscriptions. `threads` plus these two dates says more.
     const dates = ["2026-07-01", "2026-07-08", "2026-07-15", "2026-07-22", "2026-07-31"];
     const g = groupSubscriptions(
       dates.map((d, i) => row({ threadId: `t${i}`, date: `${d}T00:00:00Z` })),
     );
-    expect(g[0].perMonth).toBe(5);
+    expect(g[0]).toMatchObject({
+      threads: 5,
+      oldestDate: "2026-07-01T00:00:00.000Z",
+      newestDate: "2026-07-31T00:00:00.000Z",
+    });
+    expect(g[0]).not.toHaveProperty("perMonth");
   });
 
-  it("reports perMonth as null rather than inventing a rate from one mail", () => {
-    expect(groupSubscriptions([row({})])[0].perMonth).toBeNull();
+  it("collapses the span to a point for a single mail, rather than implying a rate", () => {
+    const g = groupSubscriptions([row({ date: "2026-08-10T09:00:00Z" })]);
+    expect(g[0].oldestDate).toBe(g[0].newestDate);
+    expect(g[0].threads).toBe(1);
   });
 
-  it("reports perMonth as null when the span is under a day", () => {
-    const g = groupSubscriptions([
-      row({ threadId: "a", date: "2026-08-10T09:00:00Z" }),
-      row({ threadId: "b", date: "2026-08-10T18:00:00Z" }),
-    ]);
-    expect(g[0].threads).toBe(2);
-    expect(g[0].perMonth).toBeNull();
-  });
-
-  it("refuses to extrapolate a monthly rate from a span far shorter than a month", () => {
-    // Field case from scripts/probe-subscriptions.mjs against a real mailbox: two
-    // messages exactly a day apart used to be reported as "59.8/month".
+  it("keeps a same-day burst visible as a burst — many threads, hours of span", () => {
+    // The field case that killed the rate field: this used to read "59.8/month".
     const g = groupSubscriptions([
       row({ threadId: "a", date: "2026-08-10T00:00:00Z" }),
       row({ threadId: "b", date: "2026-08-11T00:00:00Z" }),
     ]);
+    const spanDays =
+      (Date.parse(g[0].newestDate) - Date.parse(g[0].oldestDate)) / 86_400_000;
     expect(g[0].threads).toBe(2);
-    expect(g[0].perMonth).toBeNull();
-  });
-
-  it("states a rate once the span reaches half the reported unit", () => {
-    // 15 days is the threshold; 3 threads over exactly 15 days -> 6 per 30 days.
-    const g = groupSubscriptions([
-      row({ threadId: "a", date: "2026-08-01T00:00:00Z" }),
-      row({ threadId: "b", date: "2026-08-08T00:00:00Z" }),
-      row({ threadId: "c", date: "2026-08-16T00:00:00Z" }),
-    ]);
-    expect(g[0].perMonth).toBe(6);
+    expect(spanDays).toBe(1);
   });
 
   it("sorts by thread count, ties broken by address, and honours topN", () => {

@@ -10,12 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **`list_subscriptions` (read tier) — who keeps writing, and can you get off the list.** Groups a
   mailbox slice by sender and reports each one's opt-out options in the same row: thread and unread
-  counts, the span it was seen over, and `perMonth` — threads per 30 days, or `null` when the sample
-  is too thin to state a rate (under two dated threads, or a span shorter than 15 days — half the
-  unit being reported), because neither one welcome mail nor two messages a day apart is a frequency.
-  The span is bounded by the sample rather than by the sender, which the tool description says too.
-  Opt-out options cost **one** metadata fetch per *sender* — on that sender's newest dated thread, or
-  its first thread in the sample if none of them carry a parseable date — not one per thread; `optOut` is `one-click` / `link` / `mailto` / `none`, or `unknown` when that
+  counts, and the date span that sender was seen over. **No precomputed frequency**, deliberately:
+  `oldestDate`/`newestDate` bound what the *sample* saw, not the sender's history, so `threads` across
+  that span is the honest form of the question and the caller judges it with the sampling caveat in
+  view (the field probe below is why). Opt-out options cost **one** metadata fetch per *sender* — on
+  that sender's newest dated thread, or its first thread in the sample if none carry a parseable date
+  — not one per thread. `optOut` is `one-click` / `link` / `mailto` / `none`, or `unknown` when that
   sender's fetch failed, which is deliberately distinct from `none`. `sendersFound` reports how many
   distinct senders the sample held *before* `topN` truncated the list, so a top-ten slice of forty
   cannot be mistaken for the whole answer. Contacts nobody. The grouping itself is a pure function
@@ -42,9 +42,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sender, which assumes any thread of a sender advertises what that sender offers. The script does
   the expensive thing instead — it inspects *every* thread of each sender and reports where the
   shortcut would have missed a better opt-out, alongside how the grouping fared on real `From`/`Date`
-  headers and the span each rate was extrapolated from. Strictly read-only: metadata only, no sender
+  headers and how far back the sample actually reaches. Strictly read-only: metadata only, no sender
   contacted, no printed URL visited. Repo-only, like the parser probe and the re-verification demo.
-  Its first run is what produced the `perMonth` threshold above.
+  **Its first run against a real mailbox settled three things and killed a fourth.** Held: the
+  one-fetch-per-sender shortcut (26 extra threads across 8 senders, 0 missed opt-outs), the grouping
+  (60 real `From`/`Date` headers, none unparsed), and `sendersFound` (8 of 31 senders shown — the cap
+  was visibly needed). Killed: a `perMonth` rate this tool briefly carried. Every value it produced
+  was extrapolated from a window of 0.1 to 6.5 days, the worst turning two messages a day apart into
+  "59.8/month". Raising the threshold to half the reported unit stopped the overstatement but exposed
+  the real problem — the span is bounded by `max` (≤100 threads), and a busy mailbox produces 100
+  threads in days, so an honest rate was `null` for all 35 senders sampled. A field that is either
+  absent or extrapolated is worse than no field, so it is gone: `threads` with both dates says
+  strictly more, minus the false precision a model would have acted on.
 
 ### Fixed
 - **`SECURITY.md`: corrected an overstated scope claim.** Threat 1 asserted that neither requested
