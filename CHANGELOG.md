@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`SECURITY.md`: corrected an overstated scope claim.** Threat 1 asserted that neither requested
+  OAuth scope "can send mail" and that the no-send property was "enforced by Google". That is wrong
+  for `gmail.modify`: Google lists it as an accepted scope for `users.messages.send` and
+  `users.drafts.send`, and a probe against a `gmail.modify`-only token confirms it — both endpoints
+  answer with a payload error (400/404) rather than 403 `ACCESS_TOKEN_SCOPE_INSUFFICIENT`, i.e. the
+  request passes the authorization gate. The Google-enforced guarantee therefore holds only for a
+  `read` deployment (`gmail.readonly`); in `manage`/`filters` deployments no-send rests on the tool
+  surface — there is no send/compose/reply/forward tool and none can be registered at runtime. No
+  send-free write scope exists for an installed app (`users.messages.modify` accepts only
+  `mail.google.com`, `gmail.modify`, and the domain-wide-delegation-only `gmail.modify.restricted`).
+  **No behaviour or scope change** — documentation only; the non-goals section now also states that a
+  compromised *machine* can use the token directly, bypassing the tool surface.
+
 ## [0.8.0] - 2026-08-11
 
 Unsubscribe from mailing lists, and a release pipeline that verifies the artifact rather than the

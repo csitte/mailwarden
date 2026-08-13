@@ -41,9 +41,15 @@ mailbox content).
 - **No send tools — by design.** `mailwarden` has no compose/reply/forward/send capability. There is
   **no tool** through which mail content can be pushed to an external recipient. This is the primary
   exfiltration defense and the reason it is a hard design rule, not a feature gap.
-- **Scope-level guarantee.** The requested OAuth scopes are `gmail.modify` (+ optional
-  `gmail.settings.basic`); **neither can send mail.** So even a fully-compromised model holds a token
-  that *cannot* send. The guarantee is enforced by Google, not just by tool omission.
+- **Scope-level guarantee — in `read` deployments.** With `MAILWARDEN_TOOLS=read` (or
+  `MAILWARDEN_READONLY=1`) the only scope requested is `gmail.readonly`, and Google itself refuses
+  that token on `messages.send`. A `manage`/`filters` deployment holds `gmail.modify`, which Google
+  **does** accept on `messages.send` — there the no-send property rests on the tool surface (no
+  compose/reply/forward/send tool exists, and none can be registered at runtime), not on Google's
+  enforcement. There is no send-free write scope for an installed app: `messages.modify` accepts only
+  `mail.google.com`, `gmail.modify`, and the domain-wide-delegation-only `gmail.modify.restricted`.
+  So a `read` deployment cannot send *even if the binary were replaced*; a `manage` one cannot send
+  because there is nothing to call.
 - **No forwarding filters.** `create_filter` can label/archive/trash/star/mark, but **never** creates
   a `forward` action — which would be a standing exfiltration channel. `list_filters` *surfaces* any
   pre-existing forwarding filter so a human can spot one.
@@ -137,7 +143,7 @@ only this machine can reach.
   `<untrusted-tool-output>` fence as mail content — see threat 3.)
 - **Only what the sender opted into.** Automation requires the sender's `List-Unsubscribe-Post`
   header. A bare link is handed back for a human to open; a `mailto:` opt-out is **never** performed —
-  that would require sending mail, which no requested scope permits (threat 1).
+  that would require sending mail, which mailwarden has no tool to do (threat 1).
 - **SSRF guards on every hop.** https only, default port only (a public host can still front an
   internal service on another port), no credentials in the URL, at most 3 redirects, and each hop's
   host must resolve **exclusively** to globally reachable addresses. Each address is parsed to its
@@ -190,8 +196,11 @@ Stating these plainly is part of the threat model:
   read `MAILWARDEN_TOKEN_PASSPHRASE` straight from the environment. At-rest encryption defends against
   *file copies*, not against local code execution as you.
 - **A compromised AI client or machine.** `mailwarden` trusts the client it speaks to; if that client
-  is malicious it can drive every tool the enabled tiers expose (bounded by the scopes above — still
-  no send, no hard delete).
+  is malicious it can drive every tool the enabled tiers expose — but *only* those tools, so still no
+  send and no hard delete. A compromised **machine** is worse: it holds the token and can call the
+  Gmail API directly, bypassing the tool surface entirely. In a `manage`/`filters` deployment that
+  token carries `gmail.modify`, which Google accepts for sending; only a `read` deployment's
+  `gmail.readonly` token is harmless in that scenario (threat 1).
 - **Google-side compromise.** Gmail is the upstream of record; `mailwarden` cannot protect data Google
   itself mishandles.
 - **Social-engineering of the human.** `mailwarden` reduces *autonomous* damage; it cannot stop a user
