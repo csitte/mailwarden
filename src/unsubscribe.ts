@@ -22,7 +22,8 @@
  *    every hop (including redirects) must resolve exclusively to public addresses.
  */
 import { lookup as dnsLookup } from "node:dns/promises";
-import type { Gmail } from "./gmail.js";
+import { parseSender } from "./digest.js";
+import type { Gmail, ThreadSummary } from "./gmail.js";
 
 /** What a message's List-Unsubscribe headers offer. */
 export interface UnsubscribeOptions {
@@ -417,7 +418,19 @@ export async function unsubscribeThread(
   threadId: string,
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
 ): Promise<UnsubscribeResult> {
-  const info = await inspectUnsubscribe(gmail, threadId);
+  return unsubscribeFromInfo(await inspectUnsubscribe(gmail, threadId), deps);
+}
+
+/**
+ * The half of `unsubscribeThread` that acts, split out so a bulk run can inspect
+ * a thread once — to group by sender before deciding — instead of fetching the
+ * same headers twice.
+ */
+async function unsubscribeFromInfo(
+  info: UnsubscribeInfo,
+  deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+): Promise<UnsubscribeResult> {
+  const threadId = info.threadId;
   const base = {
     threadId,
     messageId: info.messageId,
@@ -466,5 +479,266 @@ export async function unsubscribeThread(
     url: res.url,
     status: res.status,
     ...(res.ok ? {} : { reason: `The unsubscribe endpoint answered ${res.status}.` }),
+  };
+}
+
+// ---- Subscriptions: which senders keep writing, and can you get off the list ----
+
+/** One sender's footprint across a sampled mailbox slice. */
+export interface SubscriptionGroup {
+  /** Lowercased email address — the grouping key — or "(unknown)". */
+  sender: string;
+  /** Best display name seen for this sender, or "" if only a bare address. */
+  name: string;
+  threads: number;
+  unread: number;
+  /** Newest thread from this sender in the sample: what to inspect or act on. */
+  newestThreadId: string;
+  /** ISO dates of the sample's span for this sender; "" when nothing parsed. */
+  newestDate: string;
+  oldestDate: string;
+  /**
+   * Threads per 30 days across the observed span, or `null` when the sample cannot
+   * support a rate — fewer than two dated threads, or a span under a day. A single
+   * message says nothing about frequency, and pretending otherwise would turn one
+   * welcome mail into "30/month".
+   */
+  perMonth: number | null;
+}
+
+/**
+ * Group a slice of threads by sender, newest first within each group.
+ *
+ * Pure and API-free: it works off rows `search` already fetched, the same way
+ * `buildDigest` does. The distinction from the digest is intent — the digest asks
+ * "what is in this mailbox", this asks "who keeps writing, and how often".
+ */
+export function groupSubscriptions(
+  threads: ThreadSummary[],
+  opts: { topN?: number } = {},
+): SubscriptionGroup[] {
+  const topN = opts.topN ?? 10;
+  interface Acc {
+    name: string;
+    threads: number;
+    unread: number;
+    newestThreadId: string;
+    newestMs: number;
+    oldestMs: number;
+    /** Threads whose Date header parsed — the denominator a rate may use. */
+    dated: number;
+  }
+  const groups = new Map<string, Acc>();
+
+  for (const t of threads) {
+    const { email, name } = parseSender(t.from);
+    const key = email || "(unknown)";
+    const acc = groups.get(key) ?? {
+      name: "",
+      threads: 0,
+      unread: 0,
+      newestThreadId: t.threadId,
+      newestMs: Number.NEGATIVE_INFINITY,
+      oldestMs: Number.POSITIVE_INFINITY,
+      dated: 0,
+    };
+    acc.threads++;
+    if (t.labelIds.includes("UNREAD")) acc.unread++;
+    if (!acc.name && name) acc.name = name;
+
+    const ms = Date.parse(t.date);
+    if (!Number.isNaN(ms)) {
+      acc.dated++;
+      // The newest DATED thread identifies the group: an undated row would give
+      // the caller a thread whose opt-out headers are of unknown vintage.
+      if (ms > acc.newestMs) {
+        acc.newestMs = ms;
+        acc.newestThreadId = t.threadId;
+      }
+      if (ms < acc.oldestMs) acc.oldestMs = ms;
+    }
+    groups.set(key, acc);
+  }
+
+  const iso = (ms: number) => (Number.isFinite(ms) ? new Date(ms).toISOString() : "");
+
+  return [...groups.entries()]
+    .map(([sender, a]) => {
+      const spanDays = Number.isFinite(a.newestMs) && Number.isFinite(a.oldestMs)
+        ? (a.newestMs - a.oldestMs) / 86_400_000
+        : 0;
+      return {
+        sender,
+        name: a.name,
+        threads: a.threads,
+        unread: a.unread,
+        newestThreadId: a.newestThreadId,
+        newestDate: iso(a.newestMs),
+        oldestDate: iso(a.oldestMs),
+        perMonth:
+          a.dated >= 2 && spanDays >= 1 ? Math.round((a.dated / spanDays) * 30 * 10) / 10 : null,
+      };
+    })
+    .sort((x, y) => y.threads - x.threads || x.sender.localeCompare(y.sender))
+    .slice(0, topN);
+}
+
+/** How a sender's opt-out can be reached, at a glance. */
+export type OptOutKind = "one-click" | "link" | "mailto" | "none" | "unknown";
+
+export interface Subscription extends SubscriptionGroup {
+  /**
+   * `one-click` is automatable by `unsubscribe`; `link` needs a human with a
+   * browser; `mailto` would need sending, which mailwarden does not do; `unknown`
+   * means the header fetch itself failed, not that nothing is offered.
+   */
+  optOut: OptOutKind;
+  options: UnsubscribeOptions;
+}
+
+/** Classify what a message advertised. Kept separate so it is testable alone. */
+export function classifyOptOut(options: UnsubscribeOptions): OptOutKind {
+  if (options.oneClick) return "one-click";
+  if (options.httpsUrls.length) return "link";
+  if (options.mailtos.length) return "mailto";
+  return "none";
+}
+
+/** Chunked parallelism, matching what `search` does for its own thread fetches. */
+const HEADER_CONCURRENCY = 8;
+
+/**
+ * Group a slice by sender and report each one's opt-out options — **one** header
+ * fetch per sender (on its newest thread), not one per thread. Contacts no sender.
+ *
+ * A per-sender fetch that fails yields `optOut: "unknown"` rather than sinking the
+ * listing: the point of this tool is the overview, and one unreadable thread should
+ * not cost the caller the other nineteen rows.
+ */
+export async function listSubscriptions(
+  gmail: Gmail,
+  threads: ThreadSummary[],
+  opts: { topN?: number } = {},
+): Promise<Subscription[]> {
+  const groups = groupSubscriptions(threads, opts);
+  const out: Subscription[] = [];
+  for (let i = 0; i < groups.length; i += HEADER_CONCURRENCY) {
+    const chunk = groups.slice(i, i + HEADER_CONCURRENCY);
+    const infos = await Promise.all(
+      chunk.map((g) => inspectUnsubscribe(gmail, g.newestThreadId).catch(() => null)),
+    );
+    for (let j = 0; j < chunk.length; j++) {
+      const info = infos[j];
+      const options: UnsubscribeOptions = info
+        ? { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos }
+        : { oneClick: false, httpsUrls: [], mailtos: [] };
+      out.push({
+        ...chunk[j],
+        optOut: info ? classifyOptOut(options) : "unknown",
+        options,
+      });
+    }
+  }
+  return out;
+}
+
+/** One thread's outcome in a bulk run — either an attempt, or why it was skipped. */
+export interface BulkUnsubscribeEntry extends UnsubscribeResult {
+  /** Set when no request was made because an earlier thread covered this sender. */
+  duplicateOf?: string;
+}
+
+export interface BulkUnsubscribeReport {
+  requested: number;
+  /** Threads that reached the network stage (i.e. were not skipped as duplicates). */
+  attempted: number;
+  unsubscribed: number;
+  /** Distinct senders skipped because an earlier thread in the same call covered them. */
+  skippedDuplicates: number;
+  results: BulkUnsubscribeEntry[];
+}
+
+/**
+ * Unsubscribe from several threads in one call.
+ *
+ * Two deliberate constraints, both about not multiplying the one outbound request
+ * this server makes:
+ *
+ *  - **Sequential, never parallel.** Each entry is a request to a third party; a
+ *    burst of them reads as abuse from the receiving end, and the failure of one
+ *    should not race the next.
+ *  - **One request per sender.** Two threads from the same list share an opt-out;
+ *    calling it twice tells the sender twice that the address is live, for nothing.
+ *    Later threads from a sender already handled are reported with `duplicateOf`.
+ *
+ * A thread whose inspection or request throws becomes a failed entry, not an
+ * exception: a bulk run reports partial success rather than losing the outcomes
+ * of everything that already happened (the same rule `bulk_modify` follows).
+ */
+export async function bulkUnsubscribe(
+  gmail: Gmail,
+  threadIds: string[],
+  deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+): Promise<BulkUnsubscribeReport> {
+  const results: BulkUnsubscribeEntry[] = [];
+  // Sender address → the thread that already spoke for it in this run.
+  const handled = new Map<string, string>();
+  let attempted = 0;
+  let skippedDuplicates = 0;
+
+  for (const threadId of threadIds) {
+    let info: UnsubscribeInfo;
+    try {
+      info = await inspectUnsubscribe(gmail, threadId);
+    } catch (err) {
+      results.push({
+        threadId,
+        messageId: "",
+        from: "",
+        unsubscribed: false,
+        reason: `Could not read the thread: ${err instanceof Error ? err.message : String(err)}`,
+        options: { oneClick: false, httpsUrls: [], mailtos: [] },
+      });
+      continue;
+    }
+
+    const senderKey = parseSender(info.from).email || info.from.trim().toLowerCase();
+    const earlier = senderKey ? handled.get(senderKey) : undefined;
+    if (earlier) {
+      skippedDuplicates++;
+      results.push({
+        threadId,
+        messageId: info.messageId,
+        from: info.from,
+        unsubscribed: false,
+        duplicateOf: earlier,
+        reason: `Same sender as thread ${earlier}, which was already handled in this call — no second request made.`,
+        options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
+      });
+      continue;
+    }
+    if (senderKey) handled.set(senderKey, threadId);
+
+    attempted++;
+    try {
+      results.push(await unsubscribeFromInfo(info, deps));
+    } catch (err) {
+      results.push({
+        threadId,
+        messageId: info.messageId,
+        from: info.from,
+        unsubscribed: false,
+        reason: err instanceof Error ? err.message : String(err),
+        options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
+      });
+    }
+  }
+
+  return {
+    requested: threadIds.length,
+    attempted,
+    unsubscribed: results.filter((r) => r.unsubscribed).length,
+    skippedDuplicates,
+    results,
   };
 }

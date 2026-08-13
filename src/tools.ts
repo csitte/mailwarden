@@ -4,7 +4,12 @@ import { Gmail, filterCriteriaToQuery } from "./gmail.js";
 import { getAuth, hasFilterScope } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
-import { inspectUnsubscribe, unsubscribeThread } from "./unsubscribe.js";
+import {
+  bulkUnsubscribe,
+  inspectUnsubscribe,
+  listSubscriptions,
+  unsubscribeThread,
+} from "./unsubscribe.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { fenceOutput } from "./sanitize.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
@@ -298,6 +303,55 @@ function registerReadTools(server: McpServer): void {
     async ({ threadId }) => ok(await inspectUnsubscribe(await client(), threadId)),
   );
 
+  server.registerTool(
+    "list_subscriptions",
+    {
+      description:
+        "Who keeps writing, how often, and whether you can get off the list — a mailbox slice grouped by SENDER, each row carrying its opt-out options. " +
+        "Contacts nobody: opt-out options come from the List-Unsubscribe header of each sender's newest thread (one metadata fetch per sender, not per thread). " +
+        "`optOut` is 'one-click' (the unsubscribe tool can perform it), 'link' (a human opens it in a browser), 'mailto' (would need sending, which mailwarden never does), 'none', or 'unknown' when that sender's header fetch failed. " +
+        "`perMonth` is threads per 30 days over the sampled span, or null when the sample is too thin to state a rate (under two dated threads, or a span under a day) — a single welcome mail is not a frequency. " +
+        "`newestThreadId` is what to hand to unsubscribe or bulk_unsubscribe. " +
+        "USE WHEN: 'what am I subscribed to', 'which newsletters flood me', or picking targets before a bulk unsubscribe. " +
+        "DO NOT USE: for a general inbox overview (use triage_digest — it buckets by label and age too), or for one known thread (use list_unsubscribe). " +
+        "SIDE EFFECTS: none.",
+      inputSchema: {
+        // Promotions is where mailing lists land; the caller can widen it.
+        query: z.string().trim().min(1).default("category:promotions"),
+        max: z.number().int().min(1).max(100).default(100),
+        topN: z.number().int().min(1).max(25).default(10),
+      },
+      outputSchema: {
+        query: z.string(),
+        sampled: z.number(),
+        hasMore: z.boolean(),
+        subscriptions: z.array(
+          z.object({
+            sender: z.string(),
+            name: z.string(),
+            threads: z.number(),
+            unread: z.number(),
+            newestThreadId: z.string(),
+            newestDate: z.string(),
+            oldestDate: z.string(),
+            perMonth: z.number().nullable(),
+            optOut: z.enum(["one-click", "link", "mailto", "none", "unknown"]),
+            options: unsubscribeOptionsSchema,
+          }),
+        ),
+      },
+      annotations: { title: "List subscriptions by sender", ...readOnly },
+    },
+    async ({ query, max, topN }) => {
+      const gmail = await client();
+      const result = await gmail.search(query, max);
+      const subscriptions = await listSubscriptions(gmail, result.threads, { topN });
+      // Same honest over-reporting rule as triage_digest: a filled sample may hide more.
+      const hasMore = result.nextPageToken != null || result.threads.length >= max;
+      return ok({ query, sampled: result.threads.length, hasMore, subscriptions });
+    },
+  );
+
 }
 
 function registerManageTools(server: McpServer): void {
@@ -533,6 +587,53 @@ function registerManageTools(server: McpServer): void {
       },
     },
     async ({ threadId }) => ok(await unsubscribeThread(await client(), threadId)),
+  );
+
+  server.registerTool(
+    "bulk_unsubscribe",
+    {
+      description:
+        "Unsubscribe from several mailing lists in one call, one thread id per list. " +
+        "Threads are processed SEQUENTIALLY, and at most ONE request is made per sender — a second thread from a sender already handled in this call is reported with `duplicateOf` and no request. " +
+        "Like unsubscribe, there is no URL parameter: every endpoint comes from that thread's own List-Unsubscribe header. Only RFC 8058 one-click senders are contacted; the rest come back with their alternatives in `options`. " +
+        "Partial success is reported, never hidden: a thread that cannot be read or whose endpoint fails becomes an entry with a `reason`, and the remaining threads still run. " +
+        "USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId. " +
+        "DO NOT USE: for one thread (use unsubscribe), or to find candidates (use list_subscriptions — it contacts nobody). " +
+        "SIDE EFFECTS: up to one outbound HTTPS request per DISTINCT sender (plus up to 3 redirects each) — the only non-Google hosts mailwarden ever contacts. " +
+        "Each confirms to that sender that the address is live, and none of it can be undone. The mailbox itself is not changed.",
+      inputSchema: {
+        // Capped low on purpose: every entry is an irreversible outbound request to
+        // a third party, so a mistaken call should be small enough to survive.
+        threadIds: z.array(z.string().min(1)).min(1).max(25),
+      },
+      outputSchema: {
+        requested: z.number(),
+        attempted: z.number(),
+        unsubscribed: z.number(),
+        skippedDuplicates: z.number(),
+        results: z.array(
+          z.object({
+            threadId: z.string(),
+            messageId: z.string(),
+            from: z.string(),
+            unsubscribed: z.boolean(),
+            url: z.string().optional(),
+            status: z.number().optional(),
+            reason: z.string().optional(),
+            duplicateOf: z.string().optional(),
+            options: unsubscribeOptionsSchema,
+          }),
+        ),
+      },
+      annotations: {
+        title: "Unsubscribe from several lists",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: true,
+      },
+    },
+    async ({ threadIds }) => ok(await bulkUnsubscribe(await client(), threadIds)),
   );
 
   // ---- Snooze (mailwarden's differentiator) ----

@@ -22,9 +22,9 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   `structuredContent` alongside fenced JSON text — no parsing guesswork for clients.
 - **Small attack surface.** No send tools (no exfiltration path for prompt-injected mail),
   optional read-only mode, no telemetry, no open ports by default, symlink-safe download fencing,
-  injection-fenced output. **One deliberate exception:** `unsubscribe` (manage tier) contacts the
-  opt-out endpoint named in a message's own header — the only non-Google host mailwarden ever
-  reaches, and a `read`-tier deployment makes no outbound request at all. Details under
+  injection-fenced output. **One deliberate exception:** `unsubscribe` / `bulk_unsubscribe` (manage
+  tier) contact the opt-out endpoint named in a message's own header — the only non-Google host
+  mailwarden ever reaches, and a `read`-tier deployment makes no outbound request at all. Details under
   [Security & privacy](#security--privacy) and
   [Unsubscribing](#unsubscribing--the-one-outbound-request).
 - **Correct with real-world mail.** RFC 2047 headers decoded (`=?UTF-8?B?…?=` → readable text),
@@ -83,6 +83,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders, label and age buckets, unread + attachment counts — instead of a raw thread list |
 | `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`) — contacts nobody |
+| **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, how often they write (`perMonth`), and each one's opt-out options — one header fetch per sender, contacts nobody |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
 | **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total) |
@@ -90,6 +91,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
 | **`unsubscribe`** | One-click opt-out (RFC 8058) using the endpoint from the message's own header — the only tool that contacts a non-Google host ([details](#unsubscribing--the-one-outbound-request)) |
+| **`bulk_unsubscribe`** | The same for several threads, sequentially and **at most one request per sender**; partial success reported per thread |
 | **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`), a date+time (`2026-06-20 9am`), or a preset (`tomorrow`, `tomorrow 9am`, `weekend`, `next week`, a weekday name, `in N days`, `in N hours`) |
 | **`unsnooze`** | Cancel a snooze, return to inbox now |
 | **`list_snoozed`** | All snoozed threads + due dates |
@@ -139,8 +141,11 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
 
 `list_unsubscribe` (read tier) reports what the sender offers, without contacting anyone. It reads the
 newest message that actually carries a `List-Unsubscribe` header — a reply threaded onto a newsletter
-sits at the end and advertises nothing, which would otherwise read as "this list has no opt-out". `unsubscribe` (manage tier) acts on it — and
-it is the **only** place mailwarden ever talks to a host that isn't Google, so the rules are tight:
+sits at the end and advertises nothing, which would otherwise read as "this list has no opt-out".
+`list_subscriptions` (read tier) does the same across a whole slice, grouped by sender, so you can see
+*who* keeps writing and which of them can actually be left — one header fetch per sender rather than
+per thread. `unsubscribe` and `bulk_unsubscribe` (manage tier) act on it — and that is the **only**
+place mailwarden ever talks to a host that isn't Google, so the rules are tight:
 
 - **There is no URL parameter.** The endpoint comes from the message's own header and nowhere else.
   A URL argument would let a prompt-injected mail turn the tool into an exfiltration channel
@@ -153,6 +158,11 @@ it is the **only** place mailwarden ever talks to a host that isn't Google, so t
   never derived from anything; the response body is cancelled unread. What returns to the model is the
   status code and the URL actually called — no content from the endpoint, so it cannot answer with
   instructions. (A 301/302/303 redirect is followed as a GET, i.e. with no body at all.)
+- **One request per sender, sequentially.** `bulk_unsubscribe` takes thread ids (never a query — a
+  query-driven bulk would fire off a request per matched sender before anyone had looked). Threads
+  from a sender already handled in the same call are reported with `duplicateOf` and cost no second
+  request: two threads from one list share an opt-out, and calling it twice only confirms your address
+  twice. Capped at 25 per call, because none of it can be undone.
 - **SSRF guards.** https only, default port only, no credentials in the URL, and every hop — including
   redirects, followed at most 3 times — must resolve exclusively to globally reachable addresses. The
   check parses each address to its bytes and matches it against the IANA special-purpose registry, so
@@ -177,7 +187,8 @@ read-only: no request is ever made to a sender, and nothing in the mailbox chang
 What it can't undo: the request tells the sender your address is live. A sender that ignores its own
 opt-out is beyond any client's reach — pair `unsubscribe` with `create_filter` or `trash` for those.
 Not offering an automatable option is reported as `unsubscribed:false` with the alternatives, not as an
-error. A `read`-only deployment gets `list_unsubscribe` and never makes the request at all.
+error. A `read`-only deployment gets `list_unsubscribe` and `list_subscriptions`, and never makes the
+request at all.
 
 ## Security & privacy
 
@@ -215,7 +226,7 @@ error. A `read`-only deployment gets `list_unsubscribe` and never makes the requ
   fallback.
 - **Read-only mode.** Set `MAILWARDEN_READONLY=1` (shorthand for `MAILWARDEN_TOOLS=read`) and only the
   read tools (`search`, `get_thread`, `list_labels`, `list_snoozed`, `get_profile`, `triage_digest`,
-  `list_unsubscribe`)
+  `list_unsubscribe`, `list_subscriptions`)
   are registered — nothing that can change the mailbox or write
   files is even advertised to clients (the filter tools, which need the broader `gmail.settings.basic`
   scope, are excluded too). Recommended for shared/HTTP deployments that only triage.
@@ -344,7 +355,7 @@ node dist/index.js --auth
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
-| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest/list_unsubscribe). Shorthand for `MAILWARDEN_TOOLS=read` |
+| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |
 | `PORT` | HTTP port (default 8787) |
@@ -355,7 +366,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (433 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (452 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

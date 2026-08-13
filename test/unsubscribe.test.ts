@@ -6,9 +6,14 @@ import {
   oneClickUnsubscribe,
   inspectUnsubscribe,
   unsubscribeThread,
+  groupSubscriptions,
+  classifyOptOut,
+  listSubscriptions,
+  bulkUnsubscribe,
   type UnsubscribeDeps,
+  type UnsubscribeOptions,
 } from "../src/unsubscribe.js";
-import { Gmail } from "../src/gmail.js";
+import { Gmail, type ThreadSummary } from "../src/gmail.js";
 
 // ---- Pure parsing ----
 
@@ -551,5 +556,293 @@ describe("unsubscribeThread", () => {
     expect(res.unsubscribed).toBe(false);
     expect(res.status).toBe(500);
     expect(res.reason).toMatch(/answered 500/);
+  });
+});
+
+// ---- Subscriptions: grouping by sender, and the bulk run ----
+
+/** ThreadSummary rows with only the fields the grouping actually reads. */
+function row(over: Partial<ThreadSummary>): ThreadSummary {
+  return {
+    threadId: "t",
+    messageCount: 1,
+    from: "News <news@example.com>",
+    subject: "s",
+    date: "Mon, 10 Aug 2026 10:00:00 +0000",
+    labelIds: [],
+    snippet: "",
+    hasAttachments: false,
+    ...over,
+  };
+}
+
+describe("groupSubscriptions", () => {
+  it("groups by address, counts unread, and keeps the first display name seen", () => {
+    const g = groupSubscriptions([
+      row({ threadId: "a", from: "Weekly News <news@example.com>", labelIds: ["UNREAD"] }),
+      row({ threadId: "b", from: "news@example.com" }), // bare address, same sender
+      row({ threadId: "c", from: "Other <other@example.com>", labelIds: ["UNREAD"] }),
+    ]);
+    expect(g).toHaveLength(2);
+    expect(g[0]).toMatchObject({
+      sender: "news@example.com",
+      name: "Weekly News",
+      threads: 2,
+      unread: 1,
+    });
+    expect(g[1]).toMatchObject({ sender: "other@example.com", threads: 1, unread: 1 });
+  });
+
+  it("is case-insensitive about the address, as mail is", () => {
+    const g = groupSubscriptions([
+      row({ from: "News <NEWS@Example.COM>" }),
+      row({ from: "news@example.com" }),
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0].sender).toBe("news@example.com");
+  });
+
+  it("points newestThreadId at the newest DATED thread", () => {
+    const g = groupSubscriptions([
+      row({ threadId: "old", date: "Mon, 01 Jun 2026 10:00:00 +0000" }),
+      row({ threadId: "new", date: "Mon, 10 Aug 2026 10:00:00 +0000" }),
+      row({ threadId: "mid", date: "Mon, 01 Jul 2026 10:00:00 +0000" }),
+    ]);
+    expect(g[0].newestThreadId).toBe("new");
+    expect(g[0].newestDate).toBe("2026-08-10T10:00:00.000Z");
+    expect(g[0].oldestDate).toBe("2026-06-01T10:00:00.000Z");
+  });
+
+  it("ignores an undated thread when picking the newest, but still counts it", () => {
+    const g = groupSubscriptions([
+      row({ threadId: "dated", date: "Mon, 10 Aug 2026 10:00:00 +0000" }),
+      row({ threadId: "undated", date: "not a date" }),
+    ]);
+    expect(g[0].threads).toBe(2);
+    expect(g[0].newestThreadId).toBe("dated");
+  });
+
+  it("computes perMonth from the dated span", () => {
+    // 5 threads across exactly 30 days -> 5 per 30 days.
+    const dates = ["2026-07-01", "2026-07-08", "2026-07-15", "2026-07-22", "2026-07-31"];
+    const g = groupSubscriptions(
+      dates.map((d, i) => row({ threadId: `t${i}`, date: `${d}T00:00:00Z` })),
+    );
+    expect(g[0].perMonth).toBe(5);
+  });
+
+  it("reports perMonth as null rather than inventing a rate from one mail", () => {
+    expect(groupSubscriptions([row({})])[0].perMonth).toBeNull();
+  });
+
+  it("reports perMonth as null when the span is under a day", () => {
+    const g = groupSubscriptions([
+      row({ threadId: "a", date: "2026-08-10T09:00:00Z" }),
+      row({ threadId: "b", date: "2026-08-10T18:00:00Z" }),
+    ]);
+    expect(g[0].threads).toBe(2);
+    expect(g[0].perMonth).toBeNull();
+  });
+
+  it("sorts by thread count, ties broken by address, and honours topN", () => {
+    const g = groupSubscriptions(
+      [
+        row({ from: "b@example.com" }),
+        row({ from: "a@example.com" }),
+        row({ from: "c@example.com" }),
+        row({ from: "c@example.com" }),
+      ],
+      { topN: 2 },
+    );
+    expect(g.map((s) => s.sender)).toEqual(["c@example.com", "a@example.com"]);
+  });
+
+  it("buckets a missing sender under (unknown) instead of dropping the row", () => {
+    const g = groupSubscriptions([row({ from: "" })]);
+    expect(g[0]).toMatchObject({ sender: "(unknown)", threads: 1 });
+  });
+});
+
+describe("classifyOptOut", () => {
+  it("ranks one-click above a bare link above mailto", () => {
+    const kind = (o: Partial<UnsubscribeOptions>) =>
+      classifyOptOut({ oneClick: false, httpsUrls: [], mailtos: [], ...o });
+    expect(kind({ oneClick: true, httpsUrls: ["https://a.example/u"] })).toBe("one-click");
+    expect(kind({ httpsUrls: ["https://a.example/u"], mailtos: ["mailto:x@y.z"] })).toBe("link");
+    expect(kind({ mailtos: ["mailto:x@y.z"] })).toBe("mailto");
+    expect(kind({})).toBe("none");
+  });
+});
+
+/** A Gmail double serving a different message set per thread id. */
+function gmailByThread(threads: Record<string, Record<string, string>[] | "throw">) {
+  const gets: string[] = [];
+  const api: any = {
+    users: {
+      threads: {
+        get: vi.fn(async ({ id }: { id: string }) => {
+          gets.push(id);
+          const t = threads[id];
+          if (!t || t === "throw") throw new Error(`no such thread ${id}`);
+          return {
+            data: {
+              messages: t.map((h, i) => ({
+                id: `${id}-m${i + 1}`,
+                payload: { headers: Object.entries(h).map(([name, value]) => ({ name, value })) },
+              })),
+            },
+          };
+        }),
+      },
+    },
+  };
+  return { gmail: new Gmail(api), gets };
+}
+
+const oneClickMsg = (from: string, url: string) => ({
+  From: from,
+  "List-Unsubscribe": `<${url}>`,
+  "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+});
+
+describe("listSubscriptions", () => {
+  it("fetches headers once per SENDER, not once per thread", async () => {
+    const { gmail, gets } = gmailByThread({
+      newest: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const subs = await listSubscriptions(gmail, [
+      row({ threadId: "older", date: "2026-08-01T00:00:00Z" }),
+      row({ threadId: "newest", date: "2026-08-10T00:00:00Z" }),
+    ]);
+    expect(subs).toHaveLength(1);
+    expect(subs[0]).toMatchObject({ sender: "news@example.com", threads: 2, optOut: "one-click" });
+    // Two threads, one sender, one metadata fetch — and against the newest thread.
+    expect(gets).toEqual(["newest"]);
+  });
+
+  it("carries the advertised options through for a link-only sender", async () => {
+    const { gmail } = gmailByThread({
+      t: [{ From: "News <news@example.com>", "List-Unsubscribe": "<https://a.example/u>" }],
+    });
+    const subs = await listSubscriptions(gmail, [row({ threadId: "t" })]);
+    expect(subs[0].optOut).toBe("link");
+    expect(subs[0].options.httpsUrls).toEqual(["https://a.example/u"]);
+  });
+
+  it("marks a sender whose fetch failed as unknown and keeps the other rows", async () => {
+    const { gmail } = gmailByThread({
+      good: [oneClickMsg("Good <good@example.com>", "https://a.example/u")],
+      bad: "throw",
+    });
+    const subs = await listSubscriptions(gmail, [
+      row({ threadId: "good", from: "good@example.com" }),
+      row({ threadId: "bad", from: "bad@example.com" }),
+    ]);
+    expect(subs).toHaveLength(2);
+    const bySender = Object.fromEntries(subs.map((s) => [s.sender, s]));
+    expect(bySender["good@example.com"].optOut).toBe("one-click");
+    // "unknown", not "none": we failed to look — the sender did not decline to offer.
+    expect(bySender["bad@example.com"].optOut).toBe("unknown");
+  });
+});
+
+describe("bulkUnsubscribe", () => {
+  it("acts on each distinct sender and counts the successes", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 202 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(rep).toMatchObject({ requested: 2, attempted: 2, unsubscribed: 2, skippedDuplicates: 0 });
+    expect(calls.map((c) => c.url)).toEqual(["https://a.example/u", "https://b.example/u"]);
+  });
+
+  it("makes ONE request per sender — a second thread from the same list is skipped", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <NEWS@example.com>", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(calls).toHaveLength(1);
+    expect(rep).toMatchObject({ requested: 2, attempted: 1, unsubscribed: 1, skippedDuplicates: 1 });
+    expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: false, duplicateOf: "t1" });
+    expect(rep.results[1].reason).toMatch(/already handled/);
+  });
+
+  it("runs sequentially, so the endpoints are contacted one after another", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+      t3: [oneClickMsg("C <c@example.com>", "https://c.example/u")],
+    });
+    const order: string[] = [];
+    const { deps } = fakeDeps([{ status: 200 }, { status: 200 }, { status: 200 }]);
+    const inner = deps.fetch;
+    deps.fetch = (async (url: any, init: any) => {
+      order.push(`start ${url}`);
+      const res = await (inner as any)(url, init);
+      order.push(`end ${url}`);
+      return res;
+    }) as typeof globalThis.fetch;
+    await bulkUnsubscribe(gmail, ["t1", "t2", "t3"], deps);
+    expect(order).toEqual([
+      "start https://a.example/u",
+      "end https://a.example/u",
+      "start https://b.example/u",
+      "end https://b.example/u",
+      "start https://c.example/u",
+      "end https://c.example/u",
+    ]);
+  });
+
+  it("reports a thread it could not read and still runs the rest", async () => {
+    const { gmail } = gmailByThread({
+      bad: "throw",
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["bad", "t2"], deps);
+    expect(rep).toMatchObject({ requested: 2, attempted: 1, unsubscribed: 1 });
+    expect(rep.results[0]).toMatchObject({ threadId: "bad", unsubscribed: false });
+    expect(rep.results[0].reason).toMatch(/Could not read the thread/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps a refusal separate from a failure: nothing automatable is not an error", async () => {
+    const { gmail } = gmailByThread({
+      t1: [{ From: "A <a@example.com>", "List-Unsubscribe": "<mailto:off@example.com>" }],
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    // t1 counts as attempted — it was that sender's turn — but no request went out,
+    // because a mailto: opt-out is never performed.
+    expect(rep).toMatchObject({ requested: 2, attempted: 2, unsubscribed: 1 });
+    expect(rep.results[0].reason).toMatch(/mailto/);
+    expect(calls.map((c) => c.url)).toEqual(["https://b.example/u"]);
+  });
+
+  it("turns a network failure into an entry rather than losing the whole run", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+    });
+    const { deps } = fakeDeps([{ status: 200 }]);
+    const inner = deps.fetch;
+    let first = true;
+    deps.fetch = (async (url: any, init: any) => {
+      if (first) {
+        first = false;
+        throw new Error("socket hang up");
+      }
+      return (inner as any)(url, init);
+    }) as typeof globalThis.fetch;
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(rep.results[0]).toMatchObject({ threadId: "t1", unsubscribed: false });
+    expect(rep.results[0].reason).toMatch(/socket hang up/);
+    expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: true });
+    expect(rep.unsubscribed).toBe(1);
   });
 });
