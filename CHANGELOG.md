@@ -11,10 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`list_subscriptions` (read tier) — who keeps writing, and can you get off the list.** Groups a
   mailbox slice by sender and reports each one's opt-out options in the same row: thread and unread
   counts, the span it was seen over, and `perMonth` — threads per 30 days, or `null` when the sample
-  is too thin to state a rate (under two dated threads, or a span under a day), because one welcome
-  mail is not a frequency. Opt-out options cost **one** metadata fetch per *sender* — on that sender's
-  newest dated thread, or its first thread in the sample if none of them carry a parseable date — not
-  one per thread; `optOut` is `one-click` / `link` / `mailto` / `none`, or `unknown` when that
+  is too thin to state a rate (under two dated threads, or a span shorter than 15 days — half the
+  unit being reported), because neither one welcome mail nor two messages a day apart is a frequency.
+  The span is bounded by the sample rather than by the sender, which the tool description says too.
+  Opt-out options cost **one** metadata fetch per *sender* — on that sender's newest dated thread, or
+  its first thread in the sample if none of them carry a parseable date — not one per thread; `optOut` is `one-click` / `link` / `mailto` / `none`, or `unknown` when that
   sender's fetch failed, which is deliberately distinct from `none`. `sendersFound` reports how many
   distinct senders the sample held *before* `topN` truncated the list, so a top-ten slice of forty
   cannot be mistaken for the whole answer. Contacts nobody. The grouping itself is a pure function
@@ -36,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reason, not dropped. Partial success is reported per thread, matching `bulk_modify`. Every existing
   unsubscribe guard applies unchanged — the URL still comes only from the message's own header, only
   RFC 8058 one-click is performed, and `mailto:` never is.
+- **`scripts/probe-subscriptions.mjs` — hold `list_subscriptions` against real mail.** Companion to
+  the parser probe, aimed at this tool's one shortcut: options are read from a single thread per
+  sender, which assumes any thread of a sender advertises what that sender offers. The script does
+  the expensive thing instead — it inspects *every* thread of each sender and reports where the
+  shortcut would have missed a better opt-out, alongside how the grouping fared on real `From`/`Date`
+  headers and the span each rate was extrapolated from. Strictly read-only: metadata only, no sender
+  contacted, no printed URL visited. Repo-only, like the parser probe and the re-verification demo.
+  Its first run is what produced the `perMonth` threshold above.
 
 ### Fixed
 - **`SECURITY.md`: corrected an overstated scope claim.** Threat 1 asserted that neither requested

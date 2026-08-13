@@ -644,6 +644,27 @@ describe("groupSubscriptions", () => {
     expect(g[0].perMonth).toBeNull();
   });
 
+  it("refuses to extrapolate a monthly rate from a span far shorter than a month", () => {
+    // Field case from scripts/probe-subscriptions.mjs against a real mailbox: two
+    // messages exactly a day apart used to be reported as "59.8/month".
+    const g = groupSubscriptions([
+      row({ threadId: "a", date: "2026-08-10T00:00:00Z" }),
+      row({ threadId: "b", date: "2026-08-11T00:00:00Z" }),
+    ]);
+    expect(g[0].threads).toBe(2);
+    expect(g[0].perMonth).toBeNull();
+  });
+
+  it("states a rate once the span reaches half the reported unit", () => {
+    // 15 days is the threshold; 3 threads over exactly 15 days -> 6 per 30 days.
+    const g = groupSubscriptions([
+      row({ threadId: "a", date: "2026-08-01T00:00:00Z" }),
+      row({ threadId: "b", date: "2026-08-08T00:00:00Z" }),
+      row({ threadId: "c", date: "2026-08-16T00:00:00Z" }),
+    ]);
+    expect(g[0].perMonth).toBe(6);
+  });
+
   it("sorts by thread count, ties broken by address, and honours topN", () => {
     const g = groupSubscriptions(
       [

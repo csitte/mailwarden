@@ -503,9 +503,13 @@ export interface SubscriptionGroup {
   oldestDate: string;
   /**
    * Threads per 30 days across the observed span, or `null` when the sample cannot
-   * support a rate — fewer than two dated threads, or a span under a day. A single
-   * message says nothing about frequency, and pretending otherwise would turn one
-   * welcome mail into "30/month".
+   * support a rate — fewer than two dated threads, or a span shorter than
+   * `MIN_RATE_SPAN_DAYS`. A single message says nothing about frequency, and neither
+   * do two of them a day apart.
+   *
+   * Note the span is bounded by the SAMPLE, not by the sender: a query capped at
+   * `max` threads only reaches back as far as those threads go. Widen the sample if
+   * you want rates for senders that write rarely.
    */
   perMonth: number | null;
 }
@@ -518,6 +522,19 @@ export interface SubscriptionGroup {
  * "what is in this mailbox", this asks "who keeps writing, and how often".
  */
 const DEFAULT_TOP_N = 10;
+
+/**
+ * Shortest observed span that may be extrapolated to a per-30-days rate — half the
+ * unit being reported. Anything less is guesswork wearing a number.
+ *
+ * Set from field data, not taste: `scripts/probe-subscriptions.mjs` over a real
+ * mailbox produced eight rates, every one of them extrapolated from a window of 0.1
+ * to 6.5 days. The worst turned two messages a day apart into "59.8/month" — the
+ * exact overstatement the `null` case was meant to prevent, one step up. Overstating
+ * frequency pushes a caller toward unsubscribing, which is the irreversible
+ * direction, so the threshold errs toward saying nothing.
+ */
+const MIN_RATE_SPAN_DAYS = 15;
 
 export function groupSubscriptions(
   threads: ThreadSummary[],
@@ -582,7 +599,9 @@ export function groupSubscriptions(
         newestDate: iso(a.newestMs),
         oldestDate: iso(a.oldestMs),
         perMonth:
-          a.dated >= 2 && spanDays >= 1 ? Math.round((a.dated / spanDays) * 30 * 10) / 10 : null,
+          a.dated >= 2 && spanDays >= MIN_RATE_SPAN_DAYS
+            ? Math.round((a.dated / spanDays) * 30 * 10) / 10
+            : null,
       };
     })
     .sort((x, y) => y.threads - x.threads || x.sender.localeCompare(y.sender))

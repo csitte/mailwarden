@@ -310,7 +310,7 @@ function registerReadTools(server: McpServer): void {
         "Who keeps writing, how often, and whether you can get off the list — a mailbox slice grouped by SENDER, each row carrying its opt-out options. " +
         "Contacts nobody: opt-out options come from the List-Unsubscribe header of each sender's newest thread (one metadata fetch per sender, not per thread). " +
         "`optOut` is 'one-click' (the unsubscribe tool can perform it), 'link' (a human opens it in a browser), 'mailto' (would need sending, which mailwarden never does), 'none', or 'unknown' when that sender's header fetch failed. " +
-        "`perMonth` is threads per 30 days over the sampled span, or null when the sample is too thin to state a rate (under two dated threads, or a span under a day) — a single welcome mail is not a frequency. " +
+        "`perMonth` is threads per 30 days over the sampled span, or null when the sample is too thin to state a rate (under two dated threads, or a span under 15 days — half the reported unit) — two mails a day apart are not 60/month. The span is bounded by the SAMPLE, so widen `max` if you want rates for senders that write rarely. " +
         "`newestThreadId` is what to hand to unsubscribe or bulk_unsubscribe. " +
         "`sendersFound` is how many DISTINCT senders the sample held — when it exceeds topN, the list is truncated and raising topN shows more. " +
         "USE WHEN: 'what am I subscribed to', 'which newsletters flood me', or picking targets before a bulk unsubscribe. " +
