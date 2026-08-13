@@ -312,6 +312,7 @@ function registerReadTools(server: McpServer): void {
         "`optOut` is 'one-click' (the unsubscribe tool can perform it), 'link' (a human opens it in a browser), 'mailto' (would need sending, which mailwarden never does), 'none', or 'unknown' when that sender's header fetch failed. " +
         "`perMonth` is threads per 30 days over the sampled span, or null when the sample is too thin to state a rate (under two dated threads, or a span under a day) — a single welcome mail is not a frequency. " +
         "`newestThreadId` is what to hand to unsubscribe or bulk_unsubscribe. " +
+        "`sendersFound` is how many DISTINCT senders the sample held — when it exceeds topN, the list is truncated and raising topN shows more. " +
         "USE WHEN: 'what am I subscribed to', 'which newsletters flood me', or picking targets before a bulk unsubscribe. " +
         "DO NOT USE: for a general inbox overview (use triage_digest — it buckets by label and age too), or for one known thread (use list_unsubscribe). " +
         "SIDE EFFECTS: none.",
@@ -325,6 +326,7 @@ function registerReadTools(server: McpServer): void {
         query: z.string(),
         sampled: z.number(),
         hasMore: z.boolean(),
+        sendersFound: z.number(),
         subscriptions: z.array(
           z.object({
             sender: z.string(),
@@ -345,10 +347,10 @@ function registerReadTools(server: McpServer): void {
     async ({ query, max, topN }) => {
       const gmail = await client();
       const result = await gmail.search(query, max);
-      const subscriptions = await listSubscriptions(gmail, result.threads, { topN });
+      const { subscriptions, sendersFound } = await listSubscriptions(gmail, result.threads, { topN });
       // Same honest over-reporting rule as triage_digest: a filled sample may hide more.
       const hasMore = result.nextPageToken != null || result.threads.length >= max;
-      return ok({ query, sampled: result.threads.length, hasMore, subscriptions });
+      return ok({ query, sampled: result.threads.length, hasMore, sendersFound, subscriptions });
     },
   );
 
@@ -594,7 +596,8 @@ function registerManageTools(server: McpServer): void {
     {
       description:
         "Unsubscribe from several mailing lists in one call, one thread id per list. " +
-        "Threads are processed SEQUENTIALLY, and at most ONE request is made per sender — a second thread from a sender already handled in this call is reported with `duplicateOf` and no request. " +
+        "Threads are processed SEQUENTIALLY, and at most ONE request is made per sender — a second thread from a sender whose request already went out is reported with `duplicateOf` and no request (and says so when it advertises a DIFFERENT endpoint, i.e. is probably a separate list from the same sender). " +
+        "The whole call shares a 60-second budget; threads left over when it runs out come back with `skippedOutOfTime` and a reason, so re-running with the remaining ids finishes the job. " +
         "Like unsubscribe, there is no URL parameter: every endpoint comes from that thread's own List-Unsubscribe header. Only RFC 8058 one-click senders are contacted; the rest come back with their alternatives in `options`. " +
         "Partial success is reported, never hidden: a thread that cannot be read or whose endpoint fails becomes an entry with a `reason`, and the remaining threads still run. " +
         "USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId. " +
@@ -611,6 +614,7 @@ function registerManageTools(server: McpServer): void {
         attempted: z.number(),
         unsubscribed: z.number(),
         skippedDuplicates: z.number(),
+        skippedOutOfTime: z.number(),
         results: z.array(
           z.object({
             threadId: z.string(),

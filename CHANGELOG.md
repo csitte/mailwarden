@@ -13,18 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counts, the span it was seen over, and `perMonth` — threads per 30 days, or `null` when the sample
   is too thin to state a rate (under two dated threads, or a span under a day), because one welcome
   mail is not a frequency. Opt-out options cost **one** metadata fetch per *sender* — on that sender's
-  newest dated thread — not one per thread; `optOut` is `one-click` / `link` / `mailto` / `none`, or
-  `unknown` when that sender's fetch failed, which is deliberately distinct from `none`. Contacts
-  nobody. The grouping itself is a pure function over rows `search` already fetched.
+  newest dated thread, or its first thread in the sample if none of them carry a parseable date — not
+  one per thread; `optOut` is `one-click` / `link` / `mailto` / `none`, or `unknown` when that
+  sender's fetch failed, which is deliberately distinct from `none`. `sendersFound` reports how many
+  distinct senders the sample held *before* `topN` truncated the list, so a top-ten slice of forty
+  cannot be mistaken for the whole answer. Contacts nobody. The grouping itself is a pure function
+  over rows `search` already fetched.
 - **`bulk_unsubscribe` (manage tier).** Unsubscribes from several threads in one call, taking thread
   ids — never a query, which would fire a request per matched sender before anyone had looked.
   Sequential, never parallel, and **at most one request per sender**: a second thread from a sender
-  already handled in the same call comes back with `duplicateOf` and no request, since two threads
-  from one list share an opt-out and calling it twice only confirms the address twice. Capped at 25
-  per call because none of it can be undone. Partial success is reported per thread, matching
-  `bulk_modify`: an unreadable thread or a failed endpoint becomes an entry with a `reason` while the
-  rest of the run continues. Every existing unsubscribe guard applies unchanged — the URL still comes
-  only from the message's own header, only RFC 8058 one-click is performed, and `mailto:` never is.
+  whose request already went out comes back with `duplicateOf` and no request, since two threads from
+  one list share an opt-out and calling it twice only confirms the address twice. A sender counts as
+  handled only once a request actually reached an endpoint — a refusal, or a connection that died on
+  the way, leaves the next thread its own try, because nothing was confirmed to that sender either
+  way. Where the skipped thread advertises a *different* endpoint (one sender, several lists) the
+  reason says so, rather than letting a list the caller asked to leave stay quietly subscribed; the
+  comparison is advertised-endpoint to advertised-endpoint, so a redirecting sender is not mistaken
+  for a second list. Bounded on three axes because none of it can be undone: 25 threads per call, one
+  request per sender, and a single **60-second budget** for the whole call — 25 × the single-request
+  timeout would stall long past any client's patience, the same reasoning that gives a redirect chain
+  one budget instead of one per hop. Threads left over are returned as `skippedOutOfTime` with a
+  reason, not dropped. Partial success is reported per thread, matching `bulk_modify`. Every existing
+  unsubscribe guard applies unchanged — the URL still comes only from the message's own header, only
+  RFC 8058 one-click is performed, and `mailto:` never is.
 
 ### Fixed
 - **`SECURITY.md`: corrected an overstated scope claim.** Threat 1 asserted that neither requested

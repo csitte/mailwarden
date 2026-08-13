@@ -251,6 +251,8 @@ export interface UnsubscribeDeps {
   fetch: typeof globalThis.fetch;
   /** Resolve a hostname to every address it maps to. */
   resolveHost: (hostname: string) => Promise<string[]>;
+  /** Monotonic-enough clock, injected so the bulk time budget is testable. */
+  now?: () => number;
 }
 
 export const defaultUnsubscribeDeps: UnsubscribeDeps = {
@@ -259,6 +261,7 @@ export const defaultUnsubscribeDeps: UnsubscribeDeps = {
     const entries = await dnsLookup(hostname, { all: true });
     return entries.map((e) => e.address);
   },
+  now: () => Date.now(),
 };
 
 /**
@@ -429,6 +432,7 @@ export async function unsubscribeThread(
 async function unsubscribeFromInfo(
   info: UnsubscribeInfo,
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+  timeoutMs = TIMEOUT_MS,
 ): Promise<UnsubscribeResult> {
   const threadId = info.threadId;
   const base = {
@@ -472,7 +476,7 @@ async function unsubscribeFromInfo(
     };
   }
 
-  const res = await oneClickUnsubscribe(usable, deps);
+  const res = await oneClickUnsubscribe(usable, deps, timeoutMs);
   return {
     ...base,
     unsubscribed: res.ok,
@@ -513,11 +517,13 @@ export interface SubscriptionGroup {
  * `buildDigest` does. The distinction from the digest is intent — the digest asks
  * "what is in this mailbox", this asks "who keeps writing, and how often".
  */
+const DEFAULT_TOP_N = 10;
+
 export function groupSubscriptions(
   threads: ThreadSummary[],
   opts: { topN?: number } = {},
 ): SubscriptionGroup[] {
-  const topN = opts.topN ?? 10;
+  const topN = opts.topN ?? DEFAULT_TOP_N;
   interface Acc {
     name: string;
     threads: number;
@@ -614,13 +620,19 @@ const HEADER_CONCURRENCY = 8;
  * A per-sender fetch that fails yields `optOut: "unknown"` rather than sinking the
  * listing: the point of this tool is the overview, and one unreadable thread should
  * not cost the caller the other nineteen rows.
+ *
+ * `sendersFound` is the count BEFORE `topN` truncates, so a caller can tell a
+ * complete answer from a top-ten slice of forty. A cap that is not reported reads
+ * as "that was all of them".
  */
 export async function listSubscriptions(
   gmail: Gmail,
   threads: ThreadSummary[],
   opts: { topN?: number } = {},
-): Promise<Subscription[]> {
-  const groups = groupSubscriptions(threads, opts);
+): Promise<{ subscriptions: Subscription[]; sendersFound: number }> {
+  const all = groupSubscriptions(threads, { topN: Number.POSITIVE_INFINITY });
+  const sendersFound = all.length;
+  const groups = all.slice(0, opts.topN ?? DEFAULT_TOP_N);
   const out: Subscription[] = [];
   for (let i = 0; i < groups.length; i += HEADER_CONCURRENCY) {
     const chunk = groups.slice(i, i + HEADER_CONCURRENCY);
@@ -639,24 +651,44 @@ export async function listSubscriptions(
       });
     }
   }
-  return out;
+  return { subscriptions: out, sendersFound };
 }
 
 /** One thread's outcome in a bulk run — either an attempt, or why it was skipped. */
 export interface BulkUnsubscribeEntry extends UnsubscribeResult {
-  /** Set when no request was made because an earlier thread covered this sender. */
+  /**
+   * Set when no request was made because a request had ALREADY GONE OUT for this
+   * sender earlier in the same call. A sender whose earlier thread only produced a
+   * refusal (or whose request failed before reaching the endpoint) is not recorded,
+   * so this thread still gets its own try.
+   */
   duplicateOf?: string;
 }
 
 export interface BulkUnsubscribeReport {
   requested: number;
-  /** Threads that reached the network stage (i.e. were not skipped as duplicates). */
+  /**
+   * Threads this call took responsibility for — everything except the ones skipped
+   * as duplicates or left undone when the time budget ran out. Not the same as
+   * "reached the network": a thread offering only a `mailto:` opt-out is attempted
+   * and then refused without any request going out.
+   */
   attempted: number;
   unsubscribed: number;
-  /** Distinct senders skipped because an earlier thread in the same call covered them. */
+  /** Threads skipped because a request had already gone out for that sender. */
   skippedDuplicates: number;
+  /** Threads left untouched because the call's time budget was exhausted. */
+  skippedOutOfTime: number;
   results: BulkUnsubscribeEntry[];
 }
+
+/**
+ * Wall-clock budget for a whole bulk call. The single-thread path allows 10s, and
+ * 25 of those in series would be over four minutes — long past the point where the
+ * client gives up and the caller loses the outcomes of the threads that DID succeed.
+ * Same reasoning as the one budget spanning a redirect chain, one level up.
+ */
+const BULK_BUDGET_MS = 60_000;
 
 /**
  * Unsubscribe from several threads in one call.
@@ -669,7 +701,13 @@ export interface BulkUnsubscribeReport {
  *    should not race the next.
  *  - **One request per sender.** Two threads from the same list share an opt-out;
  *    calling it twice tells the sender twice that the address is live, for nothing.
- *    Later threads from a sender already handled are reported with `duplicateOf`.
+ *    A sender is recorded only once a request has ACTUALLY gone out — a refusal or a
+ *    connection that never reached the endpoint leaves the next thread its own try,
+ *    because nothing was confirmed to that sender either way.
+ *
+ * The whole call shares one wall-clock budget, for the same reason a redirect chain
+ * does: 25 threads × the single-thread timeout would stall far past any client's
+ * patience. Threads left over when it runs out are reported as such, not dropped.
  *
  * A thread whose inspection or request throws becomes a failed entry, not an
  * exception: a bulk run reports partial success rather than losing the outcomes
@@ -679,14 +717,37 @@ export async function bulkUnsubscribe(
   gmail: Gmail,
   threadIds: string[],
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+  budgetMs = BULK_BUDGET_MS,
 ): Promise<BulkUnsubscribeReport> {
   const results: BulkUnsubscribeEntry[] = [];
-  // Sender address → the thread that already spoke for it in this run.
-  const handled = new Map<string, string>();
+  // Sender address → the thread whose request already went out, plus the endpoints
+  // that thread ADVERTISED. Compared advertised-to-advertised: the URL actually
+  // called can differ from the header's after a redirect, and comparing against that
+  // would flag every redirecting sender as a second list.
+  const handled = new Map<string, { threadId: string; urls: string[] }>();
+  const now = deps.now ?? (() => Date.now());
+  const startedAt = now();
   let attempted = 0;
   let skippedDuplicates = 0;
+  let skippedOutOfTime = 0;
 
   for (const threadId of threadIds) {
+    const remaining = budgetMs - (now() - startedAt);
+    if (remaining <= 0) {
+      skippedOutOfTime++;
+      results.push({
+        threadId,
+        messageId: "",
+        from: "",
+        unsubscribed: false,
+        reason:
+          "Not attempted: this call's time budget was exhausted by the threads before it. " +
+          "Re-run bulk_unsubscribe with the remaining thread ids.",
+        options: { oneClick: false, httpsUrls: [], mailtos: [] },
+      });
+      continue;
+    }
+
     let info: UnsubscribeInfo;
     try {
       info = await inspectUnsubscribe(gmail, threadId);
@@ -702,26 +763,41 @@ export async function bulkUnsubscribe(
       continue;
     }
 
+    const options = { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos };
     const senderKey = parseSender(info.from).email || info.from.trim().toLowerCase();
     const earlier = senderKey ? handled.get(senderKey) : undefined;
     if (earlier) {
       skippedDuplicates++;
+      // One sender can run several lists. If this thread points somewhere else, the
+      // caller is owed that fact — otherwise a list they asked to leave quietly stays.
+      const elsewhere =
+        info.httpsUrls.length > 0 && !info.httpsUrls.some((u) => earlier.urls.includes(u));
       results.push({
         threadId,
         messageId: info.messageId,
         from: info.from,
         unsubscribed: false,
-        duplicateOf: earlier,
-        reason: `Same sender as thread ${earlier}, which was already handled in this call — no second request made.`,
-        options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
+        duplicateOf: earlier.threadId,
+        reason:
+          `A request already went out to this sender for thread ${earlier.threadId} — no second one made.` +
+          (elsewhere
+            ? " Note that this thread advertises a DIFFERENT opt-out endpoint (see `options.httpsUrls`), " +
+              "so it may be a separate list from the same sender — call unsubscribe on it directly if you meant that one."
+            : ""),
+        options,
       });
       continue;
     }
-    if (senderKey) handled.set(senderKey, threadId);
 
     attempted++;
+    // Never let one slow endpoint eat the rest of the budget.
+    const perThread = Math.min(TIMEOUT_MS, remaining);
     try {
-      results.push(await unsubscribeFromInfo(info, deps));
+      const res = await unsubscribeFromInfo(info, deps, perThread);
+      // Record the sender only if a request actually reached an endpoint: `url` is
+      // set exactly when one was made. A refusal must not suppress the next thread.
+      if (senderKey && res.url) handled.set(senderKey, { threadId, urls: info.httpsUrls });
+      results.push(res);
     } catch (err) {
       results.push({
         threadId,
@@ -729,7 +805,7 @@ export async function bulkUnsubscribe(
         from: info.from,
         unsubscribed: false,
         reason: err instanceof Error ? err.message : String(err),
-        options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
+        options,
       });
     }
   }
@@ -739,6 +815,7 @@ export async function bulkUnsubscribe(
     attempted,
     unsubscribed: results.filter((r) => r.unsubscribed).length,
     skippedDuplicates,
+    skippedOutOfTime,
     results,
   };
 }

@@ -83,7 +83,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders, label and age buckets, unread + attachment counts — instead of a raw thread list |
 | `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`) — contacts nobody |
-| **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, how often they write (`perMonth`), and each one's opt-out options — one header fetch per sender, contacts nobody |
+| **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, how often they write (`perMonth`), and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
 | **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total) |
@@ -158,11 +158,16 @@ place mailwarden ever talks to a host that isn't Google, so the rules are tight:
   never derived from anything; the response body is cancelled unread. What returns to the model is the
   status code and the URL actually called — no content from the endpoint, so it cannot answer with
   instructions. (A 301/302/303 redirect is followed as a GET, i.e. with no body at all.)
-- **One request per sender, sequentially.** `bulk_unsubscribe` takes thread ids (never a query — a
-  query-driven bulk would fire off a request per matched sender before anyone had looked). Threads
-  from a sender already handled in the same call are reported with `duplicateOf` and cost no second
-  request: two threads from one list share an opt-out, and calling it twice only confirms your address
-  twice. Capped at 25 per call, because none of it can be undone.
+- **One request per sender, sequentially, inside one budget.** `bulk_unsubscribe` takes thread ids
+  (never a query — a query-driven bulk would fire off a request per matched sender before anyone had
+  looked). Threads from a sender whose request already went out are reported with `duplicateOf` and
+  cost no second request: two threads from one list share an opt-out, and calling it twice only
+  confirms your address twice. A sender is only recorded once a request actually *reached* an
+  endpoint, so a refusal or a dropped connection still leaves the next thread its own try — and if
+  the skipped thread advertises a *different* endpoint, the reason says so, since one sender can run
+  several lists. Capped at 25 threads and 60 seconds per call; whatever the budget doesn't cover comes
+  back as `skippedOutOfTime` rather than silently undone. None of it can be reversed, which is why all
+  three limits exist.
 - **SSRF guards.** https only, default port only, no credentials in the URL, and every hop — including
   redirects, followed at most 3 times — must resolve exclusively to globally reachable addresses. The
   check parses each address to its bytes and matches it against the IANA special-purpose registry, so
@@ -366,7 +371,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (452 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (458 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

@@ -710,7 +710,7 @@ describe("listSubscriptions", () => {
     const { gmail, gets } = gmailByThread({
       newest: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
     });
-    const subs = await listSubscriptions(gmail, [
+    const { subscriptions: subs } = await listSubscriptions(gmail, [
       row({ threadId: "older", date: "2026-08-01T00:00:00Z" }),
       row({ threadId: "newest", date: "2026-08-10T00:00:00Z" }),
     ]);
@@ -724,7 +724,7 @@ describe("listSubscriptions", () => {
     const { gmail } = gmailByThread({
       t: [{ From: "News <news@example.com>", "List-Unsubscribe": "<https://a.example/u>" }],
     });
-    const subs = await listSubscriptions(gmail, [row({ threadId: "t" })]);
+    const { subscriptions: subs } = await listSubscriptions(gmail, [row({ threadId: "t" })]);
     expect(subs[0].optOut).toBe("link");
     expect(subs[0].options.httpsUrls).toEqual(["https://a.example/u"]);
   });
@@ -734,7 +734,7 @@ describe("listSubscriptions", () => {
       good: [oneClickMsg("Good <good@example.com>", "https://a.example/u")],
       bad: "throw",
     });
-    const subs = await listSubscriptions(gmail, [
+    const { subscriptions: subs } = await listSubscriptions(gmail, [
       row({ threadId: "good", from: "good@example.com" }),
       row({ threadId: "bad", from: "bad@example.com" }),
     ]);
@@ -768,7 +768,7 @@ describe("bulkUnsubscribe", () => {
     expect(calls).toHaveLength(1);
     expect(rep).toMatchObject({ requested: 2, attempted: 1, unsubscribed: 1, skippedDuplicates: 1 });
     expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: false, duplicateOf: "t1" });
-    expect(rep.results[1].reason).toMatch(/already handled/);
+    expect(rep.results[1].reason).toMatch(/already went out/);
   });
 
   it("runs sequentially, so the endpoints are contacted one after another", async () => {
@@ -844,5 +844,122 @@ describe("bulkUnsubscribe", () => {
     expect(rep.results[0].reason).toMatch(/socket hang up/);
     expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: true });
     expect(rep.unsubscribed).toBe(1);
+  });
+});
+
+describe("bulkUnsubscribe — the limits that come from doing it 25 times", () => {
+  /** A clock that jumps `stepMs` on every reading, so the budget is deterministic. */
+  function fakeClock(stepMs: number) {
+    let t = 0;
+    return () => {
+      const v = t;
+      t += stepMs;
+      return v;
+    };
+  }
+
+  it("stops when the call's time budget is spent and reports the rest as untouched", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+      t3: [oneClickMsg("C <c@example.com>", "https://c.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }, { status: 200 }]);
+    // The clock is read once to stamp the start, then once per thread: 0, 20s, 40s, 60s.
+    deps.now = fakeClock(20_000);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2", "t3"], deps, 60_000);
+    // t1 (20s elapsed) and t2 (40s) still fit; by t3 the 60s budget is exactly gone.
+    expect(calls.map((c) => c.url)).toEqual(["https://a.example/u", "https://b.example/u"]);
+    expect(rep).toMatchObject({ requested: 3, attempted: 2, unsubscribed: 2, skippedOutOfTime: 1 });
+    expect(rep.results[2]).toMatchObject({ threadId: "t3", unsubscribed: false });
+    expect(rep.results[2].reason).toMatch(/time budget/);
+  });
+
+  it("does not treat a sender as handled when the request never reached the endpoint", async () => {
+    // Two threads from ONE sender; the first request dies at the socket. Nothing was
+    // confirmed to that sender, so the second thread must get its own try rather
+    // than being written off as a duplicate.
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps } = fakeDeps([{ status: 200 }]);
+    const inner = deps.fetch;
+    let first = true;
+    deps.fetch = (async (url: any, init: any) => {
+      if (first) {
+        first = false;
+        throw new Error("socket hang up");
+      }
+      return (inner as any)(url, init);
+    }) as typeof globalThis.fetch;
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(rep.results[0].reason).toMatch(/socket hang up/);
+    expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: true });
+    expect(rep.results[1].duplicateOf).toBeUndefined();
+    expect(rep).toMatchObject({ attempted: 2, unsubscribed: 1, skippedDuplicates: 0 });
+  });
+
+  it("does not treat a sender as handled after a refusal — no request went out", async () => {
+    // A mailto-only thread makes no request, so a later thread from the same sender
+    // that DOES offer one-click must still be attempted.
+    const { gmail } = gmailByThread({
+      t1: [{ From: "News <news@example.com>", "List-Unsubscribe": "<mailto:off@example.com>" }],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: true });
+    expect(rep.skippedDuplicates).toBe(0);
+    expect(calls.map((c) => c.url)).toEqual(["https://a.example/u"]);
+  });
+
+  it("flags a skipped thread that points at a DIFFERENT endpoint — one sender, two lists", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/weekly")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/offers")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(calls).toHaveLength(1); // still one request per sender
+    expect(rep.results[1]).toMatchObject({ threadId: "t2", duplicateOf: "t1" });
+    expect(rep.results[1].reason).toMatch(/DIFFERENT opt-out endpoint/);
+  });
+
+  it("stays quiet about a differing endpoint when it is the same one after a redirect", async () => {
+    // The URL actually called is the post-redirect one; comparing against THAT would
+    // label every redirecting sender a second list. The comparison is advertised-to-
+    // advertised, so this pair is a plain duplicate.
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps } = fakeDeps([
+      { status: 302, location: "https://elsewhere.example/done" },
+      { status: 200 },
+    ]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps);
+    expect(rep.results[0].url).toBe("https://elsewhere.example/done");
+    expect(rep.results[1].duplicateOf).toBe("t1");
+    expect(rep.results[1].reason).not.toMatch(/DIFFERENT/);
+  });
+});
+
+describe("listSubscriptions — reporting its own cap", () => {
+  it("reports how many senders existed before topN truncated the list", async () => {
+    const { gmail } = gmailByThread({
+      a: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      b: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+      c: [oneClickMsg("C <c@example.com>", "https://c.example/u")],
+    });
+    const threads = [
+      row({ threadId: "a", from: "a@example.com" }),
+      row({ threadId: "b", from: "b@example.com" }),
+      row({ threadId: "c", from: "c@example.com" }),
+    ];
+    const { subscriptions, sendersFound } = await listSubscriptions(gmail, threads, { topN: 2 });
+    expect(subscriptions).toHaveLength(2);
+    // Without this the caller cannot tell a complete answer from a truncated one.
+    expect(sendersFound).toBe(3);
   });
 });
