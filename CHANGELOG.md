@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-13
+
+Sender-level subscription triage and bulk unsubscribe, plus a correction to the scope claim in
+the threat model. All additive — nothing existing changes behaviour, and no re-authorization is
+needed: `list_subscriptions` is a read-tier tool and `bulk_unsubscribe` needs only `gmail.modify`.
+
 ### Added
 - **`list_subscriptions` (read tier) — who keeps writing, and can you get off the list.** Groups a
   mailbox slice by sender and reports each one's opt-out options in the same row: thread and unread
@@ -72,6 +78,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   claimed the requested scopes grant no send capability; it no longer does. Both documents now name
   `read` as the one tier whose no-send property Google enforces (`gmail.readonly` is rejected by
   Gmail's send endpoints), which is the honest — and stronger — way to state it.
+- **`SECURITY.md`: the `uuid` advisory status was out of date.** It said no upstream fix existed. One
+  does — later `googleapis` releases drop `uuid` rather than patch it — but raising our range alone
+  would not clear the four advisories, because `@google-cloud/local-auth` (the one-time browser
+  consent behind `--auth`) is at its own latest and pins `google-auth-library` to `^9`, whose
+  `gaxios` 6 still pulls `uuid` 9. The section now says that, and names replacing that dependency as
+  what would actually resolve it. The advisory count and the reachability analysis are unchanged and
+  re-verified: `uuid`'s bug is in `v3`/`v5`/`v6` with a `buf` argument, and this tree calls only `v4`.
 
 ## [0.8.0] - 2026-08-11
 
@@ -559,7 +572,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/csitte/mailwarden/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/csitte/mailwarden/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/csitte/mailwarden/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/csitte/mailwarden/compare/v0.6.0...v0.6.1
