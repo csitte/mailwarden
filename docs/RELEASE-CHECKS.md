@@ -40,8 +40,13 @@ Ohne diese vier Bestandteile verwässert jede Runde:
 Diese ändern sich zwischen Releases nicht — deshalb stehen sie hier und nicht im Prompt.
 Runde 3 verweist darauf.
 
-1. **Kein Senden.** Kein compose/reply/forward/send-Tool, und die angeforderten Scopes
-   *können* nicht senden. Auch kein Forwarding-Filter.
+1. **Kein Senden.** Kein compose/reply/forward/send-Tool und kein Forwarding-Filter.
+   **Achtung, hier stand bis 13.08.2026 etwas Falsches:** „die angeforderten Scopes *können*
+   nicht senden" gilt **nur für den `read`-Tier** (`gmail.readonly`). `gmail.modify` ist bei
+   Google ein zulässiger Scope für `messages.send`/`drafts.send` — live bestätigt, beide
+   Endpunkte antworten mit einem Payload-Fehler statt mit 403. In `manage`/`filters` trägt
+   also die **Tool-Oberfläche** die Zusage, nicht Google. Einen send-freien Write-Scope gibt
+   es für eine Installed App nicht.
 2. **Kein Hard-Delete.** Nur `trash`/`untrash`.
 3. **Das Konto ist kein Tool-Parameter.** Ein Prozess bedient genau ein Konto, fixiert vor
    der Tool-Registrierung.
@@ -198,7 +203,16 @@ dem das auffällt.
 ## Was die Runden nicht leisten
 
 Keine Prüfrunde ersetzt die Architektur. Was das Risiko eines übersehenen Fehlers
-tatsächlich begrenzt, sind die harten Design-Regeln: kein Send-Scope (von Google erzwungen,
-nicht von uns), kein Hard-Delete, Tier-Gating, der Smoke-Test vor dem irreversiblen `npm
-publish` — und dass ein Patch in Minuten veröffentlicht ist. Die Prüfrunden sind für den
-Rest.
+tatsächlich begrenzt, sind die harten Design-Regeln: kein Send-Tool (im `read`-Tier zusätzlich
+von Google erzwungen, sonst von der Tool-Oberfläche — s. Invariante 1), kein Hard-Delete,
+Tier-Gating, der Smoke-Test vor dem irreversiblen `npm publish` — und dass ein Patch in Minuten
+veröffentlicht ist. Die Prüfrunden sind für den Rest.
+
+## Nachtrag zur Trefferquote (13.08.2026)
+
+Die falsche Scope-Zusage stand in **sechs** Dateien und wurde in zwei Anläufen gefunden: die
+englischen Nutzer-Docs zuerst, die internen (`CLAUDE.md`, dieses Dokument) erst in der Runde
+danach. **Lehre für Runde 2: die Aussage suchen, nicht die Formulierung.** Der erste Grep lief
+auf „cannot send"/„scope.*send" und verfehlte deshalb `docs/SETUP.md` („neither grants a send
+capability") und alles Deutschsprachige. Ein Dokument, das Prüfrunden steuert, verdient dabei
+Vorrang — von dort reproduziert sich ein Fehler in jede spätere Runde.

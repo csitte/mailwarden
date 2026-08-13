@@ -27,8 +27,9 @@ AI client ──stdio/loopback HTTP──▶ mailwarden ──HTTPS──▶ Gma
                                        └── ~/.mailwarden/{credentials.json, token[.<account>].json}
 ```
 
-One exception, and only when the `unsubscribe` tool is called: an HTTPS request (plus up to three
-redirects) to the opt-out endpoint named in the addressed message's own `List-Unsubscribe` header
+One exception, and only when the `unsubscribe` or `bulk_unsubscribe` tool is called: an HTTPS request
+(plus up to three redirects) to the opt-out endpoint named in the addressed message's own
+`List-Unsubscribe` header — for `bulk_unsubscribe`, at most one such request per distinct sender
 (threat 9 below). Otherwise nothing else is contacted — no telemetry, no analytics, no crash
 reporting, no third-party host.
 
@@ -125,8 +126,9 @@ cannot cross. It does **not** defend against misuse of an account *within* the a
 account's own token and tier grant it.
 
 ### 9. The outbound unsubscribe request (SSRF / exfiltration via a URL)
-`unsubscribe` performs the RFC 8058 one-click opt-out — the **only** code path that contacts a host
-other than Google. An attacker's mail controls the header it reads, so two abuses have to be closed:
+`unsubscribe` performs the RFC 8058 one-click opt-out, and `bulk_unsubscribe` does the same for
+several threads in one call — together the **only** code path that contacts a host other than
+Google. An attacker's mail controls the header it reads, so two abuses have to be closed:
 smuggling mailbox content *out* through a chosen URL, and steering the request *inward* at a service
 only this machine can reach.
 
@@ -155,8 +157,14 @@ only this machine can reach.
   spellings only defends against the spellings someone thought of. Anything that does not parse as an
   address is refused. DNS resolution shares the request's 10-second budget, so a resolver that never
   answers cannot hold the tool call open.
-- **Tier-gated.** `unsubscribe` lives in the `manage` tier; a `read` deployment gets only
-  `list_unsubscribe`, which reports the options and contacts nobody.
+- **Bounded when repeated.** `bulk_unsubscribe` multiplies this request, so it is bounded on three
+  axes rather than one: at most 25 threads per call, **at most one request per sender** (recorded only
+  once a request has actually gone out, so a refusal or a failed connection does not suppress the next
+  thread), and one 60-second budget for the whole call — 25 × the single-request timeout would stall
+  far past any client's patience, and threads left over are reported as untouched rather than dropped.
+  Requests run sequentially, never in parallel.
+- **Tier-gated.** `unsubscribe` and `bulk_unsubscribe` live in the `manage` tier; a `read` deployment
+  gets only `list_unsubscribe` and `list_subscriptions`, which report the options and contact nobody.
 
 Two residuals, stated plainly:
 

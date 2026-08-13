@@ -5,11 +5,13 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 
 ## Harte Design-Regeln (nicht ohne Rücksprache ändern)
 
-- **Kein Senden — by design.** Es gibt keine compose/reply/forward/send-Tools, und die
-  angeforderten OAuth-Scopes (`gmail.modify`, optional `gmail.settings.basic`) **können**
-  nicht senden. Das ist die zentrale Sicherheitszusage gegen Prompt-Injection-Exfiltration
-  und der wichtigste Differenzierer — siehe `SECURITY.md`. Auch `create_filter` erzeugt
-  **nie** eine Forwarding-Regel.
+- **Kein Senden — by design.** Es gibt keine compose/reply/forward/send-Tools. Das ist die
+  zentrale Sicherheitszusage gegen Prompt-Injection-Exfiltration und der wichtigste
+  Differenzierer — siehe `SECURITY.md`. Auch `create_filter` erzeugt **nie** eine
+  Forwarding-Regel. **Präzise formulieren:** von Google *erzwungen* ist das nur im
+  `read`-Tier (`gmail.readonly`); `gmail.modify` ist bei Google für `messages.send` zulässig
+  (13.08.2026 live bestätigt), dort trägt die Tool-Oberfläche die Zusage. Nie wieder
+  „die Scopes können nicht senden" schreiben.
 - **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
