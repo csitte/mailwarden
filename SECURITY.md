@@ -193,8 +193,17 @@ upstream issue, and we would rather explain it than hide it:
   user still resolved the original version. That buys a clean report at the cost of testing a
   dependency tree nobody actually runs. We removed such an override for exactly this reason: our
   tree now matches what `npm install mailwarden` produces.
-- **Status.** No upstream fix is available (the advisory covers `googleapis` up to 149.0.0). We track
-  it and will pick up a fixed `googleapis` release when one ships.
+- **Status — a fixed line exists, and we cannot reach it yet.** Later `googleapis` releases drop
+  `uuid` altogether rather than patching it: `googleapis-common` 8 → `gaxios` 7 →
+  `google-auth-library` 10 has no `uuid` anywhere, and 174.0.1 is current (checked 2026-08-13, we are
+  on `^144.0.0`). Raising that range **on its own would not clear these advisories.**
+  `@google-cloud/local-auth` — the package that runs the one-time browser consent behind `--auth` — is
+  at its own latest, 3.0.1, and pins `google-auth-library` to `^9`, whose `gaxios` 6 still pulls
+  `uuid` 9. Upgrading `googleapis` alone would install a *second* copy of `google-auth-library` and
+  leave all four advisories standing. Clearing them means first replacing `@google-cloud/local-auth`
+  with our own loopback consent flow — a small amount of code in the most safety-critical path we
+  have, so it gets its own change rather than riding along with a feature. This note changes when
+  that lands.
 
 ## Explicit non-goals (what mailwarden does NOT defend against)
 
