@@ -194,7 +194,9 @@ error. A `read`-only deployment gets `list_unsubscribe` and never makes the requ
   instruction inside an email has no exfiltration path through this server. `create_filter` follows
   the same rule: it can label, archive, trash, star or mark mail, but **never** creates a *forwarding*
   filter (which would be an exfiltration path). `list_filters` still surfaces any forwarding filter
-  already on the account, so you can spot one.
+  already on the account, so you can spot one. This holds because no such tool exists and none can be
+  registered at runtime; for the stronger variant, where *Google* refuses to send rather than
+  mailwarden declining to, see **Read-only mode** below.
 - **One outbound host, no model-chosen URL.** The `unsubscribe` tool is the only code path that
   contacts a non-Google host. Its endpoint is read from the message's `List-Unsubscribe` header —
   never from a tool argument — the request body is fixed and the response body is discarded, so it
@@ -217,6 +219,12 @@ error. A `read`-only deployment gets `list_unsubscribe` and never makes the requ
   are registered — nothing that can change the mailbox or write
   files is even advertised to clients (the filter tools, which need the broader `gmail.settings.basic`
   scope, are excluded too). Recommended for shared/HTTP deployments that only triage.
+  It is also **the only tier whose no-send property Google enforces**: it holds a `gmail.readonly`
+  token, which Gmail's send endpoints reject outright. `manage` needs `gmail.modify`, and Gmail
+  *does* accept that scope for sending — mailwarden simply exposes no tool that would. So a `read`
+  deployment could not send even if this binary were replaced; a `manage` one cannot send because
+  there is nothing to call. (There is no send-free write scope to switch to — see
+  [SECURITY.md](SECURITY.md), threat 1.)
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
   directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
 - **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
@@ -250,8 +258,9 @@ First time setting up a Google OAuth app? Follow the **[step-by-step setup guide
    npx -y mailwarden --auth
    ```
    Scopes requested: `gmail.modify` (read + label/archive/trash) and `gmail.settings.basic`
-   (filter management — grants no send capability). If you authorized a version before filters
-   existed, re-run `--auth` once to grant the added scope.
+   (filter management only). If you authorized a version before filters existed, re-run `--auth`
+   once to grant the added scope. To hold a token that Gmail itself refuses to send with, authorize
+   with `MAILWARDEN_TOOLS=read` — see **Read-only mode** above.
 4. **Verify the setup** any time with the built-in doctor:
    ```bash
    npx -y mailwarden --check

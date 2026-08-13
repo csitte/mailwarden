@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mail.google.com`, `gmail.modify`, and the domain-wide-delegation-only `gmail.modify.restricted`).
   **No behaviour or scope change** — documentation only; the non-goals section now also states that a
   compromised *machine* can use the token directly, bypassing the tool surface.
+- **`README.md` / `docs/SETUP.md`: same correction, plus the positive framing.** The setup guide
+  claimed the requested scopes grant no send capability; it no longer does. Both documents now name
+  `read` as the one tier whose no-send property Google enforces (`gmail.readonly` is rejected by
+  Gmail's send endpoints), which is the honest — and stronger — way to state it.
 
 ## [0.8.0] - 2026-08-11
 
