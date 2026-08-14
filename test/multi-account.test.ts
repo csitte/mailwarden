@@ -1,7 +1,25 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeAll } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+
+/**
+ * Pay the cold module load ONCE, in a hook with its own budget.
+ *
+ * `auth.ts` pulls in `googleapis`, and the first load of that costs seconds on a
+ * cold cache — measured at 4.4s against vitest's 5s per-test default. Every test
+ * below re-imports `auth.ts` (see `freshAuth`), so without this the FIRST one to
+ * run carries that cost inside its own budget and fails whenever the machine is
+ * busy enough to push it past five seconds. That failure says nothing about the
+ * code, which is what makes it corrosive: a test that fails for reasons of load is
+ * one nobody believes on the day it fails for a real reason.
+ *
+ * Re-imports after this are cheap — `vi.resetModules()` re-executes our own source
+ * modules but leaves externalized dependencies in Node's cache.
+ */
+beforeAll(async () => {
+  await import("../src/auth.js");
+}, 60_000);
 
 // auth.ts resolves CONFIG_DIR from env at module load; account is read from
 // MAILWARDEN_ACCOUNT at call time. Each test imports a fresh module with its own
