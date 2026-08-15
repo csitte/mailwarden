@@ -380,6 +380,42 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     const res = await gmail.search("from:foo@bar.com", 25);
     expect(res.threads.map((r) => r.threadId)).toEqual(["a", "c"]);
   });
+
+  it("derives each summary's signals from the thread's FIRST message (its origin), not a later reply", async () => {
+    const api: any = {
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: [{ id: "nl" }, { id: "plain" }] } }),
+          get: async (req: any) => ({
+            data: {
+              messages:
+                req.id === "nl"
+                  ? [
+                      {
+                        id: "m1",
+                        labelIds: ["INBOX"],
+                        payload: {
+                          headers: [
+                            { name: "From", value: "News <news@x.example>" },
+                            { name: "List-Unsubscribe", value: "<https://x.example/u>" },
+                          ],
+                        },
+                      },
+                      // The user's own reply carries no list headers — the thread stays a newsletter.
+                      { id: "m2", labelIds: ["SENT"], payload: { headers: [{ name: "From", value: "me@x.example" }] } },
+                    ]
+                  : [{ id: "m3", labelIds: ["INBOX"], payload: { headers: [{ name: "From", value: "a@y.example" }] } }],
+            },
+          }),
+        },
+      },
+    };
+    const res = await new Gmail(api as gmail_v1.Gmail).search("in:inbox", 25);
+    expect(res.threads.map((r) => [r.threadId, r.signals])).toEqual([
+      ["nl", ["newsletter"]],
+      ["plain", []],
+    ]);
+  });
 });
 
 describe("modifyLabels — Bug 3: name → id resolution", () => {

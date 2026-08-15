@@ -274,8 +274,8 @@ describe("tool results — structured content + fenced text", () => {
     expect(d.withAttachments).toBe(0);
     // Both senders appear once; tie broken alphabetically by address.
     expect(d.topSenders).toEqual([
-      { sender: "alice@x.com", name: "Alice", count: 1, unread: 1 },
-      { sender: "bob@y.com", name: "", count: 1, unread: 0 },
+      { sender: "alice@x.com", name: "Alice", count: 1, unread: 1, signals: [] },
+      { sender: "bob@y.com", name: "", count: 1, unread: 0, signals: [] },
     ]);
     // INBOX/UNREAD are skipped; the user label maps to its friendly name.
     expect(d.topLabels).toEqual([{ label: "Work", count: 1 }]);

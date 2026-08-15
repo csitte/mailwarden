@@ -3,6 +3,7 @@ import { google, gmail_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import fs from "node:fs/promises";
 import path from "node:path";
+import { deriveSignals, type Signal } from "./signals.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -13,6 +14,11 @@ export interface ThreadSummary {
   labelIds: string[];
   snippet: string;
   hasAttachments: boolean;
+  /**
+   * Header/MIME-derived triage flags of the thread's FIRST message (its origin — a
+   * newsletter stays a newsletter after the user replies to it). Empty = nothing declared.
+   */
+  signals: Signal[];
 }
 
 export interface Attachment {
@@ -416,6 +422,14 @@ export function collectAttachments(m: gmail_v1.Schema$Message): Attachment[] {
   return out;
 }
 
+/** Triage signals of one message: its headers plus a flat list of its MIME parts. */
+export function messageSignals(m: gmail_v1.Schema$Message | undefined): Signal[] {
+  if (!m) return [];
+  const parts: { mimeType?: string | null; filename?: string | null }[] = [];
+  walkParts(m.payload ?? undefined, (p) => parts.push({ mimeType: p.mimeType, filename: p.filename }));
+  return deriveSignals({ headers: m.payload?.headers ?? [], parts });
+}
+
 /** Parse a raw Gmail message into the flat ParsedMessage shape. */
 export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
   const headers = m.payload?.headers ?? [];
@@ -641,6 +655,7 @@ export class Gmail {
           labelIds,
           snippet: t.snippet ?? msgs[0]?.snippet ?? "",
           hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),
+          signals: messageSignals(msgs[0]),
         });
       }
     }

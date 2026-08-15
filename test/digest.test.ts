@@ -18,6 +18,7 @@ function thread(p: Partial<ThreadSummary>): ThreadSummary {
     labelIds: [],
     snippet: "",
     hasAttachments: false,
+    signals: [],
     ...p,
   };
 }
@@ -93,8 +94,8 @@ describe("buildDigest", () => {
       { topN: 10 },
     );
     expect(d.topSenders).toEqual([
-      { sender: "news@x.com", name: "News", count: 2, unread: 1 },
-      { sender: "solo@y.com", name: "", count: 1, unread: 1 },
+      { sender: "news@x.com", name: "News", count: 2, unread: 1, signals: [] },
+      { sender: "solo@y.com", name: "", count: 1, unread: 1, signals: [] },
     ]);
   });
 

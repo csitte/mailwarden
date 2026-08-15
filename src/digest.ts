@@ -1,4 +1,5 @@
 import type { ThreadSummary } from "./gmail.js";
+import { ALL_SIGNALS, type Signal } from "./signals.js";
 
 /**
  * Triage digest — a structured overview of a mailbox slice so an agent can
@@ -14,7 +15,11 @@ export interface SenderStat {
   name: string;
   count: number;
   unread: number;
+  /** Union of the signals this sender's threads carry (see signals.ts), stable order. */
+  signals: Signal[];
 }
+
+export type SignalCounts = Record<Signal, number>;
 
 export interface LabelStat {
   label: string;
@@ -34,6 +39,8 @@ export interface Digest {
   unread: number;
   withAttachments: number;
   byAge: AgeBuckets;
+  /** How many sampled threads carry each signal (a thread can carry several). */
+  signals: SignalCounts;
   topSenders: SenderStat[];
   topLabels: LabelStat[];
 }
@@ -88,7 +95,8 @@ export function buildDigest(
 ): Digest {
   const topN = opts.topN ?? 10;
   const byAge: AgeBuckets = { last24h: 0, last7d: 0, last30d: 0, older: 0, undated: 0 };
-  const senders = new Map<string, { name: string; count: number; unread: number }>();
+  const senders = new Map<string, { name: string; count: number; unread: number; signals: Set<Signal> }>();
+  const signals = Object.fromEntries(ALL_SIGNALS.map((k) => [k, 0])) as SignalCounts;
   const labels = new Map<string, number>();
   let unread = 0;
   let withAttachments = 0;
@@ -98,12 +106,14 @@ export function buildDigest(
     if (isUnread) unread++;
     if (t.hasAttachments) withAttachments++;
     byAge[ageBucket(t.date, now)]++;
+    for (const sig of t.signals) signals[sig]++;
 
     const { email, name } = parseSender(t.from);
     const key = email || "(unknown)";
-    const s = senders.get(key) ?? { name: "", count: 0, unread: 0 };
+    const s = senders.get(key) ?? { name: "", count: 0, unread: 0, signals: new Set<Signal>() };
     s.count++;
     if (isUnread) s.unread++;
+    for (const sig of t.signals) s.signals.add(sig);
     if (!s.name && name) s.name = name; // keep the first non-empty display name
     senders.set(key, s);
 
@@ -117,7 +127,13 @@ export function buildDigest(
   }
 
   const topSenders = [...senders.entries()]
-    .map(([sender, v]) => ({ sender, name: v.name, count: v.count, unread: v.unread }))
+    .map(([sender, v]) => ({
+      sender,
+      name: v.name,
+      count: v.count,
+      unread: v.unread,
+      signals: ALL_SIGNALS.filter((k) => v.signals.has(k)),
+    }))
     .sort((a, b) => b.count - a.count || a.sender.localeCompare(b.sender))
     .slice(0, topN);
 
@@ -126,5 +142,5 @@ export function buildDigest(
     .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
     .slice(0, topN);
 
-  return { sampled: threads.length, unread, withAttachments, byAge, topSenders, topLabels };
+  return { sampled: threads.length, unread, withAttachments, byAge, signals, topSenders, topLabels };
 }

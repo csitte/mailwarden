@@ -572,6 +572,7 @@ function row(over: Partial<ThreadSummary>): ThreadSummary {
     labelIds: [],
     snippet: "",
     hasAttachments: false,
+    signals: [],
     ...over,
   };
 }

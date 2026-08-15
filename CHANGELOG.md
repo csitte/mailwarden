@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Header-derived triage `signals` on every search hit, aggregated in `triage_digest`.** Four flags an
+  agent can act on without opening the mail, each a documented header convention or MIME fact and never
+  a guess from wording: `newsletter` (`List-Id`, `List-Unsubscribe`, or `Precedence: bulk|list`),
+  `automated` (`Auto-Submitted` other than `no`, `Precedence: auto_reply`, `X-Auto-Response-Suppress`,
+  or a no-reply / mailer-daemon local-part — exact spellings only, so a person named "Noreen Reply" is
+  not flagged), `calendar` (a `text/calendar` part or an `.ics` attachment, however deep in the MIME
+  tree), `replyToMismatch` (`Reply-To` on a *different domain* than `From`; same-domain differences
+  are routine and stay silent). Read off the thread's FIRST message — its origin, so a newsletter
+  stays one after the user replies — from the `format=full` fetch `search` already makes, i.e. no
+  extra API call and available in the `read` tier. `triage_digest` reports how many sampled threads
+  carry each signal and, per sender, the union of its threads' signals. Empty means "nothing
+  declared", not "personal". A header corpus of real-world shapes (Mailchimp, GitHub, out-of-office,
+  bounce, calendar invite, phishing shape, and the edges that must NOT fire) locks the logic.
 - **`dryRun` on the three tools that act on many things at once** — `bulk_modify`, `bulk_unsubscribe`,
   `sweep_snoozed`. A dry run walks the *same* path as the real call up to the first write or outbound
   request and stops there: `bulk_modify` resolves the query and reports `matchedThreads` plus

@@ -11,6 +11,7 @@ import {
   unsubscribeThread,
 } from "./unsubscribe.js";
 import { resolveEnabledTiers } from "./tiers.js";
+import { ALL_SIGNALS } from "./signals.js";
 import { fenceOutput } from "./sanitize.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
@@ -42,6 +43,9 @@ const attachmentSchema = z.object({
   size: z.number(),
 });
 
+// Header/MIME-derived triage flags (see signals.ts). Only the ones that fire are listed.
+const signalSchema = z.enum(ALL_SIGNALS as [(typeof ALL_SIGNALS)[number], ...(typeof ALL_SIGNALS)[number][]]);
+
 const threadSummarySchema = z.object({
   threadId: z.string(),
   messageCount: z.number(),
@@ -51,6 +55,7 @@ const threadSummarySchema = z.object({
   labelIds: z.array(z.string()),
   snippet: z.string(),
   hasAttachments: z.boolean(),
+  signals: z.array(signalSchema),
 });
 
 const parsedMessageSchema = z.object({
@@ -139,6 +144,7 @@ function registerReadTools(server: McpServer): void {
     {
       description:
         "Search Gmail with native query syntax (e.g. 'in:inbox from:foo@bar.com newer_than:7d'). Returns thread summaries; read-state/category predicates are re-verified against each hit's live labels. " +
+        "Each summary carries `signals` derived from the thread's first message headers/MIME — newsletter (List-Id/List-Unsubscribe/Precedence bulk), automated (Auto-Submitted, no-reply senders), calendar (text/calendar or .ics part), replyToMismatch (Reply-To on another domain than From); empty when nothing is declared. " +
         "Paginated: when more results exist, the response carries a nextPageToken — pass it back via pageToken to fetch the next page. " +
         "USE WHEN: locating threads by sender, subject, date, label, or read state. " +
         "DO NOT USE: to fetch a thread you already have the ID of (use get_thread). " +
@@ -225,7 +231,7 @@ function registerReadTools(server: McpServer): void {
     "triage_digest",
     {
       description:
-        "Structured overview of a mailbox slice for triage DECISIONS — sender / label / age buckets plus unread and attachment counts, instead of a raw thread list. " +
+        "Structured overview of a mailbox slice for triage DECISIONS — sender / label / age buckets, unread and attachment counts, and header-derived signal counts (newsletter / automated / calendar / replyToMismatch, overall and per sender), instead of a raw thread list. " +
         "USE WHEN: deciding what to bulk-archive/snooze/label, or summarizing inbox state ('what's in my inbox?'). " +
         "DO NOT USE: to read a specific thread (use search/get_thread). " +
         "Samples up to `max` most-recent matches; hasMore flags that more matched than were sampled. " +
@@ -248,12 +254,19 @@ function registerReadTools(server: McpServer): void {
           older: z.number(),
           undated: z.number(),
         }),
+        signals: z.object({
+          newsletter: z.number(),
+          automated: z.number(),
+          calendar: z.number(),
+          replyToMismatch: z.number(),
+        }),
         topSenders: z.array(
           z.object({
             sender: z.string(),
             name: z.string(),
             count: z.number(),
             unread: z.number(),
+            signals: z.array(signalSchema),
           }),
         ),
         topLabels: z.array(z.object({ label: z.string(), count: z.number() })),
