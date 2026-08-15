@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
-- **Listed on Smithery as [`csitte/mailwarden`](https://smithery.ai/server/csitte/mailwarden)** — it serves
+- **Listed on Smithery as [`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden)** — it serves
   the 0.10.0 MCPB bundle. README says which of Smithery's two paths keeps the no-third-party property
   (`smithery install …` writes a local stdio entry; the toolbox/uplink path relays tool traffic through
   Smithery's gateway).

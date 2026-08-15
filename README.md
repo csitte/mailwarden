@@ -4,7 +4,7 @@
 [![license](https://img.shields.io/npm/l/mailwarden)](LICENSE)
 [![Node](https://img.shields.io/node/v/mailwarden)](package.json)
 [![Website](https://img.shields.io/badge/Website-csitte.at%2Fmailwarden-2ea44f)](https://www.csitte.at/mailwarden/)
-[![Smithery](https://img.shields.io/badge/Smithery-csitte%2Fmailwarden-ea580c)](https://smithery.ai/server/csitte/mailwarden)
+[![Smithery](https://img.shields.io/badge/Smithery-csitte%2Fmailwarden-ea580c)](https://smithery.ai/servers/csitte/mailwarden)
 [![Available on CodeGuilds](https://img.shields.io/badge/Available_on-CodeGuilds-6366f1?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://codeguilds.dev/packages/mailwarden)
 
 A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox triage for AI assistants, with the feature no other Gmail MCP server ships: **mailbox-side snooze**.
@@ -326,7 +326,7 @@ npm package (same file set as published; `npm run mcpb`, verified in CI: validat
 and is the same file set Smithery distributes. The one-time `npx -y mailwarden --auth` still applies
 (Node needed once for that) — the bundle reads the same `~/.mailwarden/` token.
 
-**Smithery** — listed as [`csitte/mailwarden`](https://smithery.ai/server/csitte/mailwarden), which serves
+**Smithery** — listed as [`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden), which serves
 that bundle:
 ```bash
 npx -y @smithery/cli install csitte/mailwarden --client claude   # local stdio entry in the client's config
