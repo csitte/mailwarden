@@ -13,6 +13,9 @@
  *
  * It reads; it never writes to the bridge. The message itself needs judgement (what on the page is
  * now wrong, which claim needs requalifying) and stays hand-written — see CLAUDE.md, "Release".
+ * The judgement that matters most there is not "what did we add" but "which promise got narrower":
+ * on 15.08.2026 a caveat about the bulk tools travelled as a side note, and the page went on
+ * promising a guarantee the shipped version only gives for `search`.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -59,5 +62,7 @@ console.error(`site-notice: MISSING — no bridge message from us to csitte ment
 console.error(`             Site threads scanned: ${scanned}`);
 console.error("             www.csitte.at/mailwarden/ will keep describing the previous release.");
 console.error("             Post the delta (what on the page is now wrong / missing) per CLAUDE.md,");
-console.error("             then re-run. Write-once: new file, temp-then-rename, never edit one.");
+console.error("             then re-run. Limits that narrowed an existing promise belong there FIRST —");
+console.error("             a page that still promises the old scope is worse than one missing a feature.");
+console.error("             Write-once: new file, temp-then-rename, never edit one.");
 process.exit(warnOnly ? 0 : 1);

@@ -71,6 +71,13 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Status `OPEN`; der offene Thread ist die Nachverfolgung). Inhalt ist ein *Delta gegen die Seite*,
   nicht der CHANGELOG: erst `web/app/mailwarden/page.tsx` lesen, dann (a) was dort jetzt **falsch**
   ist, (b) was fehlt, (c) neue Bezugswege. Wir liefern Fakten + Quellen, csitte formuliert selbst.
+  **(a) schließt ausdrücklich *Einschränkungen bestehender Zusagen* ein — und die stehen zuerst.**
+  Eine Zusage, die enger geworden ist, ist wichtiger als jedes neue Feature: die Seite verspricht
+  sonst weiter etwas, das die ausgelieferte Version so nicht (mehr) hält. Anlass (15.08.): der
+  Vorbehalt „`bulk_modify` re-verifiziert nicht" ging als Nebensatz einer Faktenkorrektur raus;
+  die Seite versprach daraufhin, Fehltreffer würden verworfen, „bevor eine Aktion sie sieht" —
+  wahr für `search`, falsch für die Bulk-Tools, und ihr eigener Musterfall („archiviere die
+  ungelesenen Promotions") ist genau der Fall, der dann 131 statt 17 Threads trifft.
   Zwei Konventionen der Seite respektieren: **keine Versionsnummer und keine gezählten Aufzählungen**
   im Fließtext — beides veraltet bei jedem unserer Commits.
   `npm run site-notice` beantwortet mechanisch, ob das für die aktuelle Version passiert ist (exit ≠ 0,
