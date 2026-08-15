@@ -9,7 +9,8 @@
  *
  * @param {string} cliPath  path to the built dist/index.js
  * @param {NodeJS.ProcessEnv} env  extra environment (merged over process.env)
- * @returns {Promise<{serverInfo: any, tools: Array<{name: string, description?: string}>, stderr: string}>}
+ * @returns {Promise<{serverInfo: any, tools: Array<any>, stderr: string}>}  `tools` are the raw MCP Tool
+ *   objects from tools/list (name, description, inputSchema, annotations, …).
  */
 import { spawn } from "node:child_process";
 
@@ -73,7 +74,7 @@ export function mcpSession(cliPath, env, timeoutMs = 20_000) {
       child.kill();
       resolve({
         serverInfo: init.result?.serverInfo,
-        tools: (tools.result?.tools ?? []).map((t) => ({ name: t.name, description: t.description })),
+        tools: tools.result?.tools ?? [],
         stderr,
       });
     })().catch((err) => {
