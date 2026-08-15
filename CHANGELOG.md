@@ -8,6 +8,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`scripts/probe-reverify.mjs` — hold the re-verification *premise* against a real mailbox.**
+  `demo-reverify.mjs` proves what `search()` does when an index is loose, against a fake API we made
+  loose on purpose; it cannot prove the premise underneath it — that Gmail's real index *is* loose for
+  `is:unread` in some operator combinations. Nothing in this repository ever measured that: the claim
+  entered in `cec77aa` (23.06.2026) as an observation in a commit message and has been repeated in
+  README, SECURITY.md and on the website since. The probe asks `threads.list` for a query, fetches each
+  hit's live labels and re-checks them with the shipped `deriveLabelFilters` / `threadMatchesFilters`
+  — every failing hit is a thread the index returned and the query excludes. It runs a small matrix by
+  default (the documented combination, then the same query minus one operator each), so the output says
+  *which* combination loosens rather than only that something did. Read-only and metadata-only
+  (`format: minimal` — no subject, sender or body is ever fetched); it prints counts and label names,
+  no thread ids and no mail content. Repo-only, like the other probes.
+  **First run, 15.08.2026, is recorded as inconclusive rather than as a confirmation:** the mailbox
+  reached from this checkout holds no unread mail at all, so `category:updates is:unread -in:inbox`
+  returned 0 of 69 archived `category:updates` threads. A loose index would have returned many — but
+  with zero true matches, a looseness of the form "returns read mail *in addition to* unread" produces
+  the same 0. Not decidable there; a measurement in a mailbox with unread archived mail is pending.
 - **`npm run site-notice` — the release ritual's last step, as a command instead of a memory.** The
   product page at [csitte.at/mailwarden](https://www.csitte.at/mailwarden/) is maintained by a
   different session in a repository this one deliberately never commits to, so a release reaches the
