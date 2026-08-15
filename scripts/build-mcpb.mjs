@@ -84,7 +84,9 @@ const git = (...args) => spawnSync("git", args, { cwd: repoRoot, encoding: "utf8
  */
 function resolveBundleVersion() {
   const tag = `v${version}`;
-  const dirty = git("status", "--porcelain").length > 0;
+  // Tracked changes only: an untracked file (a downloaded tool binary in CI, a scratch note)
+  // is not in the packed package and must not demote a release build.
+  const dirty = git("status", "--porcelain", "--untracked-files=no").length > 0;
   const atTag =
     git("tag", "--points-at", "HEAD").split(/\r?\n/).includes(tag) ||
     (process.env.GITHUB_REF_TYPE === "tag" && process.env.GITHUB_REF_NAME === tag);

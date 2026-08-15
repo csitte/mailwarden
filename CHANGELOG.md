@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`npm run mcpb` release detection counted untracked files as a dirty tree.** In the publish
+  workflow the downloaded `mcp-publisher` binary sat untracked in the checkout, so the CI-built 0.10.0
+  bundle was named `-dev.<sha>.dirty` (the release asset was built locally on the clean tag instead).
+  Only tracked changes count now, and the workflow builds the bundle before the publish steps.
+
 ## [0.10.0] - 2026-08-15
 
 Triage signals on every search hit, dry runs for the three bulk tools, server `instructions` for
