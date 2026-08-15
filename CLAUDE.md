@@ -45,15 +45,18 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Funktionen prüft ein Eingabe-Korpus zuverlässiger als jedes Code-Review.
 - **Doku mitziehen:** README, `CHANGELOG.md` (`[Unreleased]`), bei Setup-relevanten
   Änderungen `docs/SETUP.md`, bei Sicherheitsaussagen `SECURITY.md`.
-- **Release** (nur auf Ansage): `npm version <patch|minor>` (synct `server.json`), CHANGELOG
-  `[Unreleased]` → Version + Link-Ref, Commit + Tag `vX.Y.Z` pushen → CI publisht npm und
-  MCP-Registry automatisch; danach `npm run mcpb` (auf dem sauberen Tag-Checkout — sonst
-  entsteht ein `-dev.<sha>`-Bundle, das bewusst nicht als Release durchgeht) und
-  `gh release create vX.Y.Z dist-mcpb/mailwarden-X.Y.Z.mcpb` (striktes Bundle = Release-Asset),
-  dann `smithery mcp publish dist-mcpb/mailwarden-X.Y.Z-smithery.mcpb -n <namespace>/mailwarden`
-  (die `-smithery`-Variante trägt die echten Tool-Objekte mit `inputSchema`, die Smitherys
-  Registry verlangt; Namespace: `smithery namespace list`; braucht `smithery auth login` — OAuth im
-  Browser, macht Chris).
+- **Release** (nur auf Ansage): erst alles außer der Version pushen und **CI grün abwarten**, dann
+  `npm version <patch|minor>` (synct `server.json`; CHANGELOG vorher `[Unreleased]` → Version +
+  Link-Ref) und pushen. **Achtung `push.followTags=true`:** ein `git push` nimmt den Tag
+  automatisch mit, der Publish-Lauf startet also sofort — die Reihenfolge „taggen, dann in Ruhe
+  schauen" gibt es hier nicht. Das ist vertretbar, weil `publish.yml` Build, Tests, `npm run smoke`
+  und `npm run mcpb` selbst vor dem irreversiblen `npm publish` fährt. CI publisht npm und
+  MCP-Registry automatisch; danach `npm run mcpb` (auf dem sauberen Tag-Checkout — sonst entsteht
+  ein `-dev.<sha>`-Bundle, das bewusst nicht als Release durchgeht),
+  `gh release create vX.Y.Z dist-mcpb/mailwarden-X.Y.Z.mcpb` (striktes Bundle = Release-Asset) und
+  `npx -y @smithery/cli mcp publish dist-mcpb/mailwarden-X.Y.Z-smithery.mcpb -n csitte/mailwarden`
+  (die `-smithery`-Variante trägt die echten Tool-Objekte mit `inputSchema`, die Smitherys Registry
+  verlangt; Namespace `csitte` und Login stehen seit 15.08.2026).
 
 ## Session-Bridge
 
