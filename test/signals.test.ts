@@ -366,6 +366,7 @@ describe("mailboxOf — first mailbox with its display name", () => {
     ["Alice (Sales) <a@x.example>", "a@x.example", "Alice"],
     ['"<legit@news.example>" <evil@x.example>', "evil@x.example", "<legit@news.example>"],
     ["Alice <a@x.example>", "a@x.example", "Alice"],
+    ["Alice <a @ x.example>", "a@x.example", "Alice"],
     ["a@x.example", "a@x.example", ""],
     ["Just A Name", "", ""],
     ["", "", ""],

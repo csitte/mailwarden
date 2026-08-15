@@ -148,6 +148,8 @@ function addrSpecOf(item: string): string {
     raw = item.slice(lt + 1, gt);
     // Obsolete source route: `<@relay.example:user@host>` — the mailbox is after the colon.
     if (raw.trim().startsWith("@") && raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
+    // Obsolete whitespace around `@`, folded the same way as in the bare form below.
+    if (!raw.includes('"')) raw = raw.replace(/\s*@\s*/, "@");
   } else {
     raw = item;
     // Group syntax without angle-addrs: `Team: user@host` — drop the group name.
