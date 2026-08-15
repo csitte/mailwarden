@@ -508,16 +508,17 @@ export interface LabelFilter {
  * Derive label predicates from a Gmail query so search hits can be re-checked
  * against each thread's *live* labels.
  *
- * Why: Gmail's `threads.list` search index answers read-state operators from a
- * copy of that state which lags the mailbox, so `is:unread` returns plenty of
- * long-read mail. Measured in a real mailbox (15.08.2026, 72k messages):
- * `category:updates is:unread` returned 131 threads, 17 of which were actually
- * unread — 87% false positives; plain `is:unread -in:inbox` returned 235 for 99.
- * The predicate is NOT ignored (the same query without it returns 800+), and the
- * drift is not tied to particular operator combinations — an earlier version of
- * this comment claimed both, on an unmeasured observation. Because `search()`
- * already fetches every hit live, we can drop those false positives by comparing
- * the predicates that map 1:1 to a system/category label.
+ * Why: Gmail's `threads.list` search index CAN answer read-state operators from a
+ * copy of that state which lags the mailbox. Measured 15.08.2026 in a real mailbox
+ * (72k messages): `category:updates is:unread` returned 131 threads, 17 actually
+ * unread — 87% false positives; plain `is:unread -in:inbox` 235 for 99. A second
+ * mailbox measured the same way drifted not at all, so this is a property of a
+ * mailbox, not of Gmail everywhere — and no server can tell which one it is in
+ * without checking. The predicate is NOT ignored (the same query without it returns
+ * 800+), and where it drifts it is not tied to particular operator combinations —
+ * an earlier version of this comment claimed both, on an unmeasured observation.
+ * Because `search()` already fetches every hit live, we can drop those false
+ * positives by comparing the predicates that map 1:1 to a system/category label.
  *
  * Only unambiguous predicates are translated. Anything else (free text,
  * `label:NAME`, `from:`, `newer_than:`, …) yields no filter for that token, and

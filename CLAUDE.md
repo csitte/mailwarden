@@ -15,13 +15,15 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 - **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
-- **Suchtreffer werden re-verifiziert.** Gmails `threads.list`-Index beantwortet
-  Read-State-Operatoren aus einem **veralteten Read-State**: `is:unread` liefert massenhaft längst
-  gelesene Mail (**gemessen 15.08.2026** in einem echten Postfach: 131 Treffer für
-  `category:updates is:unread`, davon 17 echt ungelesen = 87 % Fehltreffer). `search()` prüft jeden
-  Treffer gegen die echten Labels. **Nicht mehr behaupten, der Index „verwerfe `is:unread`" oder es
-  liege an bestimmten Operator-Kombinationen** — beides war eine ungemessene Deutung und ist
-  widerlegt (dieselbe Query ohne `is:unread` liefert 800+, das Prädikat wirkt also). Demo gegen eine
+- **Suchtreffer werden re-verifiziert.** Gmails `threads.list`-Index **kann** Read-State-Operatoren
+  aus einem veralteten Read-State beantworten (**gemessen 15.08.2026**: 131 Treffer für
+  `category:updates is:unread`, davon 17 echt ungelesen = 87 % Fehltreffer — **im selben Durchgang
+  ein zweites Postfach mit 0 Drift**). `search()` prüft jeden Treffer gegen die echten Labels.
+  **Drei Formulierungen sind verbrannt und nicht wiederzubeleben:** der Index „verwerfe `is:unread`"
+  (falsch — dieselbe Query ohne das Prädikat liefert 800+, es wirkt also), es liege an bestimmten
+  **Operator-Kombinationen** (falsch — der größte Effekt stand auf der simpelsten Query), und es
+  betreffe `is:unread` **allgemein** (unbelegt — das zweite Postfach widerspricht). Belegt ist:
+  postfachabhängig, und ein Server kann vorher nicht wissen, in welchem er steckt. Demo gegen eine
   Fake-API: `node scripts/demo-reverify.mjs`; Messung im eigenen Postfach:
   `node scripts/probe-reverify.mjs`.
 

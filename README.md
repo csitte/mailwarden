@@ -15,10 +15,10 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   resurface in the inbox on a date. Built on dated labels + a sweep, so it works from any client,
   is visible in Gmail itself, and survives restarts. (Where another server offers a "snooze", it is
   a local reminder list — the mail never leaves or re-enters the inbox.)
-- **Search you can trust.** Gmail's own search index carries a **stale read-state**: ask it for
-  `is:unread` and a large share of what comes back has long been read (measured in a real mailbox:
-  **87% false positives**). `search` re-verifies every hit against its live labels and discards
-  them. Paginated via `pageToken`/`nextPageToken`.
+- **Search you can trust.** Gmail's search index can answer `is:unread` from a **stale read-state**
+  — measured in one real mailbox: **87% of the hits had long been read**; in another, zero. You
+  cannot tell which mailbox you are in without looking, so `search` re-verifies every hit against
+  its live labels. Paginated via `pageToken`/`nextPageToken`.
 - **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
   1000 messages per API request — with per-chunk partial-success reporting instead of
   all-or-nothing. The snooze sweep uses the same batch path.
@@ -39,7 +39,7 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
 
 Connectors that sync or cache your mailbox can lag behind it — and even Gmail's own search index is sometimes loose (see below). `mailwarden` talks straight to the live Gmail API (no cached snapshot) and re-verifies what the index returns, so what you see is what's actually there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
 
-`search` goes one step further than the raw API: Gmail's `threads.list` index answers read-state operators from a **stale copy** of that state, so `is:unread` returns plenty of mail you have long since read. Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
+`search` goes one step further than the raw API: Gmail's `threads.list` index can answer read-state operators from a **stale copy** of that state, so `is:unread` returns mail you have long since read — in one measured mailbox the majority of what it returned. Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
 
 ## Compared to other Gmail MCP servers
 
@@ -73,9 +73,11 @@ Ask an assistant to *"archive the unread promotional mail that's already skipped
 | `category:updates is:unread -in:inbox` | 128 | 14 | 89% |
 | `is:unread -in:inbox` | 235 | 99 | 58% |
 
-The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **read-state the index has not caught up with**: mail read weeks ago still counts as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of one operator combination — the largest drift above is plain `is:unread -in:inbox`.
+The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **read-state the index has not caught up with**: mail read weeks ago still counts as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of one operator combination — the largest drift above is on the plainest query.
 
-Re-verification is what stands between that and your mailbox: in the same measurement, every thread `search` dropped was genuinely read, and it discarded **no** genuinely unread mail.
+**A second mailbox, measured the same way on the same day, drifted not at all** — zero raw-index hits for `is:unread`, in an account whose read-state is only ever changed through the API. So this is a property of *a mailbox*, not of Gmail everywhere. The two differ in volume (72,438 vs 112 messages), in age, and — the suspected factor, and deliberately not yet measured — in where the read changes come from: swiping in the Gmail app versus API calls.
+
+Which is the whole point: **a server cannot know which kind of mailbox it is in.** Re-verification costs nothing where nothing drifts, and saves you where it does — in the measurement above, every thread `search` dropped was genuinely read, and it discarded **no** genuinely unread mail.
 
 `mailwarden` fetches every hit live anyway, so `search` re-checks the unambiguous predicates (`is:unread`, `is:read`, `in:inbox`, `category:…`, with negation) against each thread's **true** labels and drops the index's false positives before any tool sees them. The bulk action then runs on exactly the set you asked for. This is the difference between acting on what Gmail *indexed* and acting on what's *actually in the mailbox right now* — and it's why snooze/sweep are safe to hand to an assistant: the sweep resurfaces only threads whose snooze is genuinely due, verified against live labels at run time.
 

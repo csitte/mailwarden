@@ -84,12 +84,14 @@ Model can't tell quoted mail from a command.
 An action fires against mail that has since changed — or against the search index's false positives.
 
 - **Live re-verification.** `search` re-checks read-state/category predicates against each hit's
-  **true** labels and drops the index's false positives. Gmail's `threads.list` answers `is:unread`
-  from a read-state it has not caught up with: measured in a real mailbox on 15.08.2026, 87% of the
-  hits for `category:updates is:unread` had long been read (131 returned, 17 genuinely unread). The
-  predicate is applied, just against stale state — and it is not confined to particular operator
-  combinations. Snooze/sweep act on live labels at run time. See the runnable proof (from a repo
-  clone, after `npm install && npm run build`): `node scripts/demo-reverify.mjs`, and
+  **true** labels and drops the index's false positives. Gmail's `threads.list` can answer
+  `is:unread` from a read-state it has not caught up with: measured 15.08.2026, 87% of the hits for
+  `category:updates is:unread` in one real mailbox had long been read (131 returned, 17 genuinely
+  unread) — while a second mailbox measured the same way showed no drift at all. The predicate is
+  applied, just against stale state; where it drifts it is not confined to particular operator
+  combinations, and which mailboxes drift is not something a server can know in advance. Snooze/sweep
+  act on live labels at run time. See the runnable proof (from a repo clone, after
+  `npm install && npm run build`): `node scripts/demo-reverify.mjs`, and
   `node scripts/probe-reverify.mjs` to measure it in your own mailbox.
 
 ### 5. Token theft (file at rest)

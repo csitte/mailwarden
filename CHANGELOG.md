@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`scripts/probe-reverify.mjs` — hold the re-verification *premise* against a real mailbox.**
+  `demo-reverify.mjs` proves what `search()` does when an index is stale, against a fake API we made
+  stale on purpose; it cannot prove the premise underneath it — that Gmail's real index does this at
+  all. Nothing in this repository ever measured that: the claim entered in `cec77aa` (23.06.2026) as
+  an observation in a commit message and was repeated in README, SECURITY.md and on the website for
+  eight weeks. The probe asks `threads.list` for a query, fetches each hit's live labels and re-checks
+  them with the shipped `deriveLabelFilters` / `threadMatchesFilters` — every failing hit is a thread
+  the index returned and the query excludes. It runs a small matrix by default (the query the docs
+  used to single out, then the same one minus an operator each), which is how the *operator
+  combination* explanation fell: the drift showed up in all of them, largest on the plainest.
+  Read-only and metadata-only (`format: minimal` — no subject, sender or body is ever fetched); it
+  prints counts and label names, no thread ids and no mail content. Repo-only, like the other probes.
+  Its measurements are what corrected the documentation (see *Fixed*); note that the mailbox reachable
+  from a given checkout may hold no unread mail at all, in which case the run is **inconclusive rather
+  than a clean bill** — zero true matches and a stale index produce the same zero.
+- **`npm run site-notice` — the release ritual's last step, as a command instead of a memory.** The
+  product page at [csitte.at/mailwarden](https://www.csitte.at/mailwarden/) is maintained by a
+  different session in a repository this one deliberately never commits to, so a release reaches the
+  page only if someone posts a message on the session bridge. Three releases in a row did not, and the
+  page still described 0.7.0 while 0.10.0 was live. The check answers exactly one question — does a
+  message from us, addressed to that session, mention *this* version — and exits non-zero when it does
+  not; npm's `postversion` runs it in warn-only mode so the reminder appears while tagging. It reads
+  and never writes: the message itself is a judgement call (what on the page is now *wrong*, not what
+  is in this changelog) and stays hand-written. Where no bridge directory is mounted (CI, a fresh
+  clone) it reports SKIPPED rather than success — it never claims to have seen what it could not. The
+  matching rules are pure functions with their own tests, because the directory they normally read is
+  absent exactly where the suite runs: a version must be named plainly (`0.11.0-dev.<sha>`, the
+  unreleased-`main` bundle, is a different artifact and does not count), `0.1.0` is never read out of
+  `0.10.0`, ids match token-exact (`gmail-csitte` is not `csitte`), and a broadcast is not a notice.
+  Repo-only, like the probes and the demo — not part of the npm package.
+
+### Changed
+- **Listed on Smithery as [`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden)** — it serves
+  the 0.10.0 MCPB bundle. README says which of Smithery's two paths keeps the no-third-party property
+  (`smithery install …` writes a local stdio entry; the toolbox/uplink path relays tool traffic through
+  Smithery's gateway).
+
 ### Fixed
 - **The explanation of *why* re-verification is needed was wrong — measured and corrected.** README,
   SECURITY.md, the code comments and the website all said Gmail's index "silently drops `is:unread` in
@@ -17,7 +55,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `is:unread -in:inbox` **235** for **99** (58%) — but the same query *without* `is:unread` returns
   800+, so the predicate is plainly being applied. It is applied against a **read-state the index has
   not caught up with**, and the drift is not tied to any operator combination (the largest was on the
-  simplest query). One hit carried a single label: `SENT`. The behaviour mailwarden ships is unchanged
+  simplest query). One hit carried a single label: `SENT`. A **second** mailbox measured the same way
+  the same day showed **no drift at all** (zero raw-index hits for `is:unread`, in an account whose
+  read-state only ever changes through the API), which is why the docs now say a mailbox *can* drift
+  rather than that Gmail does: the two differ in volume, age and — suspected, not measured — whether
+  read-state changes come from the Gmail app or the API. A server cannot tell in advance which kind of
+  mailbox it is in, which is the argument for re-verifying at all. The behaviour mailwarden ships is unchanged
   and now better supported than before — in the same run, everything `search` dropped was genuinely
   read, and it discarded no genuinely unread mail. What changed is that the documentation now states
   what was measured, with the numbers, instead of a mechanism nobody had checked.
@@ -42,48 +85,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   token and still isn't: the consent flow runs, the guard decides afterwards whether the result may be
   stored. Both reporting sessions reviewed the design before it was built, and two of the rules above
   exist because they found holes in the first sketch.
-
-### Added
-- **`scripts/probe-reverify.mjs` — hold the re-verification *premise* against a real mailbox.**
-  `demo-reverify.mjs` proves what `search()` does when an index is loose, against a fake API we made
-  loose on purpose; it cannot prove the premise underneath it — that Gmail's real index *is* loose for
-  `is:unread` in some operator combinations. Nothing in this repository ever measured that: the claim
-  entered in `cec77aa` (23.06.2026) as an observation in a commit message and has been repeated in
-  README, SECURITY.md and on the website since. The probe asks `threads.list` for a query, fetches each
-  hit's live labels and re-checks them with the shipped `deriveLabelFilters` / `threadMatchesFilters`
-  — every failing hit is a thread the index returned and the query excludes. It runs a small matrix by
-  default (the documented combination, then the same query minus one operator each), so the output says
-  *which* combination loosens rather than only that something did. Read-only and metadata-only
-  (`format: minimal` — no subject, sender or body is ever fetched); it prints counts and label names,
-  no thread ids and no mail content. Repo-only, like the other probes.
-  **First run, 15.08.2026, is recorded as inconclusive rather than as a confirmation:** the mailbox
-  reached from this checkout holds no unread mail at all, so `category:updates is:unread -in:inbox`
-  returned 0 of 69 archived `category:updates` threads. A loose index would have returned many — but
-  with zero true matches, a looseness of the form "returns read mail *in addition to* unread" produces
-  the same 0. Not decidable there; a measurement in a mailbox with unread archived mail is pending.
-- **`npm run site-notice` — the release ritual's last step, as a command instead of a memory.** The
-  product page at [csitte.at/mailwarden](https://www.csitte.at/mailwarden/) is maintained by a
-  different session in a repository this one deliberately never commits to, so a release reaches the
-  page only if someone posts a message on the session bridge. Three releases in a row did not, and the
-  page still described 0.7.0 while 0.10.0 was live. The check answers exactly one question — does a
-  message from us, addressed to that session, mention *this* version — and exits non-zero when it does
-  not; npm's `postversion` runs it in warn-only mode so the reminder appears while tagging. It reads
-  and never writes: the message itself is a judgement call (what on the page is now *wrong*, not what
-  is in this changelog) and stays hand-written. Where no bridge directory is mounted (CI, a fresh
-  clone) it reports SKIPPED rather than success — it never claims to have seen what it could not. The
-  matching rules are pure functions with their own tests, because the directory they normally read is
-  absent exactly where the suite runs: a version must be named plainly (`0.11.0-dev.<sha>`, the
-  unreleased-`main` bundle, is a different artifact and does not count), `0.1.0` is never read out of
-  `0.10.0`, ids match token-exact (`gmail-csitte` is not `csitte`), and a broadcast is not a notice.
-  Repo-only, like the probes and the demo — not part of the npm package.
-
-### Changed
-- **Listed on Smithery as [`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden)** — it serves
-  the 0.10.0 MCPB bundle. README says which of Smithery's two paths keeps the no-third-party property
-  (`smithery install …` writes a local stdio entry; the toolbox/uplink path relays tool traffic through
-  Smithery's gateway).
-
-### Fixed
 - **`npm run mcpb` release detection counted untracked files as a dirty tree.** In the publish
   workflow the downloaded `mcp-publisher` binary sat untracked in the checkout, so the CI-built 0.10.0
   bundle was named `-dev.<sha>.dirty` (the release asset was built locally on the clean tag instead).
