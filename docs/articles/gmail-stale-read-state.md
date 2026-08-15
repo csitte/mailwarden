@@ -34,7 +34,7 @@ The difference between those two numbers is exactly what the index got wrong.
 
 ## Attempt one: nothing to see
 
-The first mailbox I reached had no unread mail at all. `category:updates is:unread -in:inbox` returned 0 — while 69 archived `category:updates` threads sat right there.
+The first mailbox I reached had no unread mail at all — `is:unread` returned 0 across the whole account. So `category:updates is:unread -in:inbox` returned 0 too, while 69 `category:updates` threads sat right there.
 
 Tempting reading: *the index is fine, the claim is bunk.* That reading is wrong, and noticing why mattered more than the number. If the index's failure mode is "returns read mail **in addition to** unread mail", then a mailbox with zero unread mail produces zero hits whether the index is perfect or hopeless. A negative result from an empty sample is not evidence. It is an empty sample.
 

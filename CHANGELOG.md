@@ -21,8 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Read-only and metadata-only (`format: minimal` — no subject, sender or body is ever fetched); it
   prints counts and label names, no thread ids and no mail content. Repo-only, like the other probes.
   Its measurements are what corrected the documentation (see *Fixed*); note that the mailbox reachable
-  from a given checkout may hold no unread mail at all, in which case the run is **inconclusive rather
-  than a clean bill** — zero true matches and a stale index produce the same zero.
+  from a given checkout may hold no unread mail at all (the first run here: `is:unread` returned 0 for
+  the entire account, alongside 69 `category:updates` threads), in which case the run is **inconclusive
+  rather than a clean bill** — zero true matches and a stale index produce the same zero.
 - **`npm run site-notice` — the release ritual's last step, as a command instead of a memory.** The
   product page at [csitte.at/mailwarden](https://www.csitte.at/mailwarden/) is maintained by a
   different session in a repository this one deliberately never commits to, so a release reaches the
