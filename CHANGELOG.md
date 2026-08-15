@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   for every tier combination (Claude Code truncates there), and a read-only deployment does not
   advertise snooze or filters.
 
+### Changed
+- **MCP SDK 1.29 → 1.30.0** (floor now `^1.30.0`): upstream stdio buffer limits, SSE keep-alive frames and
+  stricter Content-Type validation. No behavioural change for mailwarden; the v2 SDK (spec 2026-07-28)
+  is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md), not pulled by this range.
+
 ## [0.9.0] - 2026-08-13
 
 Sender-level subscription triage and bulk unsubscribe, plus a correction to the scope claim in
