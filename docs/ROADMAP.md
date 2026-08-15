@@ -4,7 +4,7 @@ What's planned, in rough priority, and what is deliberately out. Informed by a r
 the Gmail MCP server landscape (July–August 2026); no promises, PRs welcome. Shipped work is
 recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only keeps the map.
 
-## Shipped (0.1 – 0.9)
+## Shipped (0.1 – 0.10)
 
 - **Mailbox-side snooze** with presets and time of day; sweep on demand, via cron, or the built-in
   hourly daemon (0.1 → 0.6.0).
@@ -25,18 +25,17 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 - **Hardening** — `<untrusted-tool-output>` fencing, RFC 2047 / charset-correct decoding and
   429/5xx backoff (0.1.7); `--http` loopback + bearer token + Host allowlist (0.2.0); optional
   AES-256-GCM token encryption at rest (0.5.0); symlink-safe download fence.
-- **Server `instructions`** in the initialize response, tier-aware, for tool-search clients (unreleased on `main`).
+- **Server `instructions`** in the initialize response, tier-aware, for tool-search clients (0.10.0).
 - **`dryRun`** on `bulk_modify`, `bulk_unsubscribe` and `sweep_snoozed` — same path as the real call,
-  stopped before the first write or outbound request (unreleased on `main`).
+  stopped before the first write or outbound request (0.10.0).
 - **Claude Code plugin** — repo root as plugin (`.claude-plugin/plugin.json` → `npx -y mailwarden`) with a
-  `/mailwarden:setup` skill; submitted to the community marketplace (unreleased on `main`).
+  `/mailwarden:setup` skill; submitted to the community marketplace (0.10.0).
 - **Triage `signals`** on search hits (newsletter / automated / calendar / replyToMismatch), header-derived,
-  aggregated in `triage_digest` (unreleased on `main`).
-
+  aggregated in `triage_digest` (0.10.0).
 - **MCPB bundle** (`npm run mcpb` → `dist-mcpb/mailwarden-<version>.mcpb`) as a release artifact — the
   format Smithery (`smithery mcp publish`) and the Claude Desktop extension directory accept for a
   local stdio server; built from the packed package against the lockfile, validated, unpacked and
-  booted in CI (unreleased on `main`). Smithery listing follows the first release that ships it.
+  booted in CI (0.10.0). Smithery listing follows from that release on.
 
 ## Next
 

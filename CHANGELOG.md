@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-15
+
+Triage signals on every search hit, dry runs for the three bulk tools, server `instructions` for
+tool-search clients, and two new ways to install (Claude Code plugin, MCPB bundle) — plus one fix
+to a 0.9.0 behaviour (a crafted `From` display name could take another sender's key). All additive:
+no tool removed, no field changes meaning, no new OAuth scope, no re-authorization needed.
+
 ### Added
 - **MCPB bundle as a release artifact.** `npm run mcpb` (`scripts/build-mcpb.mjs`) builds two bundles in
   `dist-mcpb/` — the format Smithery (`smithery mcp publish <file>.mcpb`) and the Claude Desktop extension
@@ -678,7 +685,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/csitte/mailwarden/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/csitte/mailwarden/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/csitte/mailwarden/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/csitte/mailwarden/compare/v0.6.1...v0.7.0
