@@ -26,21 +26,20 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
   429/5xx backoff (0.1.7); `--http` loopback + bearer token + Host allowlist (0.2.0); optional
   AES-256-GCM token encryption at rest (0.5.0); symlink-safe download fence.
 - **Server `instructions`** in the initialize response, tier-aware, for tool-search clients (unreleased on `main`).
+- **`dryRun`** on `bulk_modify`, `bulk_unsubscribe` and `sweep_snoozed` — same path as the real call,
+  stopped before the first write or outbound request (unreleased on `main`).
 
 ## Next
 
-1. **`dryRun` on the bulk tools** (`bulk_modify`, `bulk_unsubscribe`, `sweep_snoozed`) — report
-   what *would* be touched (counts, sample of threads/senders) without touching it, so an assistant
-   can show the set before acting on it. Same query resolution and re-verification as the real run.
-2. **Header-derived signals in `triage_digest`** — per-message flags an assistant can act on
+1. **Header-derived signals in `triage_digest`** — per-message flags an assistant can act on
    without opening the mail: newsletter/bulk (`List-Id`, `Precedence: bulk`, `List-Unsubscribe`),
    automated (`Auto-Submitted`), calendar invite (`text/calendar` part), reply-to mismatch. Pure
    header logic, read tier, no new scope.
-3. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
+2. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
    `server/discover`, Zod 4). Not urgent: current clients negotiate down to the 1.x protocol and
    the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
    Planned for late 2026.
-4. **Claude Code plugin packaging** (`.mcp.json` → `npx mailwarden`) for the community
+3. **Claude Code plugin packaging** (`.mcp.json` → `npx mailwarden`) for the community
    marketplace — a distribution item, no server change.
 
 ## Non-goals

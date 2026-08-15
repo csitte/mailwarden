@@ -425,25 +425,27 @@ export async function unsubscribeThread(
 }
 
 /**
- * The half of `unsubscribeThread` that acts, split out so a bulk run can inspect
- * a thread once — to group by sender before deciding — instead of fetching the
- * same headers twice.
+ * The decision half of an unsubscribe, with no side effect: given what a thread
+ * advertises, either the endpoint a real run would POST to, or the structured
+ * refusal explaining why nothing would be sent. Pure, so the dry run and the real
+ * run cannot disagree about which endpoint (if any) is in play — the real run calls
+ * this and then acts on `endpoint`; the dry run calls this and reports it.
  */
-async function unsubscribeFromInfo(
+export function planUnsubscribe(
   info: UnsubscribeInfo,
-  deps: UnsubscribeDeps = defaultUnsubscribeDeps,
-  timeoutMs = TIMEOUT_MS,
-): Promise<UnsubscribeResult> {
-  const threadId = info.threadId;
+): { base: Omit<UnsubscribeResult, "unsubscribed">; endpoint?: string; refusal?: UnsubscribeResult } {
   const base = {
-    threadId,
+    threadId: info.threadId,
     messageId: info.messageId,
     from: info.from,
     options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
   };
 
   if (!info.hasUnsubscribe) {
-    return { ...base, unsubscribed: false, reason: "The message advertises no List-Unsubscribe option." };
+    return {
+      base,
+      refusal: { ...base, unsubscribed: false, reason: "The message advertises no List-Unsubscribe option." },
+    };
   }
   if (!info.oneClick) {
     const reason = info.httpsUrls.length
@@ -452,7 +454,7 @@ async function unsubscribeFromInfo(
         "It is listed in `options.httpsUrls`."
       : "The only opt-out offered is a mailto: address, which would require sending mail — " +
         "mailwarden cannot send. It is listed in `options.mailtos`.";
-    return { ...base, unsubscribed: false, reason };
+    return { base, refusal: { ...base, unsubscribed: false, reason } };
   }
 
   // A header may list several https URIs. Take the first the vetting accepts —
@@ -468,17 +470,35 @@ async function unsubscribeFromInfo(
   });
   if (!usable) {
     return {
-      ...base,
-      unsubscribed: false,
-      reason:
-        "The sender's one-click endpoint did not pass vetting (https and the default port only, " +
-        "no credentials in the URL). The advertised URLs are listed in `options.httpsUrls`.",
+      base,
+      refusal: {
+        ...base,
+        unsubscribed: false,
+        reason:
+          "The sender's one-click endpoint did not pass vetting (https and the default port only, " +
+          "no credentials in the URL). The advertised URLs are listed in `options.httpsUrls`.",
+      },
     };
   }
+  return { base, endpoint: usable };
+}
 
-  const res = await oneClickUnsubscribe(usable, deps, timeoutMs);
+/**
+ * The half of `unsubscribeThread` that acts, split out so a bulk run can inspect
+ * a thread once — to group by sender before deciding — instead of fetching the
+ * same headers twice.
+ */
+async function unsubscribeFromInfo(
+  info: UnsubscribeInfo,
+  deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+  timeoutMs = TIMEOUT_MS,
+): Promise<UnsubscribeResult> {
+  const plan = planUnsubscribe(info);
+  if (plan.refusal) return plan.refusal;
+
+  const res = await oneClickUnsubscribe(plan.endpoint!, deps, timeoutMs);
   return {
-    ...base,
+    ...plan.base,
     unsubscribed: res.ok,
     url: res.url,
     status: res.status,
@@ -662,9 +682,16 @@ export interface BulkUnsubscribeEntry extends UnsubscribeResult {
    * so this thread still gets its own try.
    */
   duplicateOf?: string;
+  /**
+   * Dry run only: the one-click endpoint a real run would POST to for this thread.
+   * Absent when a real run would send nothing either (refusal or duplicate).
+   */
+  wouldCall?: string;
 }
 
 export interface BulkUnsubscribeReport {
+  /** True when this was a rehearsal: headers were read, nothing was contacted. */
+  dryRun: boolean;
   requested: number;
   /**
    * Threads this call took responsibility for — everything except the ones skipped
@@ -678,7 +705,22 @@ export interface BulkUnsubscribeReport {
   skippedDuplicates: number;
   /** Threads left untouched because the call's time budget was exhausted. */
   skippedOutOfTime: number;
+  /**
+   * Outbound requests: the number a dry run says a real run would make, or the number a
+   * real run actually made (one per entry carrying `url`). Duplicates and refusals never count.
+   */
+  requests: number;
   results: BulkUnsubscribeEntry[];
+}
+
+export interface BulkUnsubscribeOptions {
+  /**
+   * Rehearse: read every thread's headers, run the same per-sender dedupe, report the
+   * endpoint each thread WOULD hit — and contact nobody. The time budget still applies
+   * (header reads are network calls too), so a dry run can also end in `skippedOutOfTime`.
+   */
+  dryRun?: boolean;
+  budgetMs?: number;
 }
 
 /**
@@ -716,9 +758,12 @@ export async function bulkUnsubscribe(
   gmail: Gmail,
   threadIds: string[],
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
-  budgetMs = BULK_BUDGET_MS,
+  opts: BulkUnsubscribeOptions = {},
 ): Promise<BulkUnsubscribeReport> {
+  const dryRun = opts.dryRun === true;
+  const budgetMs = opts.budgetMs ?? BULK_BUDGET_MS;
   const results: BulkUnsubscribeEntry[] = [];
+  let requests = 0;
   // Sender address → the thread whose request already went out, plus the endpoints
   // that thread ADVERTISED. Compared advertised-to-advertised: the URL actually
   // called can differ from the header's after a redirect, and comparing against that
@@ -789,6 +834,25 @@ export async function bulkUnsubscribe(
     }
 
     attempted++;
+    if (dryRun) {
+      // Same decision as the real run, minus the request. The sender is recorded as
+      // handled exactly where the real run would record it — after a request WOULD
+      // have gone out — so the dedupe verdicts of both runs line up thread for thread.
+      const plan = planUnsubscribe(info);
+      if (plan.refusal) {
+        results.push(plan.refusal);
+      } else {
+        requests++;
+        if (senderKey) handled.set(senderKey, { threadId, urls: info.httpsUrls });
+        results.push({
+          ...plan.base,
+          unsubscribed: false,
+          wouldCall: plan.endpoint,
+          reason: "Dry run — no request made. A real run would POST to `wouldCall`.",
+        });
+      }
+      continue;
+    }
     // Never let one slow endpoint eat the rest of the budget.
     const perThread = Math.min(TIMEOUT_MS, remaining);
     try {
@@ -796,6 +860,7 @@ export async function bulkUnsubscribe(
       // Record the sender only if a request actually reached an endpoint: `url` is
       // set exactly when one was made. A refusal must not suppress the next thread.
       if (senderKey && res.url) handled.set(senderKey, { threadId, urls: info.httpsUrls });
+      if (res.url) requests++;
       results.push(res);
     } catch (err) {
       results.push({
@@ -810,11 +875,13 @@ export async function bulkUnsubscribe(
   }
 
   return {
+    dryRun,
     requested: threadIds.length,
     attempted,
     unsubscribed: results.filter((r) => r.unsubscribed).length,
     skippedDuplicates,
     skippedOutOfTime,
+    requests,
     results,
   };
 }

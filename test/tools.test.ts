@@ -379,12 +379,152 @@ describe("tool results — structured content + fenced text", () => {
 
     expect(batchBodies[0]).toEqual({ ids: ["m1", "m2", "m3"], addLabelIds: [], removeLabelIds: ["INBOX"] });
     expect(res.structuredContent).toEqual({
+      dryRun: false,
       matchedMessages: 3,
+      matchedThreadCount: 2,
+      matchedThreads: ["t1", "t2"],
       modifiedMessages: 3,
       modifiedThreadCount: 2,
       modifiedThreads: ["t1", "t2"],
       capped: false, // 3 matched, well under the default maxMessages
       failed: [],
+    });
+  });
+
+  it("bulk_modify dryRun resolves the query and the labels it would create — and writes nothing", async () => {
+    const batchBodies: any[] = [];
+    const created: any[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: {
+          list: async () => ({
+            data: {
+              messages: [
+                { id: "m1", threadId: "t1" },
+                { id: "m2", threadId: "t1" },
+                { id: "m3", threadId: "t2" },
+              ],
+            },
+          }),
+          batchModify: async (req: any) => {
+            batchBodies.push(req.requestBody);
+            return {};
+          },
+        },
+        labels: {
+          list: async () => ({ data: { labels: [{ id: "Label_1", name: "Receipts", type: "user" }] } }),
+          create: async (req: any) => {
+            created.push(req.requestBody);
+            return { data: { id: "Label_new" } };
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: {
+        query: "from:shop@example.com",
+        add: ["receipts", "Finance/2026", "Label_1"], // existing (case-insensitive), new, an id
+        remove: ["INBOX"],
+        dryRun: true,
+      },
+    });
+
+    expect(batchBodies).toHaveLength(0); // nothing modified
+    expect(created).toHaveLength(0); // nothing created
+    expect(res.structuredContent).toEqual({
+      dryRun: true,
+      matchedMessages: 3,
+      matchedThreadCount: 2,
+      matchedThreads: ["t1", "t2"],
+      modifiedMessages: 0,
+      modifiedThreadCount: 0,
+      modifiedThreads: [],
+      capped: false,
+      labelsToCreate: ["Finance/2026"], // only the genuinely new name
+      failed: [],
+    });
+  });
+
+  it("bulk_unsubscribe dryRun reaches the rehearsal path (no network: a broken wire would try DNS)", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  payload: {
+                    headers: [
+                      { name: "From", value: "News <news@example.com>" },
+                      { name: "List-Unsubscribe", value: "<https://a.example/u>" },
+                      { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_unsubscribe",
+      arguments: { threadIds: ["t1"], dryRun: true },
+    });
+    expect(res.structuredContent).toMatchObject({
+      dryRun: true,
+      requests: 1,
+      unsubscribed: 0,
+      results: [{ threadId: "t1", unsubscribed: false, wouldCall: "https://a.example/u" }],
+    });
+  });
+
+  it("sweep_snoozed dryRun lists what is due and wakes nothing", async () => {
+    const batchBodies: any[] = [];
+    let labelDeleted = false;
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        labels: {
+          list: async () => ({
+            data: {
+              labels: [
+                { id: "L_parent", name: "MCP/Snoozed", type: "user" },
+                { id: "L_due", name: "MCP/Snoozed/2000-01-01", type: "user" }, // long overdue
+              ],
+            },
+          }),
+          delete: async () => {
+            labelDeleted = true;
+            return {};
+          },
+        },
+        messages: {
+          list: async (req: any) =>
+            req.labelIds?.includes("L_due")
+              ? { data: { messages: [{ id: "m1", threadId: "t1" }, { id: "m2", threadId: "t2" }] } }
+              : { data: {} },
+          batchModify: async (req: any) => {
+            batchBodies.push(req.requestBody);
+            return {};
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "sweep_snoozed", arguments: { dryRun: true } });
+    expect(batchBodies).toHaveLength(0);
+    expect(labelDeleted).toBe(false);
+    expect(res.structuredContent).toMatchObject({
+      dryRun: true,
+      dueLabels: ["MCP/Snoozed/2000-01-01"],
+      dueThreadCount: 2,
+      dueThreads: ["t1", "t2"],
+      wokenCount: 0,
+      woken: [],
     });
   });
 

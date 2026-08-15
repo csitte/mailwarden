@@ -879,7 +879,7 @@ describe("bulkUnsubscribe — the limits that come from doing it 25 times", () =
     const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }, { status: 200 }]);
     // The clock is read once to stamp the start, then once per thread: 0, 20s, 40s, 60s.
     deps.now = fakeClock(20_000);
-    const rep = await bulkUnsubscribe(gmail, ["t1", "t2", "t3"], deps, 60_000);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2", "t3"], deps, { budgetMs: 60_000 });
     // t1 (20s elapsed) and t2 (40s) still fit; by t3 the 60s budget is exactly gone.
     expect(calls.map((c) => c.url)).toEqual(["https://a.example/u", "https://b.example/u"]);
     expect(rep).toMatchObject({ requested: 3, attempted: 2, unsubscribed: 2, skippedOutOfTime: 1 });
@@ -973,5 +973,78 @@ describe("listSubscriptions — reporting its own cap", () => {
     expect(subscriptions).toHaveLength(2);
     // Without this the caller cannot tell a complete answer from a truncated one.
     expect(sendersFound).toBe(3);
+  });
+});
+
+describe("bulkUnsubscribe — dryRun rehearses the real run without contacting anyone", () => {
+  // Same fixture for every case: two threads from one sender (dedupe), one distinct
+  // sender, one link-only refusal, one unreadable thread.
+  const fixture = () =>
+    gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <NEWS@example.com>", "https://a.example/u")],
+      t3: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+      t4: [{ From: "Link <link@example.com>", "List-Unsubscribe": "<https://l.example/u>" }],
+      bad: "throw",
+    });
+  const ids = ["t1", "t2", "t3", "t4", "bad"];
+
+  it("makes NO outbound request and resolves no host, but reads every thread's headers", async () => {
+    const { gmail, gets } = fixture();
+    const { deps, calls } = fakeDeps([]);
+    const rep = await bulkUnsubscribe(gmail, ids, deps, { dryRun: true });
+    expect(calls).toHaveLength(0);
+    expect(deps.resolveHost).not.toHaveBeenCalled();
+    expect(gets).toEqual(ids); // headers are the input to the decision — those it does read
+    expect(rep.dryRun).toBe(true);
+    expect(rep.unsubscribed).toBe(0); // a rehearsal never claims a result
+  });
+
+  it("names the endpoint each thread WOULD hit, and only for threads a real run would send for", async () => {
+    const { gmail } = fixture();
+    const rep = await bulkUnsubscribe(gmail, ids, fakeDeps([]).deps, { dryRun: true });
+    const by = Object.fromEntries(rep.results.map((r) => [r.threadId, r]));
+    expect(by.t1).toMatchObject({ unsubscribed: false, wouldCall: "https://a.example/u" });
+    expect(by.t1.reason).toMatch(/Dry run/);
+    expect(by.t3).toMatchObject({ wouldCall: "https://b.example/u" });
+    // A refusal, a duplicate and an unreadable thread carry no wouldCall — nothing would go out.
+    expect(by.t2.wouldCall).toBeUndefined();
+    expect(by.t4.wouldCall).toBeUndefined();
+    expect(by.bad.wouldCall).toBeUndefined();
+    expect(rep.requests).toBe(2);
+  });
+
+  it("gives the same dedupe verdicts and refusal reasons as the real run, thread for thread", async () => {
+    const dry = await bulkUnsubscribe(fixture().gmail, ids, fakeDeps([]).deps, { dryRun: true });
+    const real = await bulkUnsubscribe(fixture().gmail, ids, fakeDeps([{ status: 200 }, { status: 200 }]).deps);
+    expect(dry.results.map((r) => r.threadId)).toEqual(real.results.map((r) => r.threadId));
+    for (let i = 0; i < ids.length; i++) {
+      const d = dry.results[i];
+      const r = real.results[i];
+      // Duplicate-of and refusal reasons are identical; only the "would" entries differ.
+      expect(d.duplicateOf).toBe(r.duplicateOf);
+      if (!d.wouldCall) expect(d.reason).toBe(r.reason);
+      // Where the dry run says "would call X", the real run called exactly X.
+      if (d.wouldCall) expect(r.url).toBe(d.wouldCall);
+    }
+    // attempted = 3: the duplicate and the unreadable thread are not attempts, in either mode.
+    expect(dry).toMatchObject({ requested: 5, attempted: 3, skippedDuplicates: 1, requests: 2 });
+    expect(real).toMatchObject({ requested: 5, attempted: 3, skippedDuplicates: 1, requests: 2, unsubscribed: 2 });
+  });
+
+  it("still honours the time budget — header reads are network calls too", async () => {
+    const { gmail } = fixture();
+    const { deps } = fakeDeps([]);
+    let clock = 0; // start, then 40s per thread → only the first thread fits a 60s budget
+    deps.now = () => {
+      const v = clock;
+      clock += 40_000;
+      return v;
+    };
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t3", "t4"], deps, { dryRun: true, budgetMs: 60_000 });
+    expect(rep.skippedOutOfTime).toBe(2);
+    expect(rep.results[0].wouldCall).toBe("https://a.example/u");
+    expect(rep.results[1].reason).toMatch(/time budget/);
+    expect(rep.results[2].reason).toMatch(/time budget/);
   });
 });

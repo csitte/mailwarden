@@ -466,6 +466,51 @@ describe("sweepSnoozed", () => {
     expect(res.wokenCount).toBe(0); // Label_archiv never swept
   });
 
+  it("reports the due labels and threads it acted on, alongside what it woke", async () => {
+    const { gmail } = makeFakeGmail(3);
+    const res = await sweepSnoozed(gmail, new Date(2026, 5, 20));
+    expect(res.dryRun).toBe(false);
+    expect(res.dueLabels).toEqual(["MCP/Snoozed/2026-06-01"]); // the Archiv label is not a date
+    expect(res.dueThreadCount).toBe(3);
+    expect(res.dueThreads.sort()).toEqual(res.woken.sort());
+  });
+
+  describe("dryRun", () => {
+    it("finds the same due labels/threads the real sweep would, and modifies nothing", async () => {
+      const { gmail, getDeleted, getRemaining, batchCalls } = makeFakeGmail(250);
+      const res = await sweepSnoozed(gmail, new Date(2026, 5, 20), { dryRun: true });
+
+      expect(res.dryRun).toBe(true);
+      expect(res.dueLabels).toEqual(["MCP/Snoozed/2026-06-01"]);
+      expect(res.dueThreadCount).toBe(250);
+      expect(res.dueThreads).toHaveLength(250);
+      // A rehearsal claims no result and leaves no trace.
+      expect(res.wokenCount).toBe(0);
+      expect(res.woken).toEqual([]);
+      expect(res.failedCount).toBe(0);
+      expect(batchCalls).toHaveLength(0);
+      expect(getRemaining()).toHaveLength(250);
+      expect(getDeleted()).toBe(false);
+    });
+
+    it("does not delete a label even when it finds it already empty", async () => {
+      // Real sweep: an empty due label is 'drained' on first look and gets deleted.
+      // Dry run: looking is all it may do.
+      const { gmail, getDeleted } = makeFakeGmail(0);
+      const res = await sweepSnoozed(gmail, new Date(2026, 5, 20), { dryRun: true });
+      expect(res.dueLabels).toEqual(["MCP/Snoozed/2026-06-01"]);
+      expect(res.dueThreadCount).toBe(0);
+      expect(getDeleted()).toBe(false);
+    });
+
+    it("agrees with the real sweep on what is due — same labels, same threads", async () => {
+      const dry = await sweepSnoozed(makeFakeGmail(7).gmail, new Date(2026, 5, 20), { dryRun: true });
+      const real = await sweepSnoozed(makeFakeGmail(7).gmail, new Date(2026, 5, 20));
+      expect(dry.dueLabels).toEqual(real.dueLabels);
+      expect(dry.dueThreads.sort()).toEqual(real.woken.sort());
+    });
+  });
+
   it("wakes a timestamped label only once its local minute has passed", async () => {
     const swept: string[] = [];
     let remaining = [{ id: "m-0", threadId: "th-0" }];

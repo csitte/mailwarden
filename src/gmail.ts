@@ -756,6 +756,19 @@ export class Gmail {
     );
   }
 
+  /**
+   * Which of `names` a modify call's `add` would have to CREATE — label names (not ids)
+   * that don't exist yet, case-insensitively, as resolveLabelIds decides it. Read-only:
+   * this is the dry-run counterpart of the auto-create, so a rehearsal can say "would
+   * create label X" without creating it. Order and duplicates as given.
+   */
+  async unknownLabelNames(names: string[]): Promise<string[]> {
+    const candidates = names.filter((s) => !looksLikeLabelId(s));
+    if (candidates.length === 0) return [];
+    const existing = new Set((await this.listLabels()).map((l) => l.name.toLowerCase()));
+    return candidates.filter((s) => !existing.has(s.toLowerCase()));
+  }
+
   /** Resolve label ids/names for modify calls (names created in `add`, skipped in `remove`). */
   private async resolveLabelIds(
     add: string[],

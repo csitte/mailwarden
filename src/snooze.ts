@@ -301,7 +301,17 @@ export async function listSnoozed(gmail: Gmail) {
 /** Messages listed per sweep round — the drain loop covers anything beyond it. */
 const SWEEP_LIST_CAP = 5000;
 
-export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
+export interface SweepOptions {
+  /**
+   * Rehearse: find the due labels and the threads under them exactly as a real sweep
+   * would (live label listing, not the search index), report them — and modify
+   * nothing, delete no label. `woken` stays empty; `dueThreads` is the answer.
+   */
+  dryRun?: boolean;
+}
+
+export async function sweepSnoozed(gmail: Gmail, today = new Date(), opts: SweepOptions = {}) {
+  const dryRun = opts.dryRun === true;
   // Minute-precision cutoff so timestamped snoozes fire at their local time;
   // bare-date labels stay due for the whole day via the prefix-sort rule.
   const cutoff = localStamp(today);
@@ -309,6 +319,7 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
   const parent = labels.find((l) => l.name === PARENT);
   const dueLabels = labels.filter((l) => isDue(l.name, cutoff));
 
+  const due = new Set<string>();
   const woken = new Set<string>();
   const errors: string[] = [];
   let failedCount = 0;
@@ -325,6 +336,11 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
         drained = true;
         break;
       }
+      for (const r of refs) due.add(r.threadId);
+      // A dry run sees one page per label — nothing drains, so re-listing
+      // would only page the same refs (a label with more than SWEEP_LIST_CAP
+      // messages is under-reported here; the real sweep loops until empty).
+      if (dryRun) break;
       // UNREAD is deliberate: a resurfaced thread is marked unread so it
       // stands out in the inbox again, like Gmail's own snooze highlight.
       const res = await gmail.batchModifyMessages(refs, ["INBOX", "UNREAD"], remove);
@@ -339,7 +355,7 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
     }
     // Only delete a label proven empty — a label deleted while messages still
     // carry it would silently lose those snoozes (archived, never resurfaced).
-    if (drained) {
+    if (drained && !dryRun) {
       try {
         await gmail.deleteLabel(label.id);
       } catch {
@@ -347,5 +363,15 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date()) {
       }
     }
   }
-  return { date: todayIso(today), wokenCount: woken.size, woken: [...woken], failedCount, errors };
+  return {
+    date: todayIso(today),
+    dryRun,
+    dueLabels: dueLabels.map((l) => l.name),
+    dueThreadCount: due.size,
+    dueThreads: [...due],
+    wokenCount: woken.size,
+    woken: [...woken],
+    failedCount,
+    errors,
+  };
 }

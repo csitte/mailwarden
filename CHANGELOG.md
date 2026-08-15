@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`dryRun` on the three tools that act on many things at once** — `bulk_modify`, `bulk_unsubscribe`,
+  `sweep_snoozed`. A dry run walks the *same* path as the real call up to the first write or outbound
+  request and stops there: `bulk_modify` resolves the query and reports `matchedThreads` plus
+  `labelsToCreate` (names in `add` that don't exist yet — reported, not created); `bulk_unsubscribe`
+  reads every thread's headers, runs the identical per-sender dedupe and reports the endpoint each
+  thread `wouldCall` (its selection is now a pure function, `planUnsubscribe`, shared with the real
+  run, so the two cannot disagree — a test holds them thread for thread); `sweep_snoozed` reports
+  `dueLabels`/`dueThreads` and deletes no label, not even an empty one. Every dry-run result says
+  `dryRun: true` and claims no outcome (`modified*`/`woken*`/`unsubscribed` are zero). The real
+  runs gain the same descriptive fields (`matchedThreads`, `dueThreads`, `requests`) so a
+  rehearsal and its execution read alike. Additive; every existing field keeps its meaning.
 - **Server `instructions`.** The MCP `initialize` response now carries a short, tier-aware
   description of what the enabled tools can do and the two invariants an agent must know (no
   send, no permanent delete). Clients that defer tool definitions — Claude Code's tool search

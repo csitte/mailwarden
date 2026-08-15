@@ -411,9 +411,10 @@ function registerManageTools(server: McpServer): void {
         "Returns matched/modified counts, affected thread IDs (capped at 500 — modifiedThreadCount has the true total), and per-chunk failures (partial success is reported, not hidden). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
         "Note: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs — for read-state-precise bulk ops, verify with search first. " +
-        "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read. " +
+        "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. " +
+        "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
-        "SIDE EFFECTS: modifies up to maxMessages messages in one call; label changes are reversible by the inverse call.",
+        "SIDE EFFECTS: modifies up to maxMessages messages in one call (none with dryRun); label changes are reversible by the inverse call.",
       inputSchema: {
         // Non-empty: an empty query would match the ENTIRE mailbox (listMessageRefs
         // omits `q`), turning a bulk op into a whole-mailbox modify.
@@ -421,34 +422,58 @@ function registerManageTools(server: McpServer): void {
         add: z.array(z.string()).default([]),
         remove: z.array(z.string()).default([]),
         maxMessages: z.number().int().min(1).max(10000).default(1000),
+        dryRun: z.boolean().default(false),
       },
       outputSchema: {
+        dryRun: z.boolean(),
         matchedMessages: z.number(),
+        matchedThreadCount: z.number(),
+        matchedThreads: z.array(z.string()),
         modifiedMessages: z.number(),
         modifiedThreadCount: z.number(),
         modifiedThreads: z.array(z.string()),
         // True when the match set was truncated at maxMessages — more remain unprocessed.
         capped: z.boolean(),
+        // Dry run only: names in `add` that don't exist yet and a real run would create.
+        labelsToCreate: z.array(z.string()).optional(),
         failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
       },
       // destructive: add:['TRASH'] over a broad query bulk-trashes existing mail.
       annotations: { title: "Bulk modify by query", ...write, destructiveHint: true },
     },
-    async ({ query, add, remove, maxMessages }) => {
+    async ({ query, add, remove, maxMessages, dryRun }) => {
       if (add.length === 0 && remove.length === 0) {
         throw new Error("bulk_modify needs at least one label in add or remove — nothing to do.");
       }
       const gmail = await client();
       const refs = await gmail.listMessageRefs({ query, max: maxMessages });
-      const res = await gmail.batchModifyMessages(refs, add, remove);
-      return ok({
+      const matchedThreads = [...new Set(refs.map((r) => r.threadId))];
+      // Both id lists are capped — a 10k-thread sweep must not flood the model context.
+      const shared = {
         matchedMessages: refs.length,
-        modifiedMessages: res.modifiedMessages,
-        modifiedThreadCount: res.modifiedThreads.length,
-        // Cap the id list — a 10k-thread sweep must not flood the model context.
-        modifiedThreads: res.modifiedThreads.slice(0, 500),
+        matchedThreadCount: matchedThreads.length,
+        matchedThreads: matchedThreads.slice(0, 500),
         // listMessageRefs stops at maxMessages: a full page means more may match.
         capped: refs.length >= maxMessages,
+      };
+      if (dryRun) {
+        return ok({
+          dryRun: true,
+          ...shared,
+          modifiedMessages: 0,
+          modifiedThreadCount: 0,
+          modifiedThreads: [],
+          labelsToCreate: await gmail.unknownLabelNames(add),
+          failed: [],
+        });
+      }
+      const res = await gmail.batchModifyMessages(refs, add, remove);
+      return ok({
+        dryRun: false,
+        ...shared,
+        modifiedMessages: res.modifiedMessages,
+        modifiedThreadCount: res.modifiedThreads.length,
+        modifiedThreads: res.modifiedThreads.slice(0, 500),
         failed: res.failed,
       });
     },
@@ -599,21 +624,26 @@ function registerManageTools(server: McpServer): void {
         "The whole call shares a 60-second budget; threads left over when it runs out come back with `skippedOutOfTime` and a reason, so re-running with the remaining ids finishes the job. " +
         "Like unsubscribe, there is no URL parameter: every endpoint comes from that thread's own List-Unsubscribe header. Only RFC 8058 one-click senders are contacted; the rest come back with their alternatives in `options`. " +
         "Partial success is reported, never hidden: a thread that cannot be read or whose endpoint fails becomes an entry with a `reason`, and the remaining threads still run. " +
-        "USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId. " +
+        "Set dryRun:true to rehearse: same header reads, same per-sender dedupe, each entry reports the endpoint it `wouldCall` — and nobody is contacted. " +
+        "USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId; dryRun first to show the user which senders would be contacted. " +
         "DO NOT USE: for one thread (use unsubscribe), or to find candidates (use list_subscriptions — it contacts nobody). " +
-        "SIDE EFFECTS: up to one outbound HTTPS request per DISTINCT sender (plus up to 3 redirects each) — the only non-Google hosts mailwarden ever contacts. " +
+        "SIDE EFFECTS: up to one outbound HTTPS request per DISTINCT sender (plus up to 3 redirects each) — the only non-Google hosts mailwarden ever contacts (none with dryRun). " +
         "Each confirms to that sender that the address is live, and none of it can be undone. The mailbox itself is not changed.",
       inputSchema: {
         // Capped low on purpose: every entry is an irreversible outbound request to
         // a third party, so a mistaken call should be small enough to survive.
         threadIds: z.array(z.string().min(1)).min(1).max(25),
+        dryRun: z.boolean().default(false),
       },
       outputSchema: {
+        dryRun: z.boolean(),
         requested: z.number(),
         attempted: z.number(),
         unsubscribed: z.number(),
         skippedDuplicates: z.number(),
         skippedOutOfTime: z.number(),
+        // Requests a real run would make (dry run) / did make (real run).
+        requests: z.number(),
         results: z.array(
           z.object({
             threadId: z.string(),
@@ -624,6 +654,7 @@ function registerManageTools(server: McpServer): void {
             status: z.number().optional(),
             reason: z.string().optional(),
             duplicateOf: z.string().optional(),
+            wouldCall: z.string().optional(),
             options: unsubscribeOptionsSchema,
           }),
         ),
@@ -636,7 +667,8 @@ function registerManageTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ threadIds }) => ok(await bulkUnsubscribe(await client(), threadIds)),
+    async ({ threadIds, dryRun }) =>
+      ok(await bulkUnsubscribe(await client(), threadIds, undefined, { dryRun })),
   );
 
   // ---- Snooze (mailwarden's differentiator) ----
@@ -680,10 +712,16 @@ function registerManageTools(server: McpServer): void {
     {
       description:
         "Resurface all snoozed threads whose date is due (<= today), batched at 1000 messages per API request. " +
-        "USE WHEN: the user asks to process due snoozes, or as a scheduled maintenance call. " +
-        "SIDE EFFECTS: due threads return to the inbox marked unread; safe to run repeatedly. failedCount/errors report messages a batch could not wake (their label is kept for the next sweep).",
+        "Set dryRun:true to rehearse: reports the due labels and threads (dueLabels/dueThreads) exactly as the sweep would find them, and wakes nothing. " +
+        "USE WHEN: the user asks to process due snoozes, or as a scheduled maintenance call; dryRun to answer 'what is due right now?' without acting. " +
+        "SIDE EFFECTS: due threads return to the inbox marked unread (none with dryRun); safe to run repeatedly. failedCount/errors report messages a batch could not wake (their label is kept for the next sweep).",
+      inputSchema: { dryRun: z.boolean().default(false) },
       outputSchema: {
         date: z.string(),
+        dryRun: z.boolean(),
+        dueLabels: z.array(z.string()),
+        dueThreadCount: z.number(),
+        dueThreads: z.array(z.string()),
         wokenCount: z.number(),
         woken: z.array(z.string()),
         failedCount: z.number(),
@@ -691,7 +729,7 @@ function registerManageTools(server: McpServer): void {
       },
       annotations: { title: "Sweep snoozed", ...write },
     },
-    async () => ok(await sweepSnoozed(await client())),
+    async ({ dryRun }) => ok(await sweepSnoozed(await client(), new Date(), { dryRun })),
   );
 
 }
