@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { Gmail, filterCriteriaToQuery } from "./gmail.js";
+import { Gmail, filterCriteriaToQuery, unverifiedPredicates } from "./gmail.js";
 import { getAuth, hasFilterScope } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
@@ -423,8 +423,8 @@ function registerManageTools(server: McpServer): void {
         "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
         "Returns matched/modified counts, matched and modified thread IDs (both lists capped at 500 — matchedThreadCount/modifiedThreadCount hold the true totals), and per-chunk failures (partial success is reported, not hidden). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
-        "Note: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs — for read-state-precise bulk ops, verify with search first. " +
-        "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. " +
+        "WARNING: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. That index can be badly out of date on read state — measured on a real mailbox, `category:updates is:unread` matched 131 threads of which 17 were genuinely unread, so this tool would have acted on 114 already-read threads. `unverifiedPredicates` in the result names exactly which conditions were taken on the index's word; when it is non-empty and the outcome must be read-state-precise, resolve the set with search (which re-verifies) and act on those thread ids instead. " +
+        "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. " +
         "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
         "SIDE EFFECTS: modifies up to maxMessages messages in one call (none with dryRun); label changes are reversible by the inverse call.",
@@ -447,6 +447,9 @@ function registerManageTools(server: McpServer): void {
         modifiedThreads: z.array(z.string()),
         // True when the match set was truncated at maxMessages — more remain unprocessed.
         capped: z.boolean(),
+        // Conditions in the query that search would have re-verified and this tool did not
+        // (`+LABEL` = must be present, `-LABEL` = must be absent). Empty = nothing to distrust.
+        unverifiedPredicates: z.array(z.string()),
         // Dry run only: names in `add` that don't exist yet and a real run would create.
         labelsToCreate: z.array(z.string()).optional(),
         failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
@@ -468,6 +471,9 @@ function registerManageTools(server: McpServer): void {
         matchedThreads: matchedThreads.slice(0, 500),
         // listMessageRefs stops at maxMessages: a full page means more may match.
         capped: refs.length >= maxMessages,
+        // Say which conditions rest on the index alone — in the dry run too, so a rehearsal
+        // cannot be mistaken for verification (it re-reads the same index).
+        unverifiedPredicates: unverifiedPredicates(query),
       };
       if (dryRun) {
         return ok({
@@ -776,7 +782,7 @@ function registerFilterTools(server: McpServer): void {
         "auto-trash → addLabels ['TRASH']; star → addLabels ['STARRED']; file under a label → addLabels ['Receipts']. " +
         "A filter only affects mail arriving AFTER it's created; set applyToExisting:true to ALSO apply the same " +
         "actions once to mail already in the mailbox (builds a Gmail search from the criteria and runs a bulk modify — " +
-        "same loose-index caveat as bulk_modify; up to maxMessages, default 1000). " +
+        "same unverified-index caveat as bulk_modify — the sweep acts on what the index returns, which can be badly stale on read state; up to maxMessages, default 1000). " +
         "USE WHEN: setting up a persistent auto-triage rule (e.g. 'always archive + label newsletters from x'), optionally cleaning up the existing backlog too. " +
         "NOTE: forwarding filters are intentionally not supported — mailwarden creates no send/exfiltration path. " +
         "SIDE EFFECTS: adds a server-side rule affecting future mail (reversible via delete_filter); with applyToExisting also modifies existing messages. Requires gmail.settings.basic.",

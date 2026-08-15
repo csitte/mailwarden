@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`bulk_modify` now names what it could not verify — `unverifiedPredicates`.** The bulk path acts on
+  Gmail's raw index by design: re-verification costs one fetch per hit and a bulk op is sized in
+  thousands, so `search` can afford it and this cannot. That trade was always in the tool description
+  as a "note"; the measurement (see *Fixed*) priced it. On a drifting mailbox
+  `bulk_modify("category:updates is:unread", remove: ["INBOX"])` archives **131** threads of which
+  **17** were genuinely unread — 114 already-read threads moved out of an inbox nobody asked to touch.
+  The result now lists the conditions the query carried that `search` would have re-verified and this
+  did not (`+CATEGORY_UPDATES`, `+UNREAD`, `-INBOX`, …); empty means there was nothing to distrust.
+  **A `dryRun` reports the same list**, because a rehearsal that re-reads the same index confirms how
+  big the set is and nothing about whether it is right — reporting only the count would have made the
+  dry run read as verification, which is the more dangerous half of the problem. `create_filter`'s
+  `applyToExisting` sweep carries the same caveat in its description. Additive: one new output field,
+  no behaviour change, no extra API call (it is a pure function over the query string).
 - **`scripts/probe-reverify.mjs` — hold the re-verification *premise* against a real mailbox.**
   `demo-reverify.mjs` proves what `search()` does when an index is stale, against a fake API we made
   stale on purpose; it cannot prove the premise underneath it — that Gmail's real index does this at

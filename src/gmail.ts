@@ -563,6 +563,25 @@ export function threadMatchesFilters(labelIds: string[], filters: LabelFilter[])
   return filters.every((f) => labelIds.includes(f.labelId) === f.present);
 }
 
+/**
+ * The predicates a query carries that `search` WOULD re-verify — for the tools that act on the raw
+ * index instead (`bulk_modify`, and `create_filter`'s applyToExisting sweep).
+ *
+ * Those tools cannot afford re-verification: it costs one fetch per hit, and a bulk op is sized in
+ * thousands. That trade was always documented as a caveat; the 15.08.2026 measurement turned it into
+ * a number. In a drifting mailbox `category:updates is:unread` matches 131 threads of which 17 are
+ * genuinely unread — a bulk archive over that query would move 114 threads the caller had already
+ * read and never meant to touch. So the caveat is no longer only in prose: the result names the
+ * predicates that were taken on the index's word, and a `dryRun` shows the same list, because a
+ * rehearsal that reports the same unverified count would otherwise read as confirmation.
+ *
+ * Formatted as `+LABEL` / `-LABEL` (must be present / must be absent) — the label ids, since that is
+ * what a caller can check a thread against.
+ */
+export function unverifiedPredicates(query: string): string[] {
+  return deriveLabelFilters(query).map((f) => `${f.present ? "+" : "-"}${f.labelId}`);
+}
+
 /** Upper bound on candidate threads scanned when re-verifying labels. */
 const FILTER_SCAN_CAP = 100;
 

@@ -11,6 +11,7 @@ import {
   referencedCids,
   looksLikeLabelId,
   deriveLabelFilters,
+  unverifiedPredicates,
   threadMatchesFilters,
   parseMessage,
   decodeRfc2047,
@@ -1478,5 +1479,42 @@ describe("Gmail.downloadAttachment", () => {
     await expect(
       gmail.downloadAttachment("m1", "a1", path.join(tmp, "report.pdf")),
     ).rejects.toThrow(/No free filename/);
+  });
+});
+
+/**
+ * The bulk tools act on the raw index — re-verification costs a fetch per hit and a bulk op is
+ * sized in thousands. The 15.08.2026 measurement priced that trade: on a drifting mailbox
+ * `category:updates is:unread` matches 131 threads of which 17 are genuinely unread, so a bulk
+ * archive over it moves 114 threads the caller had already read. The result now names the
+ * conditions it took on trust, so a model can route through `search` when precision matters.
+ */
+describe("unverifiedPredicates — what the bulk tools took on the index's word", () => {
+  it("names the read-state condition a bulk op cannot vouch for", () => {
+    expect(unverifiedPredicates("category:updates is:unread")).toEqual([
+      "+CATEGORY_UPDATES",
+      "+UNREAD",
+    ]);
+  });
+
+  it("marks a negated condition as such — the caller has to know which way to check", () => {
+    expect(unverifiedPredicates("is:unread -in:inbox")).toEqual(["+UNREAD", "-INBOX"]);
+  });
+
+  it("is empty when nothing in the query maps to a label", () => {
+    // `from:`/`older_than:` are not read-state: the index can be stale about them too, but not in
+    // a way these predicates describe, so claiming otherwise would be noise.
+    expect(unverifiedPredicates("from:shop@example.com older_than:30d")).toEqual([]);
+  });
+
+  it("stays empty for a query search itself would not post-filter", () => {
+    // Same rule as deriveLabelFilters: boolean grouping disables the whole mechanism, so there is
+    // no predicate we could claim to have skipped — we would not have checked it either way.
+    expect(unverifiedPredicates("(is:unread OR is:starred)")).toEqual([]);
+  });
+
+  it("reports exactly what search would have re-verified — one source, two readers", () => {
+    const q = "category:promotions is:read -in:inbox";
+    expect(unverifiedPredicates(q)).toHaveLength(deriveLabelFilters(q).length);
   });
 });

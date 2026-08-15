@@ -387,6 +387,8 @@ describe("tool results — structured content + fenced text", () => {
       modifiedThreadCount: 2,
       modifiedThreads: ["t1", "t2"],
       capped: false, // 3 matched, well under the default maxMessages
+      // `category:promotions` is a predicate search would have re-verified and this tool did not.
+      unverifiedPredicates: ["+CATEGORY_PROMOTIONS"],
       failed: [],
     });
   });
@@ -442,9 +444,36 @@ describe("tool results — structured content + fenced text", () => {
       modifiedThreadCount: 0,
       modifiedThreads: [],
       capped: false,
+      // `from:` maps to no label, so there is nothing the index could be stale about here.
+      unverifiedPredicates: [],
       labelsToCreate: ["Finance/2026"], // only the genuinely new name
       failed: [],
     });
+  });
+
+  it("bulk_modify dryRun still names the conditions it could not verify — a rehearsal is not a check", async () => {
+    // The dry run re-reads the SAME index the real run would, so it confirms the size of the set and
+    // nothing about its correctness. On a drifting mailbox that is the difference between "131
+    // threads matched, go ahead" and 114 already-read threads being archived.
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: {
+          list: async () => ({ data: { messages: [{ id: "m1", threadId: "t1" }] } }),
+          batchModify: async () => {
+            throw new Error("dry run must not modify anything");
+          },
+        },
+        labels: { list: async () => ({ data: { labels: [] } }) },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "category:updates is:unread", remove: ["INBOX"], dryRun: true },
+    });
+
+    expect(res.structuredContent.dryRun).toBe(true);
+    expect(res.structuredContent.unverifiedPredicates).toEqual(["+CATEGORY_UPDATES", "+UNREAD"]);
   });
 
   it("bulk_unsubscribe dryRun reaches the rehearsal path (no network: a broken wire would try DNS)", async () => {

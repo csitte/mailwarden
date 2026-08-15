@@ -79,6 +79,8 @@ The index is not *ignoring* the predicate — the same query without `is:unread`
 
 Which is the whole point: **a server cannot know which kind of mailbox it is in.** Re-verification costs nothing where nothing drifts, and saves you where it does — in the measurement above, every thread `search` dropped was genuinely read, and it discarded **no** genuinely unread mail.
 
+**Where it is *not* free: the bulk tools.** `search` re-verifies because it fetches every hit anyway; `bulk_modify` (and `create_filter`'s `applyToExisting` sweep) is sized in thousands of messages, where one fetch per hit is a different order of cost. Those act on what the index returns — so they now report `unverifiedPredicates`, the conditions from your query that were taken on the index's word (`+UNREAD`, `-INBOX`, …). Empty means there was nothing to distrust. Non-empty and the result has to be read-state-precise? Resolve the set with `search` first and act on those thread ids. A `dryRun` does **not** close this gap: it re-reads the same index, so it confirms how big the set is, never whether it is right.
+
 `mailwarden` fetches every hit live anyway, so `search` re-checks the unambiguous predicates (`is:unread`, `is:read`, `in:inbox`, `category:…`, with negation) against each thread's **true** labels and drops the index's false positives before any tool sees them. The bulk action then runs on exactly the set you asked for. This is the difference between acting on what Gmail *indexed* and acting on what's *actually in the mailbox right now* — and it's why snooze/sweep are safe to hand to an assistant: the sweep resurfaces only threads whose snooze is genuinely due, verified against live labels at run time.
 
 **See it yourself — no Gmail account needed.** From a clone of the repo (the demo is a repo-only
@@ -105,7 +107,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
-| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total). `dryRun: true` resolves the query and reports the matched threads and the labels it would create, touching nothing |
+| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total). Acts on the **raw index**, so `unverifiedPredicates` names the conditions it could not vouch for (see below). `dryRun: true` resolves the query and reports the matched threads and the labels it would create, touching nothing |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
@@ -144,7 +146,7 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
 - **Existing mail:** a filter only runs on messages arriving *after* it's created. Pass
   `applyToExisting: true` to also apply the same actions once to mail already in the mailbox —
   mailwarden builds a Gmail search from the criteria and runs a bulk modify (up to `maxMessages`,
-  default 1000; same loose-index caveat as `bulk_modify`, and the one-off pass excludes Spam/Trash).
+  default 1000; same unverified-index caveat as `bulk_modify`, and the one-off pass excludes Spam/Trash).
   This requires at least one *positive* criterion (`from`/`to`/`subject`/`query`/`hasAttachment:true`/`size`):
   an exclusion-only rule (`negatedQuery` or `hasAttachment:false`) is refused for `applyToExisting`
   because it would match almost the whole mailbox — create such a filter without the flag.
@@ -429,7 +431,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (763 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (769 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 
