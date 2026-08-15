@@ -40,7 +40,7 @@ Tempting reading: *the index is fine, the claim is bunk.* That reading is wrong,
 
 So the honest write-up of run one was: **inconclusive**, and that is what went into the changelog.
 
-## Attempt two: a mailbox with 72,438 messages
+## Attempt two: a mailbox with ~70,000 messages
 
 The second mailbox had what the first lacked: mail that is unread *and* archived. Not because anyone engineered it — because its owner swipes mail away in the Gmail app without opening it, which is what most people do.
 
@@ -85,8 +85,8 @@ I was about to write "Gmail's index answers `is:unread` from a stale read state"
 
 | Mailbox | Volume | Read state changed by | Drift |
 |---|--:|---|--:|
-| personal | 72,438 messages | app swipes **and** API | **87% / 58%** |
-| business | 112 messages | API only | **0** |
+| personal, years old | ~70,000 messages | app swipes **and** API | **87% / 58%** |
+| business, weeks old | ~100 messages | API only | **0** |
 
 Zero. Not "less". In an account where `UNREAD` is removed through the API many times a day, including 70 minutes before the measurement, the raw index returned **no** stale hits at all.
 
@@ -96,7 +96,7 @@ So the general claim was wrong too, and it was wrong in the same way as the orig
 - Another mailbox, measured identically the same day, does not.
 - Where it happens, it is not tied to any particular operator combination.
 
-The two mailboxes differ in at least four ways: volume, account age, how long since the last read-state change, and whether that change came from the Gmail app or from the API. The last one is the interesting suspect — and it is a **suspect**, not a finding. Distinguishing them properly would mean flipping a message's read state purely to watch the index, in someone's real mailbox, which is a measurement I decided not to make.
+The two mailboxes differ in at least four ways: volume (roughly three orders of magnitude), account age, how long since the last read-state change, and whether that change came from the Gmail app or from the API. The last one is the interesting suspect — and it is a **suspect**, not a finding. Distinguishing them properly would mean flipping a message's read state purely to watch the index, in someone's real mailbox, which is a measurement I decided not to make.
 
 ## What this is worth to you
 
@@ -130,4 +130,4 @@ Eight weeks is how long it took for anyone to ask "how do you know?". The answer
 
 ---
 
-*mailwarden is a Gmail MCP server that deliberately cannot send mail — [github.com/csitte/mailwarden](https://github.com/csitte/mailwarden), MIT. The measurements above were run against two real Gmail accounts on 15 August 2026, read-only, and the numbers are reproduced in the project's [CHANGELOG](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md) with the same caveats.*
+*mailwarden is a Gmail MCP server that deliberately cannot send mail — [github.com/csitte/mailwarden](https://github.com/csitte/mailwarden), MIT. The measurements above were run against two real Gmail accounts on 15 August 2026, read-only; mailbox sizes are given as orders of magnitude on purpose, every measured result is exact. The same numbers and caveats are in the project's [CHANGELOG](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md).*
