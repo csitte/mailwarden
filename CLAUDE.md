@@ -57,6 +57,18 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   `npx -y @smithery/cli mcp publish dist-mcpb/mailwarden-X.Y.Z-smithery.mcpb -n csitte/mailwarden`
   (die `-smithery`-Variante trägt die echten Tool-Objekte mit `inputSchema`, die Smitherys Registry
   verlangt; Namespace `csitte` und Login stehen seit 15.08.2026).
+- **Ein Release ist erst fertig, wenn csitte.at es weiß.** Die Produktseite
+  `www.csitte.at/mailwarden/` liegt im fremden Repo `csitte.at` — **nicht committen**, sondern eine
+  Bridge-Nachricht an `csitte` in Thread `061-mailwarden-doku-csitte-update` (Owner → `csitte`,
+  Status `OPEN`; der offene Thread ist die Nachverfolgung). Inhalt ist ein *Delta gegen die Seite*,
+  nicht der CHANGELOG: erst `web/app/mailwarden/page.tsx` lesen, dann (a) was dort jetzt **falsch**
+  ist, (b) was fehlt, (c) neue Bezugswege. Wir liefern Fakten + Quellen, csitte formuliert selbst.
+  Zwei Konventionen der Seite respektieren: **keine Versionsnummer und keine gezählten Aufzählungen**
+  im Fließtext — beides veraltet bei jedem unserer Commits.
+  `npm run site-notice` beantwortet mechanisch, ob das für die aktuelle Version passiert ist (exit ≠ 0,
+  wenn nicht); `postversion` sagt es beim Taggen schon einmal an. Ohne Bridge-Laufwerk (CI, fremder
+  Klon) meldet der Check **SKIPPED**, nie „ok" — er behauptet nichts, was er nicht gesehen hat.
+  Anlass: die Seite beschrieb noch 0.7.0, als 0.10.0 live war (drei Releases ohne Nachricht).
 
 ## Session-Bridge
 
