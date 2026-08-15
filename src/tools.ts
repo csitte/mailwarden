@@ -146,6 +146,7 @@ function registerReadTools(server: McpServer): void {
         "Search Gmail with native query syntax (e.g. 'in:inbox from:foo@bar.com newer_than:7d'). Returns thread summaries; read-state/category predicates are re-verified against each hit's live labels. " +
         "Each summary carries `signals` derived from the thread's first message headers/MIME — newsletter (List-Id/List-Unsubscribe/Precedence bulk or list), automated (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), calendar (text/calendar or .ics part), replyToMismatch (a Reply-To on another domain than From — a subdomain of the same domain counts as the same); empty when nothing is declared. " +
         "Paginated: when more results exist, the response carries a nextPageToken — pass it back via pageToken to fetch the next page. " +
+        "A page can come back with FEWER threads than maxResults and still have a nextPageToken: false positives from the index consume the scan window, and on a mailbox whose read state the index has fallen behind on, most candidates for an is:unread query can be already-read mail. A short page is therefore not evidence that the result set is exhausted — only an absent nextPageToken is. " +
         "USE WHEN: locating threads by sender, subject, date, label, or read state. " +
         "DO NOT USE: to fetch a thread you already have the ID of (use get_thread). " +
         "SIDE EFFECTS: none.",

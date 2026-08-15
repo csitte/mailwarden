@@ -582,7 +582,16 @@ export function unverifiedPredicates(query: string): string[] {
   return deriveLabelFilters(query).map((f) => `${f.present ? "+" : "-"}${f.labelId}`);
 }
 
-/** Upper bound on candidate threads scanned when re-verifying labels. */
+/**
+ * Upper bound on candidate threads scanned when re-verifying labels.
+ *
+ * It is a budget, not an expectation: each candidate costs a `threads.get`. What the 15.08.2026
+ * measurement added is how thin the yield can be — at an 87% false-positive rate, a 100-candidate
+ * window holds roughly 13 true matches, so a caller asking for 25 gets a SHORT page while more
+ * genuinely match. That is why the page token still comes back and why the tool description says a
+ * short page is not an exhausted result set. Raising this would trade latency and quota for the same
+ * information the caller can already page for.
+ */
 const FILTER_SCAN_CAP = 100;
 
 /** Max concurrent threads.get calls while resolving search candidates. */

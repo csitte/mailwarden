@@ -92,7 +92,9 @@ npm install && npm run build
 node scripts/demo-reverify.mjs
 ```
 
-The demo drives the real `search()` against a fake Gmail API whose index is deliberately loose (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
+There is a second script next to it, `node scripts/probe-reverify.mjs`, which measures the same thing in *your* mailbox instead of a fake one — read-only, metadata only (no subject, sender or body is fetched), printing counts and label names. It is how the numbers above were produced, and how you can check whether your mailbox drifts at all.
+
+The demo drives the real `search()` against a fake Gmail API whose index is deliberately stale (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
 
 ## Tools
 
