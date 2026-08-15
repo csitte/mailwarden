@@ -10,7 +10,9 @@ import {
   classifyOptOut,
   listSubscriptions,
   bulkUnsubscribe,
+  planUnsubscribe,
   type UnsubscribeDeps,
+  type UnsubscribeInfo,
   type UnsubscribeOptions,
 } from "../src/unsubscribe.js";
 import { Gmail, type ThreadSummary } from "../src/gmail.js";
@@ -974,6 +976,61 @@ describe("listSubscriptions — reporting its own cap", () => {
     expect(subscriptions).toHaveLength(2);
     // Without this the caller cannot tell a complete answer from a truncated one.
     expect(sendersFound).toBe(3);
+  });
+});
+
+describe("planUnsubscribe — the whole decision space (hasUnsubscribe × oneClick × which URLs vet)", () => {
+  const info = (over: Partial<UnsubscribeInfo>): UnsubscribeInfo => ({
+    threadId: "t",
+    messageId: "m",
+    from: "a@x.example",
+    subject: "",
+    oneClick: false,
+    httpsUrls: [],
+    mailtos: [],
+    hasUnsubscribe: false,
+    ...over,
+  });
+  const H = "https://x.example/u";
+
+  it.each<[string, Partial<UnsubscribeInfo>, { endpoint?: string; refusal?: RegExp }]>([
+    ["nothing advertised", {}, { refusal: /advertises no List-Unsubscribe/ }],
+    ["mailto only", { hasUnsubscribe: true, mailtos: ["mailto:u@x.example"] }, { refusal: /mailto: address/ }],
+    ["https link, no one-click", { hasUnsubscribe: true, httpsUrls: [H] }, { refusal: /did not opt into RFC 8058/ }],
+    ["https + mailto, no one-click", { hasUnsubscribe: true, httpsUrls: [H], mailtos: ["mailto:u@x.example"] }, { refusal: /did not opt into RFC 8058/ }],
+    ["one-click, one good URL", { hasUnsubscribe: true, oneClick: true, httpsUrls: [H] }, { endpoint: H }],
+    ["one-click, https + mailto → the https endpoint", { hasUnsubscribe: true, oneClick: true, httpsUrls: [H], mailtos: ["mailto:u@x.example"] }, { endpoint: H }],
+    ["one-click, first URL has a stray port, second is fine → second", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["https://x.example:8443/u", H] }, { endpoint: H }],
+    ["one-click, first fine, second bad → first (order kept)", { hasUnsubscribe: true, oneClick: true, httpsUrls: [H, "http://x.example/u"] }, { endpoint: H }],
+    ["one-click, explicit :443 is the default port", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["https://x.example:443/u"] }, { endpoint: "https://x.example:443/u" }],
+    ["one-click, credentials in URL", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["https://u:p@x.example/u"] }, { refusal: /did not pass vetting/ }],
+    ["one-click, http", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["http://x.example/u"] }, { refusal: /did not pass vetting/ }],
+    ["one-click, non-default port", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["https://x.example:8443/u"] }, { refusal: /did not pass vetting/ }],
+    ["one-click, unparsable URL", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["https://exa mple/u"] }, { refusal: /did not pass vetting/ }],
+    ["one-click, IDN host is fine (the network layer resolves it)", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["https://münchen.example/u"] }, { endpoint: "https://münchen.example/u" }],
+    ["one-click, upper-case scheme", { hasUnsubscribe: true, oneClick: true, httpsUrls: ["HTTPS://x.example/u"] }, { endpoint: "HTTPS://x.example/u" }],
+    // Inconsistent shapes parseListUnsubscribe never produces still get a refusal, never a call.
+    ["one-click flag with no URLs at all", { hasUnsubscribe: true, oneClick: true }, { refusal: /did not pass vetting/ }],
+    ["one-click flag but hasUnsubscribe false", { hasUnsubscribe: false, oneClick: true, httpsUrls: [H] }, { refusal: /advertises no List-Unsubscribe/ }],
+  ])("%s", (_n, over, exp) => {
+    const i = info(over);
+    const p = planUnsubscribe(i);
+    // The base every result is built from echoes the thread and its advertised options.
+    expect(p.base).toEqual({
+      threadId: "t",
+      messageId: "m",
+      from: "a@x.example",
+      options: { oneClick: i.oneClick, httpsUrls: i.httpsUrls, mailtos: i.mailtos },
+    });
+    if (exp.endpoint) {
+      expect(p.endpoint).toBe(exp.endpoint);
+      expect(p.refusal).toBeUndefined();
+    } else {
+      expect(p.endpoint).toBeUndefined();
+      expect(p.refusal).toMatchObject({ unsubscribed: false, threadId: "t" });
+      expect(p.refusal!.reason).toMatch(exp.refusal!);
+      expect(p.refusal!.url).toBeUndefined();
+    }
   });
 });
 

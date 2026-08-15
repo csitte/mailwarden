@@ -1,5 +1,5 @@
 import type { ThreadSummary } from "./gmail.js";
-import { ALL_SIGNALS, type Signal } from "./signals.js";
+import { ALL_SIGNALS, mailboxOf, type Signal } from "./signals.js";
 
 /**
  * Triage digest — a structured overview of a mailbox slice so an agent can
@@ -52,11 +52,11 @@ export interface DigestOptions {
 
 /** Split a `From` header into a lowercased address + a best-effort display name. */
 export function parseSender(from: string): { email: string; name: string } {
-  const m = /<([^>]+)>/.exec(from);
-  const email = (m ? m[1] : from).trim().toLowerCase();
-  // The display name is whatever precedes the <angle-addr>, unquoted.
-  const name = (m ? from.slice(0, m.index) : "").trim().replace(/^"|"$/g, "").trim();
-  return { email, name };
+  // The same quote-/comment-aware scanner the signals use — so a display name that
+  // contains a literal `<other@x>` cannot pick the sender key (it groups the digest and
+  // dedupes bulk_unsubscribe per sender). Nothing recognisable → the raw value, as before.
+  const { address, name } = mailboxOf(from);
+  return { email: address || from.trim().toLowerCase(), name };
 }
 
 /** Age bucket of an RFC-2822 `Date` header relative to `now`. Unparseable → "undated". */

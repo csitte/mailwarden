@@ -8,6 +8,8 @@
  * declared", not "definitely personal mail". Pure, so a header corpus can hold it.
  */
 
+import { domainToASCII } from "node:url";
+
 export type Signal = "newsletter" | "automated" | "calendar" | "replyToMismatch";
 
 /** Fixed order for stable output — a thread's signals are always listed in this order. */
@@ -23,28 +25,225 @@ export interface SignalInput {
 /**
  * Local-parts that by convention mark a sender as a machine, not a person. Matched
  * on the local-part only (before `@`) and only in these spellings — a person named
- * "Noreen Reply" must not be flagged, so no substring matching.
+ * "Noreen Reply" must not be flagged, so no substring matching. Hyphen and underscore
+ * are the two separators the same words are written with (`no-reply`, `no_reply`).
  */
-const MACHINE_LOCAL_PARTS = /^(no-?reply|do-?not-?reply|donotreply|noreply|mailer-daemon|postmaster|notifications?|alerts?|bounces?)$/i;
+const MACHINE_LOCAL_PARTS =
+  /^(no[-_]?reply|do[-_]?not[-_]?reply|mailer-daemon|postmaster|notifications?|alerts?|bounces?)$/i;
 
+/**
+ * A header's value, trimmed; `undefined` when the header is absent OR blank — a header
+ * with nothing in it declares nothing, so presence-only signals do not fire on it.
+ */
 function header(input: SignalInput, name: string): string | undefined {
   const n = name.toLowerCase();
   const h = input.headers.find((x) => (x.name ?? "").toLowerCase() === n);
-  return h?.value ?? undefined;
+  const v = (h?.value ?? "").trim();
+  return v === "" ? undefined : v;
 }
 
-/** Lowercased address out of a From/Reply-To value; "" when none is recognisable. */
-export function addressOf(value: string | undefined): string {
+/**
+ * Remove RFC 5322 comments — parenthesised, nestable, only outside quoted strings —
+ * so `bulk (mailer)` reads as `bulk` and `a@x.example (Alice)` as `a@x.example`.
+ */
+function stripComments(v: string): string {
+  let out = "";
+  let depth = 0;
+  let quoted = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (quoted) {
+      out += c;
+      if (c === "\\" && i + 1 < v.length) out += v[++i];
+      else if (c === '"') quoted = false;
+    } else if (depth > 0) {
+      if (c === "\\") i++;
+      else if (c === "(") depth++;
+      else if (c === ")") depth--;
+    } else if (c === "(") depth++;
+    else if (c === ")") continue; // stray closer outside any comment: junk, dropped
+    else if (c === '"') {
+      quoted = true;
+      out += c;
+    } else out += c;
+  }
+  // An unclosed comment would swallow the rest of the value — malformed input, so
+  // rather than lose the address, leave the value as it came.
+  return depth > 0 ? v : out;
+}
+
+/**
+ * True when the value's double quotes do not pair up (an unescaped `"` left open) —
+ * malformed per RFC 5322; the quotes are then treated as ordinary characters.
+ */
+function unbalancedQuotes(v: string): boolean {
+  let quoted = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (quoted && c === "\\") i++;
+    else if (c === '"') quoted = !quoted;
+  }
+  return quoted;
+}
+
+/** The first token of a structured value — comments, parameters (`;…`) and folding gone. */
+function firstToken(value: string | undefined): string {
   if (!value) return "";
-  const m = /<([^>]+)>/.exec(value);
-  const raw = (m ? m[1] : value).trim().toLowerCase();
-  // A bare display name with no @ is not an address.
-  return raw.includes("@") ? raw : "";
+  return (stripComments(value).trim().split(/[\s;]/)[0] ?? "").toLowerCase();
 }
 
-function domainOf(address: string): string {
+/**
+ * The addr-specs of an address-list header (From, Reply-To), lowercased, in order.
+ * Understands what a scanner needs to get the *right* address out of hostile input:
+ * quoted display names (a `<` or `@` inside quotes is text, not an address), comments,
+ * folding whitespace, groups (`Team: a@x, b@x;`), several mailboxes, and the obsolete
+ * source route (`<@relay:a@x>`). A mailbox with no `@` in it is not an address.
+ */
+export function addressesOf(value: string | undefined): string[] {
+  if (!value) return [];
+  let v = unbalancedQuotes(value) ? value.replace(/"/g, "") : value;
+  v = stripComments(v);
+  const items: string[] = [];
+  let cur = "";
+  let quoted = false;
+  let angle = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (quoted) {
+      cur += c;
+      if (c === "\\" && i + 1 < v.length) cur += v[++i];
+      else if (c === '"') quoted = false;
+    } else if (c === '"') {
+      quoted = true;
+      cur += c;
+    } else if (c === "<") {
+      angle = true;
+      cur += c;
+    } else if (c === ">") {
+      angle = false;
+      cur += c;
+    } else if ((c === "," || c === ";") && !angle) {
+      items.push(cur);
+      cur = "";
+    } else cur += c;
+  }
+  items.push(cur);
+
+  const out: string[] = [];
+  for (const item of items) {
+    let raw: string;
+    // The addr-spec is the LAST angle-addr outside quotes: a quoted display name may
+    // contain a literal `<…>`, and the mailbox's own angle-addr is what ends it.
+    const angles = [...unquoted(item).matchAll(/<([^<>]*)>/g)];
+    if (angles.length) {
+      const m = angles[angles.length - 1];
+      raw = item.slice(m.index + 1, m.index + m[0].length - 1);
+      // Obsolete source route: `<@relay.example:user@host>` — the mailbox is after the colon.
+      if (raw.trim().startsWith("@") && raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
+    } else {
+      raw = item;
+      // Group syntax without angle-addrs: `Team: user@host` — drop the group name.
+      const at = raw.indexOf("@");
+      const colon = raw.indexOf(":");
+      if (colon !== -1 && (at === -1 || colon < at) && !raw.slice(0, colon).includes('"')) {
+        raw = raw.slice(colon + 1);
+      }
+      // Bare form: obsolete whitespace around `@` is folded away; anything else that is
+      // whitespace-separated from the addr-spec (an unbracketed name, junk) is not it.
+      if (!raw.includes('"')) {
+        raw = raw.replace(/\s*@\s*/, "@").trim();
+        if (/\s/.test(raw)) raw = raw.split(/\s+/).find((w) => w.includes("@")) ?? "";
+      }
+    }
+    raw = raw.trim().toLowerCase();
+    if (raw.includes("@")) out.push(raw);
+  }
+  return out;
+}
+
+/** Quoted strings replaced by a placeholder of the same length, so scanning ignores their content. */
+function unquoted(v: string): string {
+  let out = "";
+  let quoted = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (quoted) {
+      if (c === "\\" && i + 1 < v.length) {
+        out += "__";
+        i++;
+      } else if (c === '"') {
+        quoted = false;
+        out += c;
+      } else out += "_";
+    } else {
+      if (c === '"') quoted = true;
+      out += c;
+    }
+  }
+  return out;
+}
+
+/** Lowercased address out of a From/Reply-To value (the first, if several); "" when none. */
+export function addressOf(value: string | undefined): string {
+  return addressesOf(value)[0] ?? "";
+}
+
+/**
+ * The first mailbox of a From/Reply-To value as `{ address, name }`: the address as
+ * `addressOf` finds it, the display name being what precedes the mailbox's own angle-addr
+ * (the LAST `<…>` outside quotes — a quoted name may contain a literal `<…>`), unquoted.
+ * `address` is "" when nothing recognisable is there — callers keep their own fallback.
+ */
+export function mailboxOf(value: string | undefined): { address: string; name: string } {
+  const address = addressOf(value);
+  if (!value || !address) return { address, name: "" };
+  const v = unbalancedQuotes(value) ? value.replace(/"/g, "") : value;
+  const first = v.split(/[,;](?=(?:[^"]*"[^"]*")*[^"]*$)/)[0] ?? v;
+  const angles = [...unquoted(first).matchAll(/</g)];
+  if (angles.length === 0) return { address, name: "" };
+  const name = stripComments(first.slice(0, angles[angles.length - 1].index))
+    .trim()
+    .replace(/^"(.*)"$/s, "$1")
+    .replace(/\\(.)/g, "$1")
+    .trim();
+  return { address, name };
+}
+
+/** The local-part of an addr-spec, with a quoted local-part (`"no-reply"@x`) unquoted. */
+function localPartOf(address: string): string {
   const at = address.lastIndexOf("@");
-  return at === -1 ? "" : address.slice(at + 1);
+  const lp = at === -1 ? "" : address.slice(0, at).trim();
+  const m = /^"(.*)"$/.exec(lp);
+  return m ? m[1].replace(/\\(.)/g, "$1") : lp;
+}
+
+/** Same domain, or one is a subdomain of the other — compared at label boundaries. */
+function sameOrSubdomain(a: string, b: string): boolean {
+  return a === b || a.endsWith("." + b) || b.endsWith("." + a);
+}
+
+/**
+ * `X-Auto-Response-Suppress` (Exchange) marks a message whose sender wants no automatic
+ * replies — bulk/system mail. Its value `None` means "suppress nothing" and is the one
+ * value that declares no such thing; any other value list (`All`, `OOF, AutoReply`, …) does.
+ */
+function autoResponseSuppressed(value: string | undefined): boolean {
+  if (value === undefined) return false;
+  const tokens = stripComments(value).split(",").map((t) => t.trim().toLowerCase()).filter(Boolean);
+  return tokens.length > 0 && !tokens.every((t) => t === "none");
+}
+
+/**
+ * The domain of an addr-spec as a COMPARISON key: case-folded, IDN and Punycode brought
+ * to the same (ASCII) form, Unicode normalized, trailing dot dropped — so `münchen.de`,
+ * `MÜNCHEN.de.` and `xn--mnchen-3ya.de` compare equal. "" when there is no domain.
+ */
+function domainKeyOf(address: string): string {
+  const at = address.lastIndexOf("@");
+  if (at === -1) return "";
+  const raw = address.slice(at + 1).trim().replace(/\.+$/, "");
+  if (raw === "") return "";
+  return (domainToASCII(raw) || raw).toLowerCase().replace(/\.+$/, "");
 }
 
 /**
@@ -64,7 +263,7 @@ function domainOf(address: string): string {
 export function deriveSignals(input: SignalInput): Signal[] {
   const out = new Set<Signal>();
 
-  const precedence = (header(input, "Precedence") ?? "").trim().toLowerCase();
+  const precedence = firstToken(header(input, "Precedence"));
   if (
     header(input, "List-Id") !== undefined ||
     header(input, "List-Unsubscribe") !== undefined ||
@@ -75,13 +274,14 @@ export function deriveSignals(input: SignalInput): Signal[] {
   }
 
   const from = addressOf(header(input, "From"));
-  const autoSubmitted = (header(input, "Auto-Submitted") ?? "").trim().toLowerCase();
-  const localPart = from.slice(0, from.lastIndexOf("@"));
+  // RFC 3834: `no` (with optional comments/parameters) means a human sent it; any other
+  // value, including extension tokens, means a machine did.
+  const autoSubmitted = firstToken(header(input, "Auto-Submitted"));
   if (
     (autoSubmitted !== "" && autoSubmitted !== "no") ||
     precedence === "auto_reply" ||
-    header(input, "X-Auto-Response-Suppress") !== undefined ||
-    MACHINE_LOCAL_PARTS.test(localPart)
+    autoResponseSuppressed(header(input, "X-Auto-Response-Suppress")) ||
+    MACHINE_LOCAL_PARTS.test(localPartOf(from))
   ) {
     out.add("automated");
   }
@@ -89,16 +289,24 @@ export function deriveSignals(input: SignalInput): Signal[] {
   if (
     input.parts.some(
       (p) =>
-        (p.mimeType ?? "").toLowerCase().startsWith("text/calendar") ||
+        /^text\/calendar\s*(;|$)/i.test((p.mimeType ?? "").trim()) ||
         /\.ics$/i.test(p.filename ?? ""),
     )
   ) {
     out.add("calendar");
   }
 
-  const replyTo = addressOf(header(input, "Reply-To"));
-  if (from && replyTo && domainOf(replyTo) !== domainOf(from)) {
-    out.add("replyToMismatch");
+  const fromDomain = domainKeyOf(from);
+  if (fromDomain) {
+    // Every Reply-To mailbox counts: a reply goes to all of them, so one foreign
+    // domain among several is still a reply leaving the sender's domain. A subdomain
+    // of the sender's domain (or the sender's domain being one of the Reply-To's) is
+    // NOT foreign — `news@e.brand.example` → `help@brand.example` is how marketing
+    // mail is routinely built, and a phisher gets no subdomain of the domain he spoofs.
+    const foreign = addressesOf(header(input, "Reply-To"))
+      .map(domainKeyOf)
+      .some((d) => d !== "" && !sameOrSubdomain(d, fromDomain));
+    if (foreign) out.add("replyToMismatch");
   }
 
   return ALL_SIGNALS.filter((s) => out.has(s));

@@ -13,10 +13,38 @@ import {
 const tiers = (...t: ToolTier[]) => new Set(t);
 
 describe("serverInstructions — what a tool-search client reads before it ever lists our tools", () => {
-  it("stays under the 2 KB truncation point for every tier combination", () => {
-    const combos: ToolTier[][] = [[], ["read"], ["manage"], ["filters"], ["read", "manage"], [...ALL_TIERS]];
-    for (const c of combos) expect(serverInstructions(tiers(...c)).length).toBeLessThan(2000);
-  });
+  // The whole input space: every subset of the three tiers (2^3 = 8), the empty set included.
+  const everyCombo: ToolTier[][] = [
+    [],
+    ["read"],
+    ["manage"],
+    ["filters"],
+    ["read", "manage"],
+    ["read", "filters"],
+    ["manage", "filters"],
+    [...ALL_TIERS],
+  ];
+
+  it.each(everyCombo.map((c) => [c.join("+") || "(none)", c] as const))(
+    "tiers %s: under 2 KB in BYTES (the text has non-ASCII dashes) and in characters",
+    (_n, c) => {
+      const s = serverInstructions(tiers(...c));
+      expect(Buffer.byteLength(s, "utf8")).toBeLessThan(2048);
+      expect(s.length).toBeLessThan(2000);
+    },
+  );
+
+  it.each(everyCombo.map((c) => [c.join("+") || "(none)", c] as const))(
+    "tiers %s: mentions snooze/unsubscribe only with manage, filters only with filters, get_profile only with read",
+    (_n, c) => {
+      const s = serverInstructions(tiers(...c));
+      expect(/snooze/i.test(s)).toBe(c.includes("manage"));
+      expect(/unsubscribe/i.test(s)).toBe(c.includes("manage"));
+      expect(/Gmail filters/.test(s)).toBe(c.includes("filters"));
+      expect(/get_profile/.test(s)).toBe(c.includes("read"));
+      expect(/search and read mail/.test(s)).toBe(c.includes("read"));
+    },
+  );
 
   it("always states the two invariants an agent must know: no send, no permanent delete", () => {
     for (const t of [tiers(), tiers("read"), tiers(...ALL_TIERS)]) {

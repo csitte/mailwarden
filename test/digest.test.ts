@@ -34,6 +34,22 @@ describe("parseSender", () => {
     expect(parseSender("bob@y.com")).toEqual({ email: "bob@y.com", name: "" });
     expect(parseSender('"Doe, Jane" <jane@x.com>')).toEqual({ email: "jane@x.com", name: "Doe, Jane" });
   });
+  // The sender key groups the digest and dedupes bulk_unsubscribe per sender — so a display
+  // name must not be able to pick it. Same scanner as the signals (quote- and comment-aware).
+  it.each([
+    ['"<legit@news.example>" <evil@x.example>', "evil@x.example", "<legit@news.example>"],
+    ['Alice (Sales) <a@x.example>', "a@x.example", "Alice"],
+    ["a@x.example (Alice)", "a@x.example", ""],
+    ['"Doe, Jane" <Jane@X.example>, other@y.example', "jane@x.example", "Doe, Jane"],
+    ["Team: <t@x.example>;", "t@x.example", "Team:"],
+    ["=?UTF-8?Q?Caf=C3=A9?= <cafe@x.example>", "cafe@x.example", "=?UTF-8?Q?Caf=C3=A9?="],
+  ])("%s → email %s, name %s", (from, email, name) => {
+    expect(parseSender(from)).toEqual({ email, name });
+  });
+  it("keeps the raw value as the key when nothing recognisable is there (unchanged fallback)", () => {
+    expect(parseSender("Just A Name")).toEqual({ email: "just a name", name: "" });
+    expect(parseSender("")).toEqual({ email: "", name: "" });
+  });
 });
 
 describe("ageBucket", () => {
