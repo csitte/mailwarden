@@ -35,7 +35,11 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 
 ## Next
 
-1. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
+1. **MCPB bundle** (`.mcpb`, built with `@anthropic-ai/mcpb pack` from the published package) as a
+   release artifact — the one format both Smithery (`smithery mcp publish ./mailwarden.mcpb`) and
+   the Claude Desktop-extension directory accept for a local stdio server. Needs a privacy-policy
+   URL for the latter. Adds a CI step; no server change.
+2. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
    `server/discover`, Zod 4). Not urgent: current clients negotiate down to the 1.x protocol and
    the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
    Planned for late 2026.
