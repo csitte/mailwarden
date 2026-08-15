@@ -92,19 +92,19 @@ function firstToken(value: string | undefined): string {
   return (stripComments(value).trim().split(/[\s;]/)[0] ?? "").toLowerCase();
 }
 
+/** Quotes made sane (an unbalanced `"` demotes all of them to text) and comments removed. */
+function normalizeAddressList(value: string): string {
+  return stripComments(unbalancedQuotes(value) ? value.replace(/"/g, "") : value);
+}
+
 /**
- * The addr-specs of an address-list header (From, Reply-To), lowercased, in order.
- * Understands what a scanner needs to get the *right* address out of hostile input:
- * quoted display names (a `<` or `@` inside quotes is text, not an address), comments,
- * folding whitespace, groups (`Team: a@x, b@x;`), several mailboxes, and the obsolete
- * source route (`<@relay:a@x>`). A mailbox with no `@` in it is not an address.
+ * Split an address-list into its mailboxes at `,`/`;` outside quotes and outside `<…>`,
+ * keeping each item's offset into the input. Linear — one pass, no lookahead.
  */
-export function addressesOf(value: string | undefined): string[] {
-  if (!value) return [];
-  let v = unbalancedQuotes(value) ? value.replace(/"/g, "") : value;
-  v = stripComments(v);
-  const items: string[] = [];
+function splitMailboxes(v: string): Array<{ text: string; start: number }> {
+  const items: Array<{ text: string; start: number }> = [];
   let cur = "";
+  let start = 0;
   let quoted = false;
   let angle = false;
   for (let i = 0; i < v.length; i++) {
@@ -123,42 +123,62 @@ export function addressesOf(value: string | undefined): string[] {
       angle = false;
       cur += c;
     } else if ((c === "," || c === ";") && !angle) {
-      items.push(cur);
+      items.push({ text: cur, start });
       cur = "";
+      start = i + 1;
     } else cur += c;
   }
-  items.push(cur);
+  items.push({ text: cur, start });
+  return items;
+}
 
-  const out: string[] = [];
-  for (const item of items) {
-    let raw: string;
-    // The addr-spec is the LAST angle-addr outside quotes: a quoted display name may
-    // contain a literal `<…>`, and the mailbox's own angle-addr is what ends it.
-    const angles = [...unquoted(item).matchAll(/<([^<>]*)>/g)];
-    if (angles.length) {
-      const m = angles[angles.length - 1];
-      raw = item.slice(m.index + 1, m.index + m[0].length - 1);
-      // Obsolete source route: `<@relay.example:user@host>` — the mailbox is after the colon.
-      if (raw.trim().startsWith("@") && raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
-    } else {
-      raw = item;
-      // Group syntax without angle-addrs: `Team: user@host` — drop the group name.
-      const at = raw.indexOf("@");
-      const colon = raw.indexOf(":");
-      if (colon !== -1 && (at === -1 || colon < at) && !raw.slice(0, colon).includes('"')) {
-        raw = raw.slice(colon + 1);
-      }
-      // Bare form: obsolete whitespace around `@` is folded away; anything else that is
-      // whitespace-separated from the addr-spec (an unbracketed name, junk) is not it.
-      if (!raw.includes('"')) {
-        raw = raw.replace(/\s*@\s*/, "@").trim();
-        if (/\s/.test(raw)) raw = raw.split(/\s+/).find((w) => w.includes("@")) ?? "";
-      }
+/** Index of the mailbox's own angle-addr in an item — the LAST `<` outside quotes — or -1. */
+function angleIndex(item: string): number {
+  return unquoted(item).lastIndexOf("<");
+}
+
+/** The lowercased addr-spec of one mailbox item, "" when there is none. */
+function addrSpecOf(item: string): string {
+  let raw: string;
+  // The addr-spec is the LAST angle-addr outside quotes: a quoted display name may
+  // contain a literal `<…>`, and the mailbox's own angle-addr is what ends it.
+  const lt = angleIndex(item);
+  const gt = lt === -1 ? -1 : unquoted(item).indexOf(">", lt);
+  if (lt !== -1 && gt !== -1) {
+    raw = item.slice(lt + 1, gt);
+    // Obsolete source route: `<@relay.example:user@host>` — the mailbox is after the colon.
+    if (raw.trim().startsWith("@") && raw.includes(":")) raw = raw.slice(raw.indexOf(":") + 1);
+  } else {
+    raw = item;
+    // Group syntax without angle-addrs: `Team: user@host` — drop the group name.
+    const at = raw.indexOf("@");
+    const colon = raw.indexOf(":");
+    if (colon !== -1 && (at === -1 || colon < at) && !raw.slice(0, colon).includes('"')) {
+      raw = raw.slice(colon + 1);
     }
-    raw = raw.trim().toLowerCase();
-    if (raw.includes("@")) out.push(raw);
+    // Bare form: obsolete whitespace around `@` is folded away; anything else that is
+    // whitespace-separated from the addr-spec (an unbracketed name, junk) is not it.
+    if (!raw.includes('"')) {
+      raw = raw.replace(/\s*@\s*/, "@").trim();
+      if (/\s/.test(raw)) raw = raw.split(/\s+/).find((w) => w.includes("@")) ?? "";
+    }
   }
-  return out;
+  raw = raw.trim().toLowerCase();
+  return raw.includes("@") ? raw : "";
+}
+
+/**
+ * The addr-specs of an address-list header (From, Reply-To), lowercased, in order.
+ * Understands what a scanner needs to get the *right* address out of hostile input:
+ * quoted display names (a `<` or `@` inside quotes is text, not an address), comments,
+ * folding whitespace, groups (`Team: a@x, b@x;`), several mailboxes, and the obsolete
+ * source route (`<@relay:a@x>`). A mailbox with no `@` in it is not an address.
+ */
+export function addressesOf(value: string | undefined): string[] {
+  if (!value) return [];
+  return splitMailboxes(normalizeAddressList(value))
+    .map((it) => addrSpecOf(it.text))
+    .filter((a) => a !== "");
 }
 
 /** Quoted strings replaced by a placeholder of the same length, so scanning ignores their content. */
@@ -189,24 +209,36 @@ export function addressOf(value: string | undefined): string {
 }
 
 /**
- * The first mailbox of a From/Reply-To value as `{ address, name }`: the address as
- * `addressOf` finds it, the display name being what precedes the mailbox's own angle-addr
- * (the LAST `<…>` outside quotes — a quoted name may contain a literal `<…>`), unquoted.
+ * The first mailbox of a From/Reply-To value as `{ address, name }`: the first item that
+ * carries an addr-spec, and its display name — what precedes the mailbox's own angle-addr
+ * (the LAST `<` outside quotes — a quoted name may contain a literal `<…>`), comments
+ * removed, an enclosing quoted-string unquoted. A name that was written with unquoted
+ * commas (`Doe, Jane <j@x>`) is kept whole: the earlier comma-split pieces belong to it
+ * as long as they carry no address syntax of their own. Linear in the input.
  * `address` is "" when nothing recognisable is there — callers keep their own fallback.
  */
 export function mailboxOf(value: string | undefined): { address: string; name: string } {
-  const address = addressOf(value);
-  if (!value || !address) return { address, name: "" };
-  const v = unbalancedQuotes(value) ? value.replace(/"/g, "") : value;
-  const first = v.split(/[,;](?=(?:[^"]*"[^"]*")*[^"]*$)/)[0] ?? v;
-  const angles = [...unquoted(first).matchAll(/</g)];
-  if (angles.length === 0) return { address, name: "" };
-  const name = stripComments(first.slice(0, angles[angles.length - 1].index))
-    .trim()
-    .replace(/^"(.*)"$/s, "$1")
-    .replace(/\\(.)/g, "$1")
-    .trim();
-  return { address, name };
+  if (!value) return { address: "", name: "" };
+  const v = normalizeAddressList(value);
+  const items = splitMailboxes(v);
+  for (const it of items) {
+    const address = addrSpecOf(it.text);
+    if (!address) continue;
+    const lt = angleIndex(it.text);
+    if (lt === -1) return { address, name: "" };
+    const whole = v.slice(0, it.start + lt);
+    const own = it.text.slice(0, lt);
+    const name = /[<>@]/.test(unquoted(whole)) ? own : whole;
+    return { address, name: unquotePhrase(name) };
+  }
+  return { address: "", name: "" };
+}
+
+/** A display-name phrase: trimmed, an enclosing quoted-string unquoted and unescaped. */
+function unquotePhrase(phrase: string): string {
+  const t = phrase.trim();
+  const m = /^"(.*)"$/s.exec(t);
+  return (m ? m[1].replace(/\\(.)/g, "$1") : t).trim();
 }
 
 /** The local-part of an addr-spec, with a quoted local-part (`"no-reply"@x`) unquoted. */

@@ -3,7 +3,7 @@ import { google, gmail_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import fs from "node:fs/promises";
 import path from "node:path";
-import { deriveSignals, type Signal } from "./signals.js";
+import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -140,6 +140,25 @@ export function decodeRfc2047(value: string): string {
       }
     },
   );
+}
+
+/**
+ * Decode a `From` header for display WITHOUT letting the decoded text gain structure.
+ * RFC 2047 §6.2: a decoded encoded-word is text, never syntax — yet a display name that
+ * decodes to `<legit@news.example>,` would read as a second mailbox to anything that
+ * parses the DECODED string, and `parseSender` does (it is the sender key that groups
+ * `triage_digest` / `list_subscriptions` and dedupes `bulk_unsubscribe`): a crafted mail
+ * could take a legitimate newsletter's key. So the structure is read off the RAW value
+ * (`mailboxOf`), only the display name is decoded, and it is re-emitted QUOTED whenever
+ * it contains address syntax. Nothing recognisable as a mailbox → plain decoded text.
+ */
+export function decodeAddressHeader(raw: string): string {
+  const { address, name } = mailboxOf(raw);
+  if (!address) return decodeRfc2047(raw);
+  const shown = decodeRfc2047(name).trim();
+  if (!shown) return address;
+  const needsQuoting = /[()<>@,;:\\"[\]]/.test(shown);
+  return `${needsQuoting ? `"${shown.replace(/[\\"]/g, "\\$&")}"` : shown} <${address}>`;
 }
 
 /**
@@ -433,14 +452,14 @@ export function messageSignals(m: gmail_v1.Schema$Message | undefined): Signal[]
 /** Parse a raw Gmail message into the flat ParsedMessage shape. */
 export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
   const headers = m.payload?.headers ?? [];
-  const h = (n: string) =>
-    decodeRfc2047(headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "");
+  const raw = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+  const h = (n: string) => decodeRfc2047(raw(n));
   const { text, html } = collectBodies(m.payload ?? undefined);
   return {
     id: m.id!,
     threadId: m.threadId!,
     labelIds: m.labelIds ?? [],
-    from: h("From"),
+    from: decodeAddressHeader(raw("From")),
     to: h("To"),
     subject: h("Subject"),
     date: h("Date"),
@@ -644,12 +663,12 @@ export class Gmail {
         const labelIds = [...new Set(msgs.flatMap((m) => m.labelIds ?? []))];
         if (!threadMatchesFilters(labelIds, filters)) continue; // drop index false positives
         const headers = msgs[0]?.payload?.headers ?? [];
-        const h = (n: string) =>
-          decodeRfc2047(headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "");
+        const raw = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+        const h = (n: string) => decodeRfc2047(raw(n));
         out.push({
           threadId: t.id!,
           messageCount: msgs.length,
-          from: h("From"),
+          from: decodeAddressHeader(raw("From")),
           subject: h("Subject"),
           date: h("Date"),
           labelIds,
@@ -735,7 +754,7 @@ export class Gmail {
     const raw = (n: string) => headerOf(last, n);
     return {
       messageId: last.id!,
-      from: decodeRfc2047(raw("From")),
+      from: decodeAddressHeader(raw("From")),
       subject: decodeRfc2047(raw("Subject")),
       listUnsubscribe: raw("List-Unsubscribe"),
       listUnsubscribePost: raw("List-Unsubscribe-Post"),

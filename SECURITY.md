@@ -73,6 +73,12 @@ Model can't tell quoted mail from a command.
 - **Output fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers and stripped
   of invisible / BiDi-override characters, so the client can distinguish mailbox content from
   `mailwarden`'s own output.
+- **Header text is not header syntax.** Where a header's *structure* matters — the `From` mailbox that
+  keys `triage_digest` / `list_subscriptions` grouping and the `bulk_unsubscribe` per-sender dedupe,
+  the `Reply-To` domains behind `replyToMismatch` — it is read off the raw wire form with a scanner
+  that knows RFC 5322 quoting, comments and groups; RFC 2047 encoded-words are decoded only into the
+  display name, and re-quoted if the decoded text contains address syntax. A display name cannot pose
+  as another sender's address, encoded or not (0.10.0).
 
 ### 4. Acting on stale state
 An action fires against mail that has since changed — or against the search index's false positives.

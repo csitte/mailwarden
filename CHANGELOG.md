@@ -81,6 +81,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is known to lack `gmail.settings.basic` registers no filter tools and advertises none.
 
 ### Changed
+- **`from` in search hits, `get_thread` messages and subscription rows is normalised** to
+  `Name <address>` (address lowercased, RFC 5322 comments dropped, a name with address syntax in it
+  quoted) — a by-product of reading the structure off the raw header (see *Fixed*). A bare address stays
+  bare; a header with no recognisable mailbox stays plain decoded text.
 - **README: the snooze claim is now "mailbox-side snooze", not "the feature nobody else ships".** Another
   Gmail MCP server carries a local reminder list under the name snooze; what is unique here is that the
   snooze lives in the mailbox (label + sweep, visible in Gmail, survives a restart). Unsubscribe added to
@@ -93,6 +97,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **MCP SDK 1.29 → 1.30.0** (floor now `^1.30.0`): upstream stdio buffer limits, SSE keep-alive frames and
   stricter Content-Type validation. No behavioural change for mailwarden; the v2 SDK (spec 2026-07-28)
   is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md), not pulled by this range.
+
+### Fixed
+- **A crafted `From` display name could take another sender's key.** The sender key (the addr-spec) that
+  groups `triage_digest` and `list_subscriptions` and dedupes `bulk_unsubscribe` per sender was read off
+  the *RFC 2047-decoded* header. RFC 2047 says decoded text is text, never syntax — but a display name
+  that decodes to `<legit@news.example>,` read as a second mailbox, so a mail Gmail shows as
+  `evil@x.example` was filed under the newsletter's key: `list_subscriptions` merged it into that sender's
+  row (and inspected the attacker's thread for the row's opt-out options), `bulk_unsubscribe` skipped
+  the real newsletter as a duplicate if the attacker's thread came first. Since 0.9.0. Now the mailbox
+  structure is read off the RAW header (`decodeAddressHeader`), only the display name is decoded, and it
+  is re-emitted quoted whenever it contains address syntax; `parseSender` itself uses the same
+  quote-/comment-aware scanner as the signals, so neither the raw form (`"<legit@x>" <evil@y>`) nor the
+  encoded one can pose as another address. No send, no data leaves the mailbox either way — this was
+  mis-grouping and a skipped opt-out, found in the release checks (round 4, fix-commit review), not
+  reported.
 
 ## [0.9.0] - 2026-08-13
 

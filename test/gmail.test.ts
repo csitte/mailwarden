@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import type { gmail_v1 } from "googleapis";
+import { parseSender } from "../src/digest.js";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -13,6 +14,7 @@ import {
   threadMatchesFilters,
   parseMessage,
   decodeRfc2047,
+  decodeAddressHeader,
   withBackoff,
   isInvalidGrant,
   isInsufficientScope,
@@ -707,6 +709,48 @@ describe("Gmail.search — pagination", () => {
     expect(listCalls[0].pageToken).toBe("p8");
     expect(res.threads.map((r) => r.threadId)).toEqual(["d"]);
     expect(res.nextPageToken).toBe("p9");
+  });
+});
+
+describe("decodeAddressHeader — RFC 2047 text must not become address syntax", () => {
+  // The attack: on the wire ONE valid mailbox (DMARC-aligned on x.example); the display
+  // name is an encoded-word that DECODES to `<legit@news.example>,`. Decode-then-parse
+  // would read that as a second mailbox and hand the attacker the newsletter's sender key
+  // (digest grouping, list_subscriptions grouping, bulk_unsubscribe dedupe).
+  const attack = "=?UTF-8?Q?=3Clegit=40news=2Eexample=3E=2C?= <evil@x.example>";
+  it("keeps the real mailbox and quotes the decoded name", () => {
+    expect(decodeAddressHeader(attack)).toBe('"<legit@news.example>," <evil@x.example>');
+    expect(parseSender(decodeAddressHeader(attack))).toEqual({
+      email: "evil@x.example",
+      name: "<legit@news.example>,",
+    });
+  });
+  it.each([
+    ["=?UTF-8?Q?legit=40news=2Eexample=2C?= <evil@x.example>", '"legit@news.example," <evil@x.example>', "evil@x.example"],
+    ["=?UTF-8?Q?=3Clegit=40news=2Eexample=3E?= <evil@x.example>", '"<legit@news.example>" <evil@x.example>', "evil@x.example"],
+    ["=?UTF-8?Q?a=3B_b?= <evil@x.example>", '"a; b" <evil@x.example>', "evil@x.example"],
+    ['=?UTF-8?Q?Say_=22hi=22?= <q@x.example>', '"Say \\"hi\\"" <q@x.example>', "q@x.example"],
+  ])("%s → %s, sender key %s", (raw, shown, key) => {
+    expect(decodeAddressHeader(raw)).toBe(shown);
+    expect(parseSender(decodeAddressHeader(raw)).email).toBe(key);
+  });
+  it("renders ordinary headers as before: name, then address; comma names quoted", () => {
+    expect(decodeAddressHeader("Alice Example <alice@example.com>")).toBe("Alice Example <alice@example.com>");
+    expect(decodeAddressHeader("=?UTF-8?B?Tm9yZWVu?= <noreply@x.example>")).toBe("Noreen <noreply@x.example>");
+    expect(decodeAddressHeader("=?iso-8859-1?Q?M=FCller=2C_Hans?= <h@x.example>")).toBe('"Müller, Hans" <h@x.example>');
+    expect(parseSender(decodeAddressHeader("=?iso-8859-1?Q?M=FCller=2C_Hans?= <h@x.example>"))).toEqual({
+      email: "h@x.example",
+      name: "Müller, Hans",
+    });
+    expect(decodeAddressHeader('"Doe, Jane" <jane@x.example>')).toBe('"Doe, Jane" <jane@x.example>');
+    expect(decodeAddressHeader("bob@y.example")).toBe("bob@y.example");
+    expect(decodeAddressHeader("<bob@y.example>")).toBe("bob@y.example");
+    expect(decodeAddressHeader("Alice (Sales) <a@x.example>")).toBe("Alice <a@x.example>");
+  });
+  it("falls back to plain decoded text when there is no mailbox", () => {
+    expect(decodeAddressHeader("=?UTF-8?B?Tm9yZWVu?=")).toBe("Noreen");
+    expect(decodeAddressHeader("")).toBe("");
+    expect(decodeAddressHeader("Just A Name")).toBe("Just A Name");
   });
 });
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { deriveSignals, addressOf, addressesOf, ALL_SIGNALS, type SignalInput } from "../src/signals.js";
+import { deriveSignals, addressOf, addressesOf, mailboxOf, ALL_SIGNALS, type SignalInput } from "../src/signals.js";
 import { messageSignals } from "../src/gmail.js";
 import { buildDigest } from "../src/digest.js";
 import type { ThreadSummary } from "../src/gmail.js";
@@ -353,6 +353,39 @@ describe("deriveSignals corpus — design questions, conservative reading pinned
     ["application/ics without a file name → silent", F, cal("application/ics"), []],
     ["text/x-vcalendar (vCalendar 1.0) → silent", F, cal("text/x-vcalendar"), []],
   ])("%s", (_n, h, p, exp) => expect(sig(h, p)).toEqual(exp));
+});
+
+describe("mailboxOf — first mailbox with its display name", () => {
+  it.each([
+    ["Doe, Jane <j@x.example>", "j@x.example", "Doe, Jane"],
+    ["Acme, Inc. <news@acme.example>", "news@acme.example", "Acme, Inc."],
+    ["Smith, John, Jr. <js@x.example>", "js@x.example", "Smith, John, Jr."],
+    ['"Doe, Jane" <j@x.example>', "j@x.example", "Doe, Jane"],
+    ["Alice <>, Bob <b@y.example>", "b@y.example", "Bob"],
+    ["a@x.example, Bob <b@y.example>", "a@x.example", ""],
+    ["Alice (Sales) <a@x.example>", "a@x.example", "Alice"],
+    ['"<legit@news.example>" <evil@x.example>', "evil@x.example", "<legit@news.example>"],
+    ["Alice <a@x.example>", "a@x.example", "Alice"],
+    ["a@x.example", "a@x.example", ""],
+    ["Just A Name", "", ""],
+    ["", "", ""],
+  ])("%s → %s / %s", (v, address, name) => {
+    expect(mailboxOf(v)).toEqual({ address, name });
+  });
+  it("is linear: a 100 KB header of separators and quotes parses in milliseconds", () => {
+    const inputs = [
+      '"' + ",".repeat(100_000) + '" <a@x.example>',
+      ",".repeat(100_000) + " <a@x.example>",
+      "(".repeat(50_000) + ")".repeat(50_000) + " <a@x.example>",
+      '"(<a@b>,;'.repeat(12_000) + " <a@x.example>",
+    ];
+    const t0 = performance.now();
+    for (const v of inputs) {
+      mailboxOf(v);
+      addressesOf(v);
+    }
+    expect(performance.now() - t0).toBeLessThan(500);
+  });
 });
 
 describe("addressOf / addressesOf", () => {
