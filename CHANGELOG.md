@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Listed on Smithery as [`csitte/mailwarden`](https://smithery.ai/server/csitte/mailwarden)** — it serves
+  the 0.10.0 MCPB bundle. README says which of Smithery's two paths keeps the no-third-party property
+  (`smithery install …` writes a local stdio entry; the toolbox/uplink path relays tool traffic through
+  Smithery's gateway).
+
 ### Fixed
 - **`npm run mcpb` release detection counted untracked files as a dirty tree.** In the publish
   workflow the downloaded `mcp-publisher` binary sat untracked in the checkout, so the CI-built 0.10.0

@@ -4,6 +4,7 @@
 [![license](https://img.shields.io/npm/l/mailwarden)](LICENSE)
 [![Node](https://img.shields.io/node/v/mailwarden)](package.json)
 [![Website](https://img.shields.io/badge/Website-csitte.at%2Fmailwarden-2ea44f)](https://www.csitte.at/mailwarden/)
+[![Smithery](https://img.shields.io/badge/Smithery-csitte%2Fmailwarden-ea580c)](https://smithery.ai/server/csitte/mailwarden)
 [![Available on CodeGuilds](https://img.shields.io/badge/Available_on-CodeGuilds-6366f1?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://codeguilds.dev/packages/mailwarden)
 
 A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox triage for AI assistants, with the feature no other Gmail MCP server ships: **mailbox-side snooze**.
@@ -322,9 +323,20 @@ Or install the **MCPB bundle** (`mailwarden-<version>.mcpb`, attached to
 Extensions → *Install extension…* — the same server, self-contained at run time (no `npx`; Claude
 Desktop brings the Node runtime), with the tool tiers as a setting. The bundle is built from the packed
 npm package (same file set as published; `npm run mcpb`, verified in CI: validated, unpacked and booted)
-and is the format Smithery uses for a local stdio server (Smithery gets a variant of the same file set
-with full tool schemas). The one-time `npx -y mailwarden --auth` still applies (Node needed once for
-that) — the bundle reads the same `~/.mailwarden/` token.
+and is the same file set Smithery distributes. The one-time `npx -y mailwarden --auth` still applies
+(Node needed once for that) — the bundle reads the same `~/.mailwarden/` token.
+
+**Smithery** — listed as [`csitte/mailwarden`](https://smithery.ai/server/csitte/mailwarden), which serves
+that bundle:
+```bash
+npx -y @smithery/cli install csitte/mailwarden --client claude   # local stdio entry in the client's config
+```
+Note which of Smithery's two paths you take. The install above writes a plain local server entry: the
+process, your token and your mail stay on your machine, exactly as with `npx`. Adding it to Smithery's
+**toolbox** instead (`smithery mcp add`) also runs the bundle locally, but relays the tool traffic
+through Smithery's gateway so a remote client can reach it — the mailbox content in those responses then
+passes through a third party. That is a property of the gateway, not of mailwarden; if you want the
+no-third-party guarantee, use the local install, the npm package, or the `.mcpb` from the release page.
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
 ```bash

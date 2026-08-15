@@ -35,7 +35,7 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 - **MCPB bundle** (`npm run mcpb` → `dist-mcpb/mailwarden-<version>.mcpb`) as a release artifact — the
   format Smithery (`smithery mcp publish`) and the Claude Desktop extension directory accept for a
   local stdio server; built from the packed package against the lockfile, validated, unpacked and
-  booted in CI (0.10.0). Smithery listing follows from that release on.
+  booted in CI (0.10.0). Published on Smithery as `csitte/mailwarden` (15.08.2026).
 
 ## Next
 
