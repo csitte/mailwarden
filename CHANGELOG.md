@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   advertise snooze or filters.
 
 ### Changed
+- **`SECURITY.md`: mapped against published guidance.** New section citing the MCP Security Best
+  Practices (spec 2026-07-28) and the OWASP MCP Security Cheat Sheet, and stating which control here
+  answers which recommendation (stdio/loopback+token, scope minimization = tiers, SSRF guard, output
+  fencing, URL never a tool parameter, `destructiveHint` on the tools a client should gate). Also
+  names what only a client can deliver.
 - **MCP SDK 1.29 → 1.30.0** (floor now `^1.30.0`): upstream stdio buffer limits, SSE keep-alive frames and
   stricter Content-Type validation. No behavioural change for mailwarden; the v2 SDK (spec 2026-07-28)
   is tracked in [`docs/ROADMAP.md`](docs/ROADMAP.md), not pulled by this range.

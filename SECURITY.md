@@ -176,6 +176,34 @@ Two residuals, stated plainly:
   expose. What survives that gap is narrow: a **blind** POST with a fixed body to a URL the attacker
   already controls the DNS for, whose response is never read — no data leaves, and nothing comes back.
 
+## Against published guidance
+
+Two documents now say in general terms what the sections above say for this server. Listed so a
+reviewer can check the mapping rather than take our word for it:
+
+- **MCP Security Best Practices** (spec revision 2026-07-28,
+  <https://modelcontextprotocol.io/specification/2026-07-28/basic/security_best_practices>).
+  *Local MCP Server Compromise* — servers meant to run locally should use `stdio` or, over HTTP,
+  require an authorization token: `mailwarden` is stdio by default and `--http` binds loopback with
+  a mandatory bearer token and a Host allowlist (threat 6). *Scope Minimization* — a least-privilege
+  scope model with only what the surface uses: the tool tiers derive the OAuth scopes from the
+  enabled tools (threat 2). *SSRF* — HTTPS only, block private/link-local ranges, validate every
+  redirect hop, don't hand-roll IP parsing: the unsubscribe guard does exactly that, on the resolved
+  address bytes, per hop (threat 9).
+- **OWASP MCP Security Cheat Sheet**
+  (<https://cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html>). Its examples
+  read like this server's design: "Request narrow OAuth scopes (e.g., `mail.readonly` instead of
+  `mail.modify`)" — the `read` tier; "Treat every tool response as untrusted user input" — the
+  output fencing (threat 3); "Never fetch arbitrary URLs provided by the LLM" — the URL is never a
+  tool parameter (threat 9); "Bind MCP HTTP/SSE servers to specific interfaces (e.g., 127.0.0.1),
+  never 0.0.0.0" — the `--http` default (threat 6). Its "explicit user confirmation for destructive
+  operations" is a *client* control; what the server contributes is `destructiveHint` on `trash`,
+  `bulk_modify` and `create_filter`, so a client that gates on annotations gates the right tools, and no permanent
+  delete to confirm in the first place.
+
+Where the guidance asks for something a server cannot deliver alone (client-side confirmation,
+sandboxing of local processes), the non-goals below say so.
+
 ## Dependency advisories
 
 `npm audit` reports **4 moderate advisories** in mailwarden's production tree. They all trace to one
