@@ -6,12 +6,14 @@
 [![Website](https://img.shields.io/badge/Website-csitte.at%2Fmailwarden-2ea44f)](https://www.csitte.at/mailwarden/)
 [![Available on CodeGuilds](https://img.shields.io/badge/Available_on-CodeGuilds-6366f1?logo=data:image/svg%2bxml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyTDIgN2wxMCA1IDEwLTV6TTIgMTdsMTAgNSAxMC01TTIgMTJsMTAgNSAxMC01Ii8+PC9zdmc+)](https://codeguilds.dev/packages/mailwarden)
 
-A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox triage for AI assistants, with the feature nobody else ships: **snooze**.
+A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox triage for AI assistants, with the feature no other Gmail MCP server ships: **mailbox-side snooze**.
 
 ## Highlights
 
-- **Snooze — the feature nobody else ships.** Archive a thread now, have it resurface in the inbox
-  on a date. Built on dated labels + a sweep, so it works from any client and survives restarts.
+- **Snooze — the only *mailbox-side* snooze in a Gmail MCP server.** Archive a thread now, have it
+  resurface in the inbox on a date. Built on dated labels + a sweep, so it works from any client,
+  is visible in Gmail itself, and survives restarts. (Where another server offers a "snooze", it is
+  a local reminder list — the mail never leaves or re-enters the inbox.)
 - **Search you can trust.** Gmail's own search index silently drops `is:unread` in some operator
   combinations — `search` re-verifies every hit against its live labels and discards the index's
   false positives. Paginated via `pageToken`/`nextPageToken`.
@@ -39,13 +41,14 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 
 ## Compared to other Gmail MCP servers
 
-Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden`, and one deliberate omission is a security feature, not a gap.
+Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden` among Gmail MCP servers (mailbox-side snooze, search re-verification), and one deliberate omission is a security feature, not a gap. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
 
 | Capability | **mailwarden** | [taylorwilsdon](https://github.com/taylorwilsdon/google_workspace_mcp) | [Google official](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | mcpemails.com |
 |---|:--:|:--:|:--:|:--:|
-| **Snooze** — defer a thread back to the inbox on a date/time or preset | ✅ | — | — | — |
+| **Mailbox-side snooze** — archive now, resurface in the inbox on a date/time or preset | ✅ | — | — | — |
 | **Search-result re-verification** — drops the index's false positives against live labels | ✅ | — | — | — |
 | **Sweep / bulk over a query** — one action across every matching thread | ✅ 1000/req, partial-success | — | — | ⚠️ bulk organize (no query re-verification) |
+| **Unsubscribe** — per-sender overview + RFC 8058 one-click opt-out, no send scope needed | ✅ | — | — | — |
 | **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose at all | ❌ sends | ⚠️ draft-only | ❌ sends |
 | **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | — | ⚠️ scope split | ⚠️ scoped keys |
 | **Token encryption at rest** (optional) | ✅ AES-256-GCM | ✅ | n/a (hosted) | ✅ AES-256-GCM |
