@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`--auth` could silently replace another mailbox's token.** Which file it writes is decided by
+  `--account` / `MAILWARDEN_ACCOUNT` **alone**, never by the account picked in the consent screen — so
+  authorizing a second mailbox from a checkout (a bare `npm run auth`, which passes neither) aimed
+  straight at the first mailbox's `token.json` and overwrote it. Nothing failed: the success line
+  ("authorized as <address>") was formally true, and the loss surfaced only at the next server
+  restart, when a session found itself in the wrong mailbox. Reported 15.08.2026 by the two mailbox
+  sessions that ran into it, and proven from both sides by Google's own grant mails — to the minute of
+  the file write. Now `--auth` establishes both identities before writing: which account the existing
+  file belongs to, and which one was just authorized. They must match, or nothing is written and the
+  message names both addresses, the file, and the two ways forward (`--account <name>` for a second
+  mailbox, `--force` to replace deliberately). Tokens written from now on record their account, so the
+  check costs no call; an older one is asked live, once, so an existing install is covered on its very
+  first run rather than one auth too late. **"Cannot tell" counts as a mismatch** — an unidentifiable
+  token must not authorize its own replacement — with exactly one exception: a token Google itself
+  rejects with `invalid_grant` protects nothing and is replaced with a note. A timeout is not that
+  exception; it proves nothing about the token, and treating the two alike would let a flaky network do
+  the damage this prevents. The target path is now also printed **before** the browser opens (the last
+  moment `Ctrl-C` still helps) and named in the success line. `--auth` was never a no-op on an existing
+  token and still isn't: the consent flow runs, the guard decides afterwards whether the result may be
+  stored. Both reporting sessions reviewed the design before it was built, and two of the rules above
+  exist because they found holes in the first sketch.
+
 ### Added
 - **`scripts/probe-reverify.mjs` — hold the re-verification *premise* against a real mailbox.**
   `demo-reverify.mjs` proves what `search()` does when an index is loose, against a fake API we made

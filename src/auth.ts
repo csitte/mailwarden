@@ -8,6 +8,10 @@ import path from "node:path";
 import os from "node:os";
 import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
 import { CliError } from "./cli.js";
+// gmail.ts does not import this module, so this stays acyclic. The invalid_grant test lives there
+// because that is where it is normally raised (the API layer), and the overwrite guard needs the
+// same judgement: a token Google rejects is dead, a token that merely timed out is not.
+import { isInvalidGrant } from "./gmail.js";
 
 /**
  * The OAuth scopes to request are derived from the enabled tool tiers (see tiers.ts):
@@ -359,6 +363,7 @@ async function persistToken(
   client: OAuth2Client,
   cred: { client_id: string; client_secret: string },
   account: string | null,
+  email?: string | null,
 ): Promise<void> {
   await fs.mkdir(CONFIG_DIR, { recursive: true });
   const payload = JSON.stringify(
@@ -371,6 +376,11 @@ async function persistToken(
       // (filters) without a network round-trip. Optional: google.auth.fromJSON
       // ignores this extra field, and an older token without it reads as "unknown".
       ...(client.credentials.scope ? { scope: client.credentials.scope } : {}),
+      // Record WHICH mailbox this token belongs to, so a later `--auth` can tell whether it is
+      // about to replace a token for a *different* account (see tokenOverwriteVerdict). Same
+      // deal as `scope`: google.auth.fromJSON ignores it, and an older file without it reads
+      // as "unknown" rather than as a mismatch.
+      ...(email ? { email } : {}),
     },
     null,
     2,
@@ -382,6 +392,122 @@ async function persistToken(
   const contents = key ? JSON.stringify(encryptToken(payload, key), null, 2) : payload;
   await fs.writeFile(tokenPath(account), contents, { mode: 0o600 });
   if (key) console.error("mailwarden: token stored encrypted at rest (MAILWARDEN_TOKEN_PASSPHRASE).");
+}
+
+/** Gmail addresses are case-insensitive in practice; compare them that way. */
+const sameMailbox = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+export type OverwriteCheck = { ok: true; note?: string } | { ok: false; message: string };
+
+/**
+ * May `--auth` replace the token file that is already there?
+ *
+ * The accident this exists for (reported 15.08.2026, and proven by Google's own grant mail):
+ * the target path is decided by `--account`/`MAILWARDEN_ACCOUNT` ALONE, never by the account
+ * clicked in the consent screen. So authorizing a second mailbox from a repo checkout — a bare
+ * `npm run auth` — silently replaced the *first* mailbox's token. Nothing failed, and the success
+ * line ("authorized as <address>") was formally true, which is exactly why nobody read it as a
+ * warning.
+ *
+ * The rule is therefore: overwrite only what we can positively identify as the SAME mailbox.
+ * "Cannot tell" counts as a mismatch, not as permission — a token written before this version
+ * records no account, and that is precisely the first run after an update, i.e. the run the check
+ * is supposed to catch. Being lenient there would make the whole guard inert exactly once per
+ * installation, at the decisive moment. (That correction came from the multi-account session
+ * reviewing this design; the first sketch had the blind spot.)
+ */
+export function tokenOverwriteVerdict(input: {
+  tokenFile: string;
+  exists: boolean;
+  storedEmail: string | null;
+  storedDead?: boolean;
+  newEmail: string | null;
+  force: boolean;
+  account: string | null;
+}): OverwriteCheck {
+  const { tokenFile, exists, storedEmail, storedDead, newEmail, force, account } = input;
+  if (!exists) return { ok: true };
+  if (storedEmail && newEmail && sameMailbox(storedEmail, newEmail)) return { ok: true };
+  // A token Google itself rejects (invalid_grant — revoked, or the 7-day expiry of a "Testing"
+  // consent screen) guards nothing: whoever owns it cannot use it either, so replacing it takes
+  // nothing away. Note the narrowness — ONLY invalid_grant counts. A timeout or a 5xx also fails
+  // to name the account, but says nothing about the token, and waving those through would let a
+  // flaky network do exactly the damage this check prevents.
+  if (storedDead && !storedEmail) {
+    return {
+      ok: true,
+      note: `Replacing ${tokenFile}: the token stored there is no longer accepted by Google (invalid_grant), so nothing was lost.`,
+    };
+  }
+
+  const what = storedEmail
+    ? `It holds a token for ${storedEmail}`
+    : `It could not be identified — a token written before this version records no account, and an ` +
+      `expired, encrypted or malformed one cannot be asked either`;
+  const granted = newEmail ? `you just authorized ${newEmail}` : `the account you just authorized could not be confirmed`;
+
+  if (force) {
+    return { ok: true, note: `Replacing ${tokenFile} as instructed (--force): ${what.toLowerCase()}, ${granted}.` };
+  }
+
+  return {
+    ok: false,
+    message:
+      `Refusing to overwrite ${tokenFile}. ${what}, and ${granted}.\n` +
+      `Replacing it would leave that mailbox without a token — silently, which is the accident this check exists for.\n\n` +
+      `  To authorize a SECOND mailbox alongside the first:\n` +
+      `      mailwarden --auth --account <name>      (writes token.<name>.json, leaves this file alone)\n` +
+      `  To deliberately replace the token in ${tokenFile}:\n` +
+      `      mailwarden --auth${account ? ` --account ${account}` : ""} --force\n\n` +
+      `Nothing was written. The consent you completed in the browser granted access but stored no ` +
+      `token here; revoke it at https://myaccount.google.com/permissions if it was not intended.`,
+  };
+}
+
+/**
+ * Which mailbox does the token at `tokenFile` belong to? `null` when that cannot be established —
+ * which this deliberately does NOT paper over: an unidentifiable token is treated as a mismatch
+ * above. Tokens written by this version answer from the file (no network); older ones are asked
+ * live, so a still-valid token of the SAME account re-authorizes without friction.
+ */
+async function identifyStoredToken(): Promise<{ exists: boolean; email: string | null; dead: boolean }> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await fs.readFile(tokenPath(), "utf8"));
+  } catch (err) {
+    // ENOENT = nothing to overwrite. Anything else (unreadable, not JSON) exists but cannot be
+    // identified — reported as such rather than as absent, which would wave the write through.
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, email: null, dead: false };
+    return { exists: true, email: null, dead: false };
+  }
+  const recorded = (parsed as { email?: unknown } | null)?.email;
+  if (typeof recorded === "string" && recorded.trim()) return { exists: true, email: recorded.trim(), dead: false };
+
+  // No recorded account: ask Gmail with the OLD token. One extra call, only during interactive
+  // `--auth`, and only for tokens predating this field — so an existing install is covered on its
+  // very first run rather than one auth too late, which is the whole point of the check.
+  try {
+    const client = await loadSavedToken();
+    if (!client) return { exists: true, email: null, dead: false }; // malformed shape: unusable, but unproven
+    return { exists: true, ...(await probeEmail(client)) };
+  } catch {
+    // Encrypted without a passphrase, for instance: exists, cannot be asked, not proven dead.
+    return { exists: true, email: null, dead: false };
+  }
+}
+
+/**
+ * The mailbox a client is authorized for. Never throws — `--auth` must not fail over a probe — but
+ * it does distinguish the one failure that carries meaning: `invalid_grant` proves the token is
+ * expired or revoked, whereas a timeout proves nothing.
+ */
+async function probeEmail(client: OAuth2Client): Promise<{ email: string | null; dead: boolean }> {
+  try {
+    const res = await google.gmail({ version: "v1", auth: client }).users.getProfile({ userId: "me" });
+    return { email: res.data.emailAddress ?? null, dead: false };
+  } catch (err) {
+    return { email: null, dead: isInvalidGrant(err) };
+  }
 }
 
 /**
@@ -400,7 +526,7 @@ let cachedClient: OAuth2Client | null = null;
  * - interactive=false (server runtime): loads the stored refresh token, else throws.
  * - interactive=true (`mailwarden --auth`): runs the browser consent flow once and stores it.
  */
-export async function getAuth(interactive = false): Promise<OAuth2Client> {
+export async function getAuth(interactive = false, opts: { force?: boolean } = {}): Promise<OAuth2Client> {
   if (!interactive) {
     if (cachedClient) return cachedClient;
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
@@ -442,6 +568,11 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
   // of a "Testing" OAuth consent screen, which surfaces as invalid_grant) would otherwise make
   // re-auth a silent no-op that never opens the browser and never replaces the dead token.
   const scopes = authScopesForTiers(resolveEnabledTiers(process.env));
+  const account = activeAccount();
+  // Name the target BEFORE the browser opens. After the fact it is a report; here it is the last
+  // moment a `Ctrl-C` still helps — and the path, not the address, is what tells a multi-account
+  // user that this run is about to aim at the wrong file.
+  console.error(`mailwarden: authorizing → will write ${tokenPath(account)}`);
   const client = (await authenticate({ scopes, keyfilePath: CRED_PATH })) as OAuth2Client;
   if (!client.credentials.refresh_token) {
     throw new CliError(
@@ -450,7 +581,25 @@ export async function getAuth(interactive = false): Promise<OAuth2Client> {
         "then run `mailwarden --auth` again.",
     );
   }
-  await persistToken(client, cred, activeAccount());
+
+  // Never replace one mailbox's token with another's by accident. Both sides are established
+  // first: which account the file currently belongs to, and which one the consent screen just
+  // authorized. The verdict is a pure function so its rules are testable without a browser.
+  const stored = await identifyStoredToken();
+  const fresh = await probeEmail(client);
+  const verdict = tokenOverwriteVerdict({
+    tokenFile: tokenPath(account),
+    exists: stored.exists,
+    storedEmail: stored.email,
+    storedDead: stored.dead,
+    newEmail: fresh.email,
+    force: opts.force === true,
+    account,
+  });
+  if (!verdict.ok) throw new CliError(verdict.message);
+  if (verdict.note) console.error(`mailwarden: ${verdict.note}`);
+
+  await persistToken(client, cred, account, fresh.email);
   cachedClient = null; // a later non-interactive load re-reads the freshly stored token
   return client;
 }

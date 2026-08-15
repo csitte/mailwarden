@@ -266,6 +266,43 @@ Want **both** mailboxes instead of replacing one? Keep the first and authorize t
 own name: `npx -y mailwarden --auth --account work`, then register a second server entry with
 `MAILWARDEN_ACCOUNT=work` in its env. See *Multiple accounts* in the README.
 
+### "Refusing to overwrite …/token.json"
+
+You ran `--auth` and picked a Google account that is **not** the one the target token file belongs
+to. mailwarden stopped before writing, because that write would have left the first mailbox without
+a token — silently, which is exactly how it goes unnoticed.
+
+Which file is written depends **only** on `--account` / `MAILWARDEN_ACCOUNT`, never on the account
+you click in the browser. So authorizing a second mailbox without `--account` aims straight at the
+first one's file. Two ways on:
+
+```bash
+npx -y mailwarden --auth --account work   # a SECOND mailbox, in its own token.work.json
+npx -y mailwarden --auth --force          # really replace what is in the default token.json
+```
+
+The refusal stops the **write**, not the **grant** — the browser consent already went through, and
+Google has already mailed you about it. If it was a mistake, revoke that access at
+<https://myaccount.google.com/permissions>.
+
+You may also see it when the existing token cannot be identified — one written by mailwarden before
+0.11.0 records no account, and an encrypted or unreachable one cannot be asked. That is treated as a
+mismatch on purpose: "I don't know whose token this is" must not authorize replacing it. `--force`
+is the way through. (A token Google itself rejects with `invalid_grant` is replaced without asking:
+it protects nothing.)
+
+### After re-authorizing, the server still uses the old account
+
+Expected, and the reason a repair can look like it failed: a running server holds its OAuth client
+in memory for the life of the process, so `--auth` in another terminal cannot reach it. **Restart
+the MCP server** (in Claude Code: `/mcp` reconnect) and check with `get_profile` that the address is
+the one you expect.
+
+Worth making a habit in a multi-account setup: **call `get_profile` before the first action that
+changes anything.** But compare it against the address you *expect*, written down somewhere — a
+wrong mailbox answers just as plausibly as the right one ("112 messages" looks fine either way).
+A deviation means stop, not think.
+
 ### Where's my data? How do I uninstall?
 
 Local state is one directory: `~/.mailwarden/` — `credentials.json`, `token.json`, and one

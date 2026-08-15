@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
-import { getAuth, hasModifyScope, hasFilterScope, activeAccount } from "./auth.js";
+import { getAuth, hasModifyScope, hasFilterScope, activeAccount, tokenPath } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
@@ -67,13 +67,20 @@ async function main(): Promise<void> {
         `Unexpected argument '${stray}'. To authorize a named account use: mailwarden --auth --account <name>.`,
       );
     }
-    const client = await getAuth(true);
+    // `--force` deliberately replaces a token that belongs to a DIFFERENT mailbox. Without it,
+    // that case aborts before anything is written (auth.ts, tokenOverwriteVerdict).
+    const force = args.includes("--force");
+    const client = await getAuth(true, { force });
     // Prove the credential works end-to-end before declaring success — catches a
     // consent that completed but can't actually call Gmail (wrong scope, etc.).
     try {
       const { emailAddress } = await new Gmail(client).getProfile();
       const label = account ? ` (account: ${account})` : "";
-      console.error(`✓ mailwarden authorized as ${emailAddress}${label} — refresh token stored.`);
+      // Name the file, not just the address. "authorized as X" was formally true even when the
+      // token landed in another mailbox's file — the report that could not show the accident.
+      console.error(
+        `✓ mailwarden authorized as ${emailAddress}${label} — refresh token stored in ${tokenPath(account)}.`,
+      );
       if (account) {
         console.error(
           `  To use this account, start the server with MAILWARDEN_ACCOUNT=${account} ` +

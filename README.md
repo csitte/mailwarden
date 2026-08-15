@@ -372,6 +372,15 @@ Account names are **case-insensitive** — they become filenames, so `Work` and 
 same file on Windows/macOS. mailwarden lower-cases them (`--account Work` → `token.work.json`) so a
 name always maps to exactly one mailbox.
 
+**Which file `--auth` writes depends only on `--account` / `MAILWARDEN_ACCOUNT` — never on the
+account you pick in the browser.** Authorizing a second mailbox *without* `--account` would
+therefore aim straight at the first one's token file, so `--auth` checks first and **refuses**
+rather than replacing another mailbox's token; `--force` overrides it deliberately. The two knobs
+are not interchangeable: `MAILWARDEN_ACCOUNT` is the one for several mailboxes out of one config
+directory (it picks `token.<name>.json`), while `MAILWARDEN_DIR` moves the *whole* directory —
+useful to keep setups apart entirely, but it does not give you a second account inside one.
+`npm run auth` from a repo clone passes neither, i.e. it always serves the default account.
+
 `mailwarden --check` shows the active account and lists the others it finds. With no
 `MAILWARDEN_ACCOUNT` set, everything uses the default `token.json` exactly as before — this is fully
 backward compatible.
@@ -405,7 +414,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (747 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (763 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

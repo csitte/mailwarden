@@ -2,7 +2,8 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { checkCredentials, encryptToken, decryptToken } from "../src/auth.js";
+import { checkCredentials, encryptToken, decryptToken, tokenOverwriteVerdict } from "../src/auth.js";
+import type { OverwriteCheck } from "../src/auth.js";
 
 // Stable mock instance that survives vi.resetModules() (the factory re-runs,
 // but keeps handing out this same vi.fn).
@@ -131,15 +132,14 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     await expect(fs.access(path.join(tmp, "token.json"))).rejects.toThrow();
   });
 
-  it("runs the consent flow even when a stale token.json already exists (re-auth is not a no-op)", async () => {
-    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+  /** A previous grant's token sitting on disk, in the pre-`email` shape every existing install has. */
+  async function withStaleToken(dir: string) {
     await fs.writeFile(
-      path.join(tmp, "credentials.json"),
+      path.join(dir, "credentials.json"),
       JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
     );
-    // A dead token from a previous grant is sitting on disk.
     await fs.writeFile(
-      path.join(tmp, "token.json"),
+      path.join(dir, "token.json"),
       JSON.stringify({
         type: "authorized_user",
         client_id: "cid",
@@ -148,14 +148,58 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
       }),
     );
     mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+  }
+
+  it("runs the consent flow even when a token.json already exists (re-auth is not a no-op)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await withStaleToken(tmp);
+
+    const { getAuth } = await freshAuth(tmp);
+    // Whatever the overwrite guard decides afterwards, the browser flow must have RUN — the
+    // property this test has always defended: a stale token must never make --auth a silent no-op
+    // that leaves the dead token in place.
+    await getAuth(true).catch(() => undefined);
+    expect(mocks.authenticate).toHaveBeenCalledOnce();
+  });
+
+  it("refuses to replace a token it cannot identify, and leaves it untouched", async () => {
+    // No network here, so neither the stored token nor the fresh client can be resolved to an
+    // address — the guard's fail-closed case. The old token must survive the refusal intact.
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await withStaleToken(tmp);
+
+    const { getAuth } = await freshAuth(tmp);
+    await expect(getAuth(true)).rejects.toThrow(/Refusing to overwrite/);
+
+    const kept = JSON.parse(await fs.readFile(path.join(tmp, "token.json"), "utf8"));
+    expect(kept.refresh_token).toBe("stale-rt");
+  });
+
+  it("replaces it when the user says so explicitly (--force)", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await withStaleToken(tmp);
+
+    const { getAuth } = await freshAuth(tmp);
+    await getAuth(true, { force: true });
+
+    const stored = JSON.parse(await fs.readFile(path.join(tmp, "token.json"), "utf8"));
+    expect(stored.refresh_token).toBe("fresh-rt");
+  });
+
+  it("writes the first token with no guard in the way", async () => {
+    // Nothing to overwrite → the common first-run path must stay frictionless.
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+    await fs.writeFile(
+      path.join(tmp, "credentials.json"),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+    );
+    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "first-rt" } });
 
     const { getAuth } = await freshAuth(tmp);
     await getAuth(true);
 
-    // The consent flow must have actually run and replaced the stale token.
-    expect(mocks.authenticate).toHaveBeenCalledOnce();
     const stored = JSON.parse(await fs.readFile(path.join(tmp, "token.json"), "utf8"));
-    expect(stored.refresh_token).toBe("fresh-rt");
+    expect(stored.refresh_token).toBe("first-rt");
   });
 
   it("preflights a missing credentials.json before opening the browser", async () => {
@@ -507,5 +551,117 @@ describe("checkCredentials — --auth preflight (pure)", () => {
       (checkCredentials(JSON.stringify({ web: { client_secret: "cs" } }), P) as { message: string })
         .message,
     ).toMatch(/missing client_id or client_secret/);
+  });
+});
+
+/**
+ * The overwrite guard. Reported 15.08.2026 by the two mailbox sessions: a bare `npm run auth`
+ * replaced the PRIVATE mailbox's token with a grant for the BUSINESS account, because the target
+ * path follows `--account` alone and never the account picked in the consent screen. Proven from
+ * both sides by Google's own grant mails, to the minute of the file write.
+ *
+ * The rules below are the fix. Two of them exist because the reviewing sessions took the first
+ * sketch apart: "cannot identify the stored token" must count as a mismatch (otherwise the guard
+ * is inert on exactly the first run after an update — every installation's decisive run), and a
+ * token Google itself rejects may be replaced (it protects nothing) — but ONLY on invalid_grant,
+ * never on a timeout that merely failed to ask.
+ */
+describe("tokenOverwriteVerdict — --auth must not replace another mailbox's token", () => {
+  const base = {
+    tokenFile: "/home/u/.mailwarden/token.json",
+    exists: true,
+    storedEmail: "private@gmail.com",
+    newEmail: "private@gmail.com",
+    force: false,
+    account: null as string | null,
+  };
+  const refuse = (r: OverwriteCheck) => (r as { ok: false; message: string }).message;
+
+  it("permits the first authorization — there is nothing to overwrite", () => {
+    expect(tokenOverwriteVerdict({ ...base, exists: false, storedEmail: null })).toEqual({ ok: true });
+  });
+
+  it("permits a plain re-auth of the same mailbox", () => {
+    expect(tokenOverwriteVerdict(base)).toEqual({ ok: true });
+  });
+
+  it("treats the address case- and whitespace-insensitively", () => {
+    expect(
+      tokenOverwriteVerdict({ ...base, storedEmail: " Private@Gmail.com ", newEmail: "private@gmail.com" }),
+    ).toEqual({ ok: true });
+  });
+
+  it("refuses the reported accident, naming both mailboxes and the file", () => {
+    const r = tokenOverwriteVerdict({ ...base, newEmail: "business@example.com" });
+    expect(r.ok).toBe(false);
+    expect(refuse(r)).toContain("private@gmail.com");
+    expect(refuse(r)).toContain("business@example.com");
+    expect(refuse(r)).toContain("/home/u/.mailwarden/token.json");
+  });
+
+  it("offers both ways forward: a second account, or an explicit replacement", () => {
+    const r = tokenOverwriteVerdict({ ...base, newEmail: "business@example.com" });
+    expect(refuse(r)).toContain("--auth --account <name>");
+    expect(refuse(r)).toContain("--force");
+  });
+
+  it("says the browser grant already happened and how to revoke it", () => {
+    // The abort prevents the WRITE, not the GRANT — by then Google has already sent its security
+    // mail. Leaving that out would strand an unwanted authorization nobody knows to revoke.
+    const r = tokenOverwriteVerdict({ ...base, newEmail: "business@example.com" });
+    expect(refuse(r)).toMatch(/Nothing was written/);
+    expect(refuse(r)).toContain("myaccount.google.com/permissions");
+  });
+
+  it("repeats the account in the --force hint, so the retry keeps aiming at the same file", () => {
+    const r = tokenOverwriteVerdict({
+      ...base,
+      account: "work",
+      tokenFile: "/home/u/.mailwarden/token.work.json",
+      newEmail: "business@example.com",
+    });
+    expect(refuse(r)).toContain("--auth --account work --force");
+  });
+
+  it("refuses when the stored token cannot be identified — the blind spot of the first sketch", () => {
+    // Every token written before this version records no account. That is the FIRST run after an
+    // update, i.e. the very run the guard is for; "unknown" therefore must not mean "go ahead".
+    const r = tokenOverwriteVerdict({ ...base, storedEmail: null });
+    expect(r.ok).toBe(false);
+    expect(refuse(r)).toMatch(/could not be identified/);
+  });
+
+  it("refuses when the freshly authorized account could not be confirmed", () => {
+    const r = tokenOverwriteVerdict({ ...base, newEmail: null });
+    expect(r.ok).toBe(false);
+    expect(refuse(r)).toMatch(/could not be confirmed/);
+  });
+
+  it("permits replacing a token Google no longer accepts — it protects nobody", () => {
+    const r = tokenOverwriteVerdict({ ...base, storedEmail: null, storedDead: true });
+    expect(r.ok).toBe(true);
+    expect((r as { note?: string }).note).toMatch(/invalid_grant/);
+  });
+
+  it("does NOT extend that to a token that merely could not be reached", () => {
+    // A timeout fails to name the account just like a dead token does, but proves nothing about
+    // it. Treating the two alike would let a flaky network cause the exact loss this prevents.
+    expect(tokenOverwriteVerdict({ ...base, storedEmail: null, storedDead: false }).ok).toBe(false);
+  });
+
+  it("keeps refusing a known mismatch even if the old token is dead", () => {
+    const r = tokenOverwriteVerdict({
+      ...base,
+      storedEmail: "private@gmail.com",
+      storedDead: true,
+      newEmail: "business@example.com",
+    });
+    expect(r.ok).toBe(false);
+  });
+
+  it("obeys --force, and says what it replaced", () => {
+    const r = tokenOverwriteVerdict({ ...base, newEmail: "business@example.com", force: true });
+    expect(r.ok).toBe(true);
+    expect((r as { note?: string }).note).toContain("business@example.com");
   });
 });
