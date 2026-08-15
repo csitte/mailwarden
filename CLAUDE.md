@@ -59,9 +59,14 @@ Protokoll: `_session-bridge/README.md`.
 
 **Nie direkt in fremde Repos committen** (z. B. `csitte.at`) — nur über die Bridge informieren.
 
-**Bridge-Push (Watcher):** Beim Session-Start (nach dem Bridge-Start-Scan) das
-Monitor-Tool armen — persistent: true, Beschreibung "Session-Bridge: neue Nachrichten an
-mailwarden", Kommando mit dem Pfad, der auf diesem Gerät existiert:
+**Bridge-Push (Watcher):** Beim Session-Start zuerst der Bridge-Start-Scan in einem
+Durchgang — keine eigene Schleife über die Dateien, die läuft auf dem Drive ins Timeout:
+`bash D:/gitwork/session-broker/watch-bridge.sh --fold mailwarden` (PC) bzw.
+`bash C:/gitwork/session-broker/watch-bridge.sh --fold mailwarden` (Notebook)
+zeigt die offenen Threads mit `owner: mailwarden`; meldet er eine WARNUNG, lädt Drive noch
+nach — später wiederholen. Danach das Monitor-Tool armen — persistent: true, Beschreibung
+"Session-Bridge: neue Nachrichten an mailwarden", Kommando mit dem Pfad, der auf diesem Gerät
+existiert:
 `bash D:/gitwork/session-broker/watch-bridge.sh mailwarden` (PC) bzw.
 `bash C:/gitwork/session-broker/watch-bridge.sh mailwarden` (Notebook).
 Jede Notification = neue Bridge-Nachricht an diese Session → Datei lesen, im Chat
