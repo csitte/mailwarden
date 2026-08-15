@@ -218,3 +218,18 @@ danach. **Lehre für Runde 2: die Aussage suchen, nicht die Formulierung.** Der 
 auf „cannot send"/„scope.*send" und verfehlte deshalb `docs/SETUP.md` („neither grants a send
 capability") und alles Deutschsprachige. Ein Dokument, das Prüfrunden steuert, verdient dabei
 Vorrang — von dort reproduziert sich ein Fehler in jede spätere Runde.
+
+## Nachtrag zur Trefferquote (15.08.2026, Release 0.10.0)
+
+Vier Runden, Ausbeute wieder ungleich: Runde 1 (Korpus über `signals.ts`) **22 falsche Verdikte**,
+alle reproduziert, darunter eine Evasion; Runde 2 **19 Formulierungen**, keine gebrochene Zusage;
+Runde 6 8 Kleinigkeiten (toter Anker in `docs/SETUP.md`, 404-`$schema`, Testzahl); Runde 4 auf den
+Fix-Commits **4 Funde, einer an der Ursache**: der Runde-1-Fix hatte den beobachteten Fall
+(`"<a@evil>" <a@x>` im Rohheader) geschlossen, nicht die Ursache — `From` wurde RFC-2047-*dekodiert*,
+bevor `parseSender` die Struktur las, und ein Encoded-Word, das zu `<legit@news.example>,` dekodiert,
+kaperte den Sender-Key eines Newsletters (seit 0.9.0). Dazu zwei Regressionen desselben Fixes
+(quadratische Laufzeit, verlorener Anzeigename). **Lehre: schreibt ein Runde-1-Fix einen geteilten
+Helfer neu (hier `parseSender` mit drei Aufrufern), ist Runde 4 nicht optional — und die Frage „Ursache
+oder Fall?" ist dort die ertragreichste.** Zweite Lehre: was ein Skript verifiziert, muss es auch beim
+Release-Lauf verifizieren — der Publish-Workflow legte eine Datei in den Baum, die der Dirty-Check des
+Bundle-Builds mitzählte; erst der Release-Lauf zeigte es.
