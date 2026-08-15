@@ -53,6 +53,49 @@ export function authScopesForTiers(tiers: Set<ToolTier>): string[] {
 }
 
 /**
+ * The server-level `instructions` a client sees at initialize time. Clients that defer tool
+ * definitions (Claude Code's tool search loads only tool NAMES plus these instructions at session
+ * start) decide from this text WHEN to look for our tools at all — so it names the jobs the
+ * enabled tiers cover, in plain user language, and states the two invariants an agent must know
+ * before it acts (nothing sends, nothing hard-deletes). Kept well under the 2 KB truncation
+ * point, most important first. Tier-aware: a read-only deployment must not advertise snooze.
+ */
+export function serverInstructions(tiers: Set<ToolTier>): string {
+  const jobs: string[] = [];
+  if (tiers.has("read")) {
+    jobs.push(
+      "search and read mail (search results are re-verified against live labels, so `is:unread`-style " +
+        "predicates are trustworthy), list labels, get a triage digest of a mailbox slice, and list " +
+        "subscriptions/newsletters by sender with their opt-out options",
+    );
+  }
+  if (tiers.has("manage")) {
+    jobs.push(
+      "archive, label, mark read/unread, trash/untrash (recoverable), bulk-change everything matching " +
+        "a query, snooze a thread to a date/time or preset and sweep due snoozes back into the inbox, " +
+        "unsubscribe from newsletters (one-click, RFC 8058), and download attachments",
+    );
+  }
+  if (tiers.has("filters")) {
+    jobs.push("list, create and delete server-side Gmail filters (auto-triage rules; label actions only)");
+  }
+  const triggers = ["asks about their Gmail inbox, specific emails or newsletters"];
+  if (tiers.has("manage")) triggers.push("wants to organize, defer (snooze) or clean up mail");
+  if (tiers.has("filters")) triggers.push("wants Gmail to auto-triage incoming mail with rules");
+  const scope =
+    jobs.length === 0
+      ? "No tools are enabled in this deployment."
+      : `Use these tools whenever the user ${triggers.join(", or ")}. They can: ${jobs.join("; ")}.`;
+  const which = tiers.has("read") ? " (call get_profile to confirm which)" : "";
+  return (
+    `mailwarden — live Gmail tools for the one account this server is connected to${which}. ` +
+    scope +
+    " By design there are NO compose/reply/forward/send tools and no permanent delete (trash only); do " +
+    "not look for them. Every call reads the live mailbox — nothing is cached or synced."
+  );
+}
+
+/**
  * Which of `required` a grant of `granted` does NOT cover — by *capability*, not string equality.
  * `gmail.modify` is a strict superset of `gmail.readonly`, so a token authorized for the full
  * surface satisfies a later read-only deployment. Comparing literally would flag such a healthy

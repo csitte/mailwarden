@@ -2,6 +2,8 @@ import { describe, it, expect } from "vitest";
 import {
   authScopesForTiers,
   missingScopes,
+  serverInstructions,
+  ALL_TIERS,
   GMAIL_READONLY,
   GMAIL_MODIFY,
   GMAIL_SETTINGS_BASIC,
@@ -9,6 +11,40 @@ import {
 } from "../src/tiers.js";
 
 const tiers = (...t: ToolTier[]) => new Set(t);
+
+describe("serverInstructions — what a tool-search client reads before it ever lists our tools", () => {
+  it("stays under the 2 KB truncation point for every tier combination", () => {
+    const combos: ToolTier[][] = [[], ["read"], ["manage"], ["filters"], ["read", "manage"], [...ALL_TIERS]];
+    for (const c of combos) expect(serverInstructions(tiers(...c)).length).toBeLessThan(2000);
+  });
+
+  it("always states the two invariants an agent must know: no send, no permanent delete", () => {
+    for (const t of [tiers(), tiers("read"), tiers(...ALL_TIERS)]) {
+      const s = serverInstructions(t);
+      expect(s).toMatch(/NO compose\/reply\/forward\/send tools/);
+      expect(s).toMatch(/no permanent delete \(trash only\)/);
+      expect(s).toMatch(/nothing is cached/);
+    }
+  });
+
+  it("advertises only what the enabled tiers can do — a read-only deployment must not promise snooze", () => {
+    const readOnly = serverInstructions(tiers("read"));
+    expect(readOnly).toMatch(/search and read mail/);
+    expect(readOnly).toMatch(/get_profile/);
+    expect(readOnly).not.toMatch(/snooze/i); // neither as a job nor as a "use when" trigger
+    expect(readOnly).not.toMatch(/Gmail filters/);
+
+    const full = serverInstructions(tiers(...ALL_TIERS));
+    expect(full).toMatch(/snooze a thread/);
+    expect(full).toMatch(/unsubscribe/);
+    expect(full).toMatch(/Gmail filters/);
+  });
+
+  it("does not point at get_profile when the read tier (which owns it) is off", () => {
+    expect(serverInstructions(tiers("manage"))).not.toMatch(/get_profile/);
+    expect(serverInstructions(tiers())).toMatch(/No tools are enabled/);
+  });
+});
 
 describe("authScopesForTiers", () => {
   it("requests modify+settings.basic for the default (all tiers) — unchanged from before", () => {

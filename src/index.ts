@@ -7,14 +7,19 @@ import { getAuth, hasModifyScope, activeAccount } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
-import { resolveEnabledTiers } from "./tiers.js";
+import { resolveEnabledTiers, serverInstructions } from "./tiers.js";
 import { runDoctor } from "./doctor.js";
 import { CliError, debugEnabled, findStrayPositional, readAccountArg, resolveMode } from "./cli.js";
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 function makeServer(): McpServer {
-  const server = new McpServer({ name: "mailwarden", version: VERSION });
+  // `instructions` is what a tool-search client reads at session start to decide whether to look
+  // for our tools at all — derived from the same tier set that decides which tools get registered.
+  const server = new McpServer(
+    { name: "mailwarden", version: VERSION },
+    { instructions: serverInstructions(resolveEnabledTiers(process.env)) },
+  );
   registerTools(server);
   return server;
 }

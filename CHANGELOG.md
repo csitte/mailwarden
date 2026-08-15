@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Server `instructions`.** The MCP `initialize` response now carries a short, tier-aware
+  description of what the enabled tools can do and the two invariants an agent must know (no
+  send, no permanent delete). Clients that defer tool definitions — Claude Code's tool search
+  loads only tool *names* plus these instructions at session start — use exactly this text to
+  decide whether to look for mailwarden's tools at all; before, mailwarden sent none. Under 2 KB
+  for every tier combination (Claude Code truncates there), and a read-only deployment does not
+  advertise snooze or filters.
+
 ## [0.9.0] - 2026-08-13
 
 Sender-level subscription triage and bulk unsubscribe, plus a correction to the scope claim in
