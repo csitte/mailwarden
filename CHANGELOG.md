@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Claude Code plugin packaging.** The repository root now carries `.claude-plugin/plugin.json` (server
+  entry `npx -y mailwarden`, i.e. the published package — the plugin ships no code of its own) plus one
+  skill, `/mailwarden:setup`, which walks a user through the OAuth setup by reading the plugin's own
+  `docs/SETUP.md` (no second copy of the instructions to drift) and starts from `mailwarden --check`.
+  Loads with `claude --plugin-dir <clone>`; verified with `claude mcp list` (`plugin:mailwarden:mailwarden`
+  connected). Neither the manifest nor the skill is part of the npm package. No `version` field on
+  purpose: marketplaces then pin the commit SHA and follow pushes, and there is no second version
+  number to keep in step with `package.json`.
 - **Header-derived triage `signals` on every search hit, aggregated in `triage_digest`.** Four flags an
   agent can act on without opening the mail, each a documented header convention or MIME fact and never
   a guess from wording: `newsletter` (`List-Id`, `List-Unsubscribe`, or `Precedence: bulk|list`),

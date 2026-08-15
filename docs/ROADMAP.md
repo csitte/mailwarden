@@ -28,6 +28,8 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 - **Server `instructions`** in the initialize response, tier-aware, for tool-search clients (unreleased on `main`).
 - **`dryRun`** on `bulk_modify`, `bulk_unsubscribe` and `sweep_snoozed` — same path as the real call,
   stopped before the first write or outbound request (unreleased on `main`).
+- **Claude Code plugin** — repo root as plugin (`.claude-plugin/plugin.json` → `npx -y mailwarden`) with a
+  `/mailwarden:setup` skill; submitted to the community marketplace (unreleased on `main`).
 - **Triage `signals`** on search hits (newsletter / automated / calendar / replyToMismatch), header-derived,
   aggregated in `triage_digest` (unreleased on `main`).
 
@@ -37,8 +39,6 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    `server/discover`, Zod 4). Not urgent: current clients negotiate down to the 1.x protocol and
    the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
    Planned for late 2026.
-2. **Claude Code plugin packaging** (`.mcp.json` → `npx mailwarden`) for the community
-   marketplace — a distribution item, no server change.
 
 ## Non-goals
 

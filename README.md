@@ -298,6 +298,17 @@ First time setting up a Google OAuth app? Follow the **[step-by-step setup guide
 claude mcp add mailwarden -- npx -y mailwarden
 ```
 
+**Claude Code plugin** — the same server plus a `/mailwarden:setup` skill that walks you through the
+OAuth setup and diagnoses a broken one. The repo root is the plugin (`.claude-plugin/plugin.json`), so
+from a clone:
+```bash
+claude --plugin-dir /path/to/mailwarden
+```
+It is submitted to Anthropic's community marketplace; once listed, `/plugin marketplace add anthropics/claude-plugins-community`
+then `/plugin install mailwarden@claude-community` does the same without a clone. The plugin runs the full
+tool surface — for a narrower tier (`MAILWARDEN_TOOLS=read`) or a second account, use `claude mcp add` with
+the env you want instead (see [Config](#config-env) and [Multiple accounts](#multiple-accounts)).
+
 **Claude Desktop** — add to `claude_desktop_config.json`:
 ```json
 {

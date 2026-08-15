@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "mailwarden",
+  "displayName": "mailwarden — Gmail triage (no send)",
+  "description": "Gmail MCP server for inbox triage: search with re-verified results, labels, archive/trash, mailbox-side snooze, triage digest, RFC 8058 unsubscribe. No send tools by design. Runs locally via npx; one-time `npx mailwarden --auth` connects your account.",
+  "author": {
+    "name": "C.Sitte Softwaretechnik",
+    "url": "https://www.csitte.at/mailwarden/"
+  },
+  "homepage": "https://github.com/csitte/mailwarden#readme",
+  "repository": "https://github.com/csitte/mailwarden",
+  "license": "MIT",
+  "keywords": [
+    "gmail",
+    "email",
+    "mcp",
+    "snooze",
+    "triage",
+    "unsubscribe",
+    "inbox",
+    "no-send"
+  ],
+  "mcpServers": {
+    "mailwarden": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "mailwarden"
+      ]
+    }
+  }
+}
