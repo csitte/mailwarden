@@ -3,7 +3,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { registerTools } from "./tools.js";
-import { getAuth, hasModifyScope, activeAccount } from "./auth.js";
+import { getAuth, hasModifyScope, hasFilterScope, activeAccount } from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
@@ -15,10 +15,14 @@ const VERSION: string = createRequire(import.meta.url)("../package.json").versio
 
 function makeServer(): McpServer {
   // `instructions` is what a tool-search client reads at session start to decide whether to look
-  // for our tools at all — derived from the same tier set that decides which tools get registered.
+  // for our tools at all — derived from the same tier set that decides which tools get registered,
+  // with the same scope gate: a `filters` tier whose token is known to lack gmail.settings.basic
+  // registers no filter tools (tools.ts), so it must not advertise them here either.
+  const advertised = resolveEnabledTiers(process.env);
+  if (advertised.has("filters") && hasFilterScope() === false) advertised.delete("filters");
   const server = new McpServer(
     { name: "mailwarden", version: VERSION },
-    { instructions: serverInstructions(resolveEnabledTiers(process.env)) },
+    { instructions: serverInstructions(advertised) },
   );
   registerTools(server);
   return server;
