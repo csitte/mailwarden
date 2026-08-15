@@ -15,10 +15,15 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 - **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
-- **Suchtreffer werden re-verifiziert.** Gmails `threads.list`-Index ist bei
-  Read-State-Operatoren unzuverlässig (`is:unread` fällt in manchen Kombinationen weg);
-  `search()` prüft jeden Treffer gegen die echten Labels. Beweis-Demo:
-  `node scripts/demo-reverify.mjs`.
+- **Suchtreffer werden re-verifiziert.** Gmails `threads.list`-Index beantwortet
+  Read-State-Operatoren aus einem **veralteten Read-State**: `is:unread` liefert massenhaft längst
+  gelesene Mail (**gemessen 15.08.2026** in einem echten Postfach: 131 Treffer für
+  `category:updates is:unread`, davon 17 echt ungelesen = 87 % Fehltreffer). `search()` prüft jeden
+  Treffer gegen die echten Labels. **Nicht mehr behaupten, der Index „verwerfe `is:unread`" oder es
+  liege an bestimmten Operator-Kombinationen** — beides war eine ungemessene Deutung und ist
+  widerlegt (dieselbe Query ohne `is:unread` liefert 800+, das Prädikat wirkt also). Demo gegen eine
+  Fake-API: `node scripts/demo-reverify.mjs`; Messung im eigenen Postfach:
+  `node scripts/probe-reverify.mjs`.
 
 ## Architektur-Muster
 

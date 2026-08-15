@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **The explanation of *why* re-verification is needed was wrong — measured and corrected.** README,
+  SECURITY.md, the code comments and the website all said Gmail's index "silently drops `is:unread` in
+  some operator combinations". That entered in `cec77aa` (23.06.2026) as an unmeasured reading of a
+  real symptom and was repeated everywhere since. A read-only measurement in a real mailbox (72,438
+  messages, 15.08.2026) reproduces the symptom and refutes the explanation: `category:updates
+  is:unread` returned **131** threads of which **17** were genuinely unread (87% false positives),
+  `is:unread -in:inbox` **235** for **99** (58%) — but the same query *without* `is:unread` returns
+  800+, so the predicate is plainly being applied. It is applied against a **read-state the index has
+  not caught up with**, and the drift is not tied to any operator combination (the largest was on the
+  simplest query). One hit carried a single label: `SENT`. The behaviour mailwarden ships is unchanged
+  and now better supported than before — in the same run, everything `search` dropped was genuinely
+  read, and it discarded no genuinely unread mail. What changed is that the documentation now states
+  what was measured, with the numbers, instead of a mechanism nobody had checked.
 - **`--auth` could silently replace another mailbox's token.** Which file it writes is decided by
   `--account` / `MAILWARDEN_ACCOUNT` **alone**, never by the account picked in the consent screen — so
   authorizing a second mailbox from a checkout (a bare `npm run auth`, which passes neither) aimed

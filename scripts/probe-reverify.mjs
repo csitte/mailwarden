@@ -12,10 +12,13 @@
  * `deriveLabelFilters` / `threadMatchesFilters`, not a copy). Every hit that fails is a thread the
  * index returned and the query excludes: an index false positive.
  *
- * The default queries form a small matrix, because "the index is loose" is not the interesting
- * claim — *which combination* makes it loose is. Query 1 is the documented case; 2 and 3 drop one
- * operator each, so a false positive that appears only in 1 tells them apart; 4 repeats 1 for a
- * different category.
+ * The default queries form a small matrix: query 1 is the case the docs used to single out, 2 and 3
+ * drop one operator each, 4 repeats 1 for another category. The first run of this matrix
+ * (15.08.2026) is what corrected the documentation — the drift showed up in ALL of them, largest on
+ * the plainest (`is:unread -in:inbox`), which is how we learned it is not a quirk of one operator
+ * combination but a stale read-state behind `is:unread` itself. Add a query without `is:unread` for
+ * the control that settles it: if the index simply ignored the predicate, both would return the same
+ * count. They do not (800+ vs 131 in that mailbox), so it is applied — just to stale state.
  *
  * STRICTLY READ-ONLY, and metadata-only: `format: "minimal"` returns label ids and no headers, so
  * this never reads a subject, sender or body. Nothing is modified, nobody is contacted. It prints

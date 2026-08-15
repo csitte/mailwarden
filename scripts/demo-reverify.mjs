@@ -7,8 +7,10 @@
 // It drives the REAL production `Gmail.search()` (imported from dist/) against a
 // fake Gmail API whose search index is deliberately *loose*: for the query
 // `category:updates is:unread -in:inbox` it hands back a thread that is actually
-// READ. That is the real, reproducible Gmail behavior — `threads.list` silently
-// drops `is:unread` in some operator combinations. A server that trusts the index
+// READ. That is real, measured Gmail behavior: its index answers `is:unread` from
+// a read-state that lags the mailbox — 87% of the hits for one such query in a real
+// mailbox had long been read (see scripts/probe-reverify.mjs, which measures it in
+// YOUR mailbox rather than a fake one). A server that trusts the index
 // would act on that read thread (archive it, mark it, feed it to an assistant).
 // mailwarden re-checks every hit against its true labels and drops the false
 // positive before any tool sees it.
