@@ -25,12 +25,14 @@
  *
  * Usage: `npm run smoke` (from the repo root). Exits non-zero on the first failed check.
  */
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, mkdirSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { mcpSession } from "./lib/mcp-session.mjs";
+import { npm, run } from "./lib/run.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expectedVersion = createRequire(import.meta.url)(path.join(repoRoot, "package.json")).version;
@@ -40,108 +42,6 @@ function check(label, ok, detail = "") {
   console.log(`${ok ? "  ✓" : "  ✗"} ${label}${detail ? ` — ${detail}` : ""}`);
   if (!ok) failures.push(label);
   return ok;
-}
-
-/**
- * npm is `npm.cmd` on Windows, which Node refuses to spawn directly (it is a batch file, not an
- * executable) — so that platform needs `shell: true`, and with a shell the arguments have to be
- * quoted themselves: the temp and repo paths can contain spaces.
- */
-const onWindows = process.platform === "win32";
-const npm = onWindows ? "npm.cmd" : "npm";
-function run(cmd, args, opts = {}) {
-  // With a shell, pass ONE pre-quoted command string and no argv array — Node deprecates
-  // (DEP0190) the array form under `shell: true` because it concatenates without escaping.
-  const quoted = args.map((a) => (/[\s"]/.test(a) ? `"${a}"` : a)).join(" ");
-  const res = onWindows
-    ? spawnSync(`${cmd} ${quoted}`, [], { encoding: "utf8", shell: true, ...opts })
-    : spawnSync(cmd, args, { encoding: "utf8", ...opts });
-  if (res.status !== 0) {
-    console.error(`\n${cmd} ${args.join(" ")} failed (exit ${res.status}):`);
-    if (res.error) console.error(res.error.message);
-    console.error(res.stdout ?? "");
-    console.error(res.stderr ?? "");
-    process.exit(1);
-  }
-  return res;
-}
-
-/**
- * Drive the packed server through one MCP session over stdio and return what it reported.
- *
- * Waits for the response with the matching id rather than sleeping a fixed interval: a slow CI
- * runner would otherwise read as a broken handshake. Kills the child either way — the server is
- * long-lived by design and would keep the workflow alive.
- */
-function mcpSession(cliPath, env, timeoutMs = 20_000) {
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cliPath], {
-      env: { ...process.env, ...env },
-      stdio: ["pipe", "pipe", "pipe"],
-    });
-    let buf = "";
-    let stderr = "";
-    const pending = new Map();
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`MCP handshake timed out after ${timeoutMs}ms. stderr: ${stderr.trim()}`));
-    }, timeoutMs);
-
-    const send = (msg) => child.stdin.write(JSON.stringify(msg) + "\n");
-    const request = (id, method, params) =>
-      new Promise((res) => {
-        pending.set(id, res);
-        send({ jsonrpc: "2.0", id, method, params });
-      });
-
-    child.stderr.on("data", (d) => (stderr += d));
-    child.stdout.on("data", (d) => {
-      buf += d;
-      // Frames are newline-delimited JSON; a chunk may hold several or half of one.
-      let nl;
-      while ((nl = buf.indexOf("\n")) !== -1) {
-        const line = buf.slice(0, nl).trim();
-        buf = buf.slice(nl + 1);
-        if (!line) continue;
-        let msg;
-        try {
-          msg = JSON.parse(line);
-        } catch {
-          continue; // not a JSON-RPC frame — ignore rather than fail the run
-        }
-        const resolveFn = pending.get(msg.id);
-        if (resolveFn) {
-          pending.delete(msg.id);
-          resolveFn(msg);
-        }
-      }
-    });
-    child.on("error", (err) => {
-      clearTimeout(timer);
-      reject(err);
-    });
-
-    (async () => {
-      const init = await request(1, "initialize", {
-        protocolVersion: "2024-11-05",
-        capabilities: {},
-        clientInfo: { name: "mailwarden-smoke", version: "0" },
-      });
-      send({ jsonrpc: "2.0", method: "notifications/initialized" });
-      const tools = await request(2, "tools/list", {});
-      clearTimeout(timer);
-      child.kill();
-      resolve({
-        serverInfo: init.result?.serverInfo,
-        tools: (tools.result?.tools ?? []).map((t) => t.name),
-        stderr,
-      });
-    })().catch((err) => {
-      clearTimeout(timer);
-      child.kill();
-      reject(err);
-    });
-  });
 }
 
 const work = mkdtempSync(path.join(tmpdir(), "mailwarden-smoke-"));
@@ -174,26 +74,28 @@ try {
 
   console.log("\nMCP handshake (default tiers):");
   const session = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig });
+  const toolNames = session.tools.map((t) => t.name);
   check("server boots and answers initialize", session.serverInfo?.name === "mailwarden", JSON.stringify(session.serverInfo));
   check(
     `reported version matches package.json (${expectedVersion})`,
     session.serverInfo?.version === expectedVersion,
     `got ${session.serverInfo?.version}`,
   );
-  check("tools/list is non-empty", session.tools.length > 0, `${session.tools.length} tools`);
+  check("tools/list is non-empty", toolNames.length > 0, `${toolNames.length} tools`);
   for (const tool of ["search", "snooze", "archive", "create_filter"]) {
-    check(`tool present: ${tool}`, session.tools.includes(tool));
+    check(`tool present: ${tool}`, toolNames.includes(tool));
   }
   // The central safety promise: no compose/reply/forward/send tool exists in the shipped artifact.
-  const sendish = session.tools.filter((t) => /send|compose|reply|forward/i.test(t));
+  const sendish = toolNames.filter((t) => /send|compose|reply|forward/i.test(t));
   check("no send-shaped tool is registered", sendish.length === 0, sendish.join(",") || "none");
 
   console.log("\nMCP handshake (MAILWARDEN_TOOLS=read):");
   const readOnly = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig, MAILWARDEN_TOOLS: "read" });
-  check("read tier still registers search", readOnly.tools.includes("search"));
+  const readOnlyNames = readOnly.tools.map((t) => t.name);
+  check("read tier still registers search", readOnlyNames.includes("search"));
   // `unsubscribe` is in this list for a second reason: it is the only tool that makes an
   // outbound request to a non-Google host, and a read-only deployment must never be able to.
-  const writeTools = readOnly.tools.filter((t) =>
+  const writeTools = readOnlyNames.filter((t) =>
     ["archive", "trash", "modify_labels", "create_filter", "unsubscribe"].includes(t),
   );
   check("read tier registers no write tools", writeTools.length === 0, writeTools.join(",") || "none");

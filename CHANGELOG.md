@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **MCPB bundle as a release artifact.** `npm run mcpb` (`scripts/build-mcpb.mjs`) builds
+  `dist-mcpb/mailwarden-<version>.mcpb` — the format Smithery (`smithery mcp publish <file>.mcpb`) and
+  the Claude Desktop extension directory accept for a local stdio server. Built from the PACKED npm
+  package (`npm pack` → unpack → `npm ci --omit=dev` against this repo's lockfile), so it ships exactly
+  the published files with a pinned dependency tree; the manifest (`mcpb/manifest.json`, one
+  `user_config` knob: the tool tiers → `MAILWARDEN_TOOLS`) gets its version from `package.json` and its
+  `tools` list from a real `tools/list` handshake against the staged tree, never by hand. The script then
+  `mcpb validate`s, packs, checks the size against Smithery's 25 MiB limit (6 MiB today), unpacks the
+  bundle and boots THAT — the pack step drops files by pattern and this is the proof nothing dropped was
+  needed. Runs in CI on every push and in the publish workflow (kept as a run artifact); the release
+  attaches it to the GitHub release. `--no-tools` omits the tools array (workaround for
+  smithery-ai/cli#787). No server change: the bundle starts `dist/index.js` the way `npx mailwarden` would.
 - **Claude Code plugin packaging.** The repository root now carries `.claude-plugin/plugin.json` (server
   entry `npx -y mailwarden`, i.e. the published package — the plugin ships no code of its own) plus one
   skill, `/mailwarden:setup`, which walks a user through the OAuth setup by reading the plugin's own

@@ -46,7 +46,10 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Änderungen `docs/SETUP.md`, bei Sicherheitsaussagen `SECURITY.md`.
 - **Release** (nur auf Ansage): `npm version <patch|minor>` (synct `server.json`), CHANGELOG
   `[Unreleased]` → Version + Link-Ref, Commit + Tag `vX.Y.Z` pushen → CI publisht npm und
-  MCP-Registry automatisch; danach `gh release create`.
+  MCP-Registry automatisch; danach `npm run mcpb` (vom Tag-Stand) und
+  `gh release create vX.Y.Z dist-mcpb/mailwarden-X.Y.Z.mcpb` (Bundle = Release-Asset), dann
+  `smithery mcp publish dist-mcpb/mailwarden-X.Y.Z.mcpb -n <namespace>/mailwarden` (Namespace:
+  `smithery namespace list`; braucht `smithery auth login` — OAuth im Browser, macht Chris).
 
 ## Session-Bridge
 

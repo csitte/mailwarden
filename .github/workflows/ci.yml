@@ -52,3 +52,9 @@ jobs:
 
       - name: Smoke-test the packed package
         run: npm run smoke
+
+      # Same artifact discipline for the MCPB bundle (Smithery + Claude Desktop): built from the
+      # packed package against the lockfile, validated, unpacked and booted. Catches a manifest or
+      # bundle-content break on the commit that introduces it, not at release time.
+      - name: Build + verify the MCPB bundle
+        run: npm run mcpb

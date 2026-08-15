@@ -156,8 +156,10 @@ Gewinn: 27 echte Opt-out-Endpunkte, keiner fälschlich blockiert.
 
 **Der mechanische Teil läuft inzwischen automatisch.** `npm run smoke` prüft gegen das
 *installierte* Paket: relative Links, Sprungmarken, Versionsgleichstand package.json ↔
-server.json, dazu Handshake, Tool-Oberfläche und `--check`. Nicht mehr per Prompt nachbauen —
-der Prompt fragt nur noch nach dem, was ein Skript nicht beurteilen kann:
+server.json, dazu Handshake, Tool-Oberfläche und `--check`. `npm run mcpb` tut dasselbe für das
+zweite Artefakt, das MCPB-Bundle (Manifest validiert, Bundle entpackt und gebootet, Größe unter
+Smitherys Limit). Nicht mehr per Prompt nachbauen — der Prompt fragt nur noch nach dem, was ein
+Skript nicht beurteilen kann:
 
 ```
 `npm run smoke` ist gelaufen und grün — es deckt relative Links, Sprungmarken,

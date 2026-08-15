@@ -317,6 +317,12 @@ the env you want instead (see [Config](#config-env) and [Multiple accounts](#mul
   }
 }
 ```
+Or install the **MCPB bundle** (`mailwarden-<version>.mcpb`, attached to
+[GitHub releases](https://github.com/csitte/mailwarden/releases) from 0.10.0 on) as a Desktop extension — Settings →
+Extensions → *Install extension…* — the same server, self-contained (no `npx`, no Node install), with the
+tool tiers as a setting. The bundle is built from the published npm package (`npm run mcpb`, verified in
+CI: validated, unpacked and booted) and is what Smithery distributes for a local stdio server. The
+one-time `npx -y mailwarden --auth` still applies — the bundle reads the same `~/.mailwarden/` token.
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
 ```bash

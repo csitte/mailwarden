@@ -65,3 +65,17 @@ jobs:
         run: |
           ./mcp-publisher login github-oidc
           ./mcp-publisher publish
+
+      # The MCPB bundle is the release asset for Smithery (`smithery mcp publish`) and the Claude
+      # Desktop extension directory. Built here from the same checkout and lockfile the release
+      # was published from, verified (validate + unpack + boot), and kept as a run artifact so the
+      # file attached to the GitHub release is the one CI checked — see the release steps in CLAUDE.md.
+      - name: Build + verify the MCPB bundle
+        run: npm run mcpb
+
+      - name: Upload the MCPB bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: mailwarden-mcpb
+          path: dist-mcpb/mailwarden-*.mcpb
+          if-no-files-found: error
