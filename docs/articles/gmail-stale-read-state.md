@@ -77,7 +77,7 @@ Same symptom, different mechanism, and the difference is not academic:
 - "Silently drops the predicate" implies an operator-parsing quirk you could dodge by rephrasing the query.
 - "Stale read state" says rephrasing will not save you, because the index's *data* is behind, not its *logic*.
 
-The second explanation also survives the evidence better. The largest drift I measured was on the simplest query, `is:unread -in:inbox` — not on the three-operator combination the README had been holding up as the example for two months. The "certain operator combinations" part of my sentence was as unfounded as the "drops" part. I had generalised a single observation into a mechanism, twice, in one sentence.
+The second explanation also survives the evidence better. The drift showed up on the simplest query too — `is:unread -in:inbox`, no category, one negation — and not only on the three-operator combination the README had been holding up as the example for two months. (Careful with that one: measured by *share* the simple query is the mildest of the three at 58%; measured by threads actually wrong, it is the worst at 136. Both readings kill the "certain combinations" story, and I nearly published the flattering half of that sentence on its own.) The "certain operator combinations" part of my sentence was as unfounded as the "drops" part. I had generalised a single observation into a mechanism, twice, in one sentence.
 
 ## Then a second mailbox disagreed with my correction
 

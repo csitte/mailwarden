@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   them with the shipped `deriveLabelFilters` / `threadMatchesFilters` — every failing hit is a thread
   the index returned and the query excludes. It runs a small matrix by default (the query the docs
   used to single out, then the same one minus an operator each), which is how the *operator
-  combination* explanation fell: the drift showed up in all of them, largest on the plainest.
+  combination* explanation fell: the drift showed up in all of them, the plainest included.
   Read-only and metadata-only (`format: minimal` — no subject, sender or body is ever fetched); it
   prints counts and label names, no thread ids and no mail content. Repo-only, like the other probes.
   Its measurements are what corrected the documentation (see *Fixed*); note that the mailbox reachable
@@ -55,8 +55,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is:unread` returned **131** threads of which **17** were genuinely unread (87% false positives),
   `is:unread -in:inbox` **235** for **99** (58%) — but the same query *without* `is:unread` returns
   800+, so the predicate is plainly being applied. It is applied against a **read-state the index has
-  not caught up with**, and the drift is not tied to any operator combination (the largest was on the
-  simplest query). One hit carried a single label: `SENT`. A **second** mailbox measured the same way
+  not caught up with**, and the drift is not tied to exotic operator combinations — the plainest of the
+  three queries shows it too, with the lowest share (58%) but the most wrong threads in absolute terms
+  (136). One hit carried a single label: `SENT`. A **second** mailbox measured the same way
   the same day showed **no drift at all** (zero raw-index hits for `is:unread`, in an account whose
   read-state only ever changes through the API), which is why the docs now say a mailbox *can* drift
   rather than that Gmail does: the two differ in volume, age and — suspected, not measured — whether

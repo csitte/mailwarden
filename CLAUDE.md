@@ -21,7 +21,8 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   ein zweites Postfach mit 0 Drift**). `search()` prüft jeden Treffer gegen die echten Labels.
   **Drei Formulierungen sind verbrannt und nicht wiederzubeleben:** der Index „verwerfe `is:unread`"
   (falsch — dieselbe Query ohne das Prädikat liefert 800+, es wirkt also), es liege an bestimmten
-  **Operator-Kombinationen** (falsch — der größte Effekt stand auf der simpelsten Query), und es
+  **Operator-Kombinationen** (falsch — auch die simpelste Query zeigt den Effekt; „größter Effekt" nur
+  absolut, 136 Threads, in Prozent ist sie mit 58 % die schwächste), und es
   betreffe `is:unread` **allgemein** (unbelegt — das zweite Postfach widerspricht). Belegt ist:
   postfachabhängig, und ein Server kann vorher nicht wissen, in welchem er steckt. Demo gegen eine
   Fake-API: `node scripts/demo-reverify.mjs`; Messung im eigenen Postfach:

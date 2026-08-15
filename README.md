@@ -73,7 +73,7 @@ Ask an assistant to *"archive the unread promotional mail that's already skipped
 | `category:updates is:unread -in:inbox` | 128 | 14 | 89% |
 | `is:unread -in:inbox` | 235 | 99 | 58% |
 
-The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **read-state the index has not caught up with**: mail read weeks ago still counts as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of one operator combination — the largest drift above is on the plainest query.
+The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **read-state the index has not caught up with**: mail read weeks ago still counts as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of exotic operator combinations: the plainest query of the three shows it too — with the *lowest* share (58%) but the *most* wrong threads in absolute terms (136).
 
 **A second mailbox, measured the same way on the same day, drifted not at all** — zero raw-index hits for `is:unread`, in an account whose read-state is only ever changed through the API. So this is a property of *a mailbox*, not of Gmail everywhere. The two differ in volume (72,438 vs 112 messages), in age, and — the suspected factor, and deliberately not yet measured — in where the read changes come from: swiping in the Gmail app versus API calls.
 
