@@ -1,11 +1,11 @@
 {
-  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/dist/mcpb-manifest-v0.3.schema.json",
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.3.schema.json",
   "manifest_version": "0.3",
   "name": "mailwarden",
   "display_name": "mailwarden — Gmail triage (no send)",
   "version": "0.0.0-set-by-build",
   "description": "Gmail MCP server for inbox triage: re-verified search, labels, archive/trash, mailbox-side snooze, triage digest, RFC 8058 unsubscribe. No send tools by design.",
-  "long_description": "mailwarden is a native Gmail MCP server built for triage, not correspondence. It searches (and re-verifies every hit against the live labels — Gmail's index is unreliable for read-state operators), reads threads, moves mail between labels, archives, trashes and untrashes, snoozes on the mailbox side (a label plus a sweep — no local state, so the snooze survives a restart and shows in the Gmail UI), builds a triage digest, lists subscriptions by sender and unsubscribes via RFC 8058 List-Unsubscribe.\n\nBy design there is no compose, reply, forward or send tool, and `create_filter` never produces a forwarding rule — so a prompt-injected mail has no exfiltration path through this server. Nothing is deleted permanently (trash/untrash only), and there is no mailbox mirror or cache: every call goes live to the Gmail API.\n\nSetup is a one-time OAuth consent to YOUR OWN Google Cloud OAuth client — the refresh token stays in `~/.mailwarden/` on this machine. Run `npx -y mailwarden --auth` once (guide: docs/SETUP.md), then this bundle finds the token. `npx -y mailwarden --check` diagnoses an incomplete setup.",
+  "long_description": "mailwarden is a native Gmail MCP server built for triage, not correspondence. It searches (and re-verifies every hit against the live labels — Gmail's index is unreliable for read-state operators), reads threads, moves mail between labels, archives, trashes and untrashes, snoozes on the mailbox side (a label plus a sweep — no local state, so the snooze survives a restart and shows in the Gmail UI), builds a triage digest, lists subscriptions by sender and unsubscribes via RFC 8058 List-Unsubscribe.\n\nBy design there is no compose, reply, forward or send tool, and `create_filter` never produces a forwarding rule — so a prompt-injected mail has no exfiltration path through this server. Nothing is deleted permanently (trash/untrash only), and there is no mailbox mirror or cache: every call goes live to the Gmail API.\n\nSetup is a one-time OAuth consent to YOUR OWN Google Cloud OAuth client — the refresh token stays in `~/.mailwarden/` on this machine. Run `npx -y mailwarden --auth` once (guide: https://github.com/csitte/mailwarden/blob/main/docs/SETUP.md), then this bundle finds the token. `npx -y mailwarden --check` diagnoses an incomplete setup.",
   "author": {
     "name": "C.Sitte Softwaretechnik",
     "email": "chris@csitte.com",
@@ -45,7 +45,7 @@
     "tools": {
       "type": "string",
       "title": "Tool tiers",
-      "description": "Comma-separated subset of read, manage, filters. Fewer tiers = fewer tools AND a narrower OAuth scope at `--auth` (read alone is gmail.readonly, where Google itself enforces no-send). Must match what you authorized.",
+      "description": "Comma-separated subset of read, manage, filters. Fewer tiers = fewer tools; set the same value when authorizing (`MAILWARDEN_TOOLS=read npx -y mailwarden --auth`) and the OAuth scope narrows with it (read alone is gmail.readonly, where Google itself enforces no-send). Must not exceed what you authorized.",
       "default": "read,manage,filters",
       "required": false
     }

@@ -3,7 +3,7 @@
 This is the long-form walkthrough. If you have set up a Google OAuth desktop app before,
 the [README's five-line setup](../README.md#setup) is all you need — this page exists for
 everyone doing it the first time, and for the two traps that cost real hours
-(the [7-day token expiry](#help-it-worked-for-a-week-then-died-invalid_grant) and the
+(the [7-day token expiry](#help-it-worked-for-a-week-then-died-with-invalid_grant) and the
 ["unverified app" screen](#the-unverified-app-warning-is-normal)).
 
 **What you'll end up with:**

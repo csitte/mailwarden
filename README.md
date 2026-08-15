@@ -80,7 +80,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 
 | Tool | What it does |
 |---|---|
-| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk), `automated` (Auto-Submitted, no-reply senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain) — read off the first message's headers, no extra call |
+| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
@@ -319,10 +319,12 @@ the env you want instead (see [Config](#config-env) and [Multiple accounts](#mul
 ```
 Or install the **MCPB bundle** (`mailwarden-<version>.mcpb`, attached to
 [GitHub releases](https://github.com/csitte/mailwarden/releases) from 0.10.0 on) as a Desktop extension — Settings →
-Extensions → *Install extension…* — the same server, self-contained (no `npx`, no Node install), with the
-tool tiers as a setting. The bundle is built from the published npm package (`npm run mcpb`, verified in
-CI: validated, unpacked and booted) and is what Smithery distributes for a local stdio server. The
-one-time `npx -y mailwarden --auth` still applies — the bundle reads the same `~/.mailwarden/` token.
+Extensions → *Install extension…* — the same server, self-contained at run time (no `npx`; Claude
+Desktop brings the Node runtime), with the tool tiers as a setting. The bundle is built from the packed
+npm package (same file set as published; `npm run mcpb`, verified in CI: validated, unpacked and booted)
+and is the format Smithery uses for a local stdio server (Smithery gets a variant of the same file set
+with full tool schemas). The one-time `npx -y mailwarden --auth` still applies (Node needed once for
+that) — the bundle reads the same `~/.mailwarden/` token.
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
 ```bash
@@ -391,7 +393,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (458 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (702 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

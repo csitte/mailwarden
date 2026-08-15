@@ -23,8 +23,9 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 ## Architektur-Muster
 
 - `src/` — `auth.ts` (OAuth/Token/Accounts), `gmail.ts` (API-Wrapper), `tools.ts`
-  (MCP-Tool-Registrierung), `tiers.ts` (Tool-Tiers → Scopes), `snooze.ts`, `digest.ts`,
-  `doctor.ts` (`--check`), `http.ts`, `index.ts` (CLI).
+  (MCP-Tool-Registrierung), `tiers.ts` (Tool-Tiers → Scopes, Server-`instructions`), `snooze.ts`,
+  `digest.ts`, `signals.ts` (Header-Signale), `unsubscribe.ts` (RFC 8058 + SSRF-Guard),
+  `sanitize.ts` (Fencing), `cli.ts`, `doctor.ts` (`--check`), `http.ts`, `index.ts` (CLI).
 - **Reine Logik von IO trennen.** Testbare pure Funktionen (z. B. `buildReport`,
   `resolveSnoozeDate`, `deriveLabelFilters`) + dünne IO-Schicht drumherum. Neue Features
   folgen diesem Muster.

@@ -36,7 +36,7 @@ expiring after seven days.
   tools and requests only `gmail.readonly` at `--auth`. The plugin's default server entry runs
   the full surface; a user who wants a narrower tier should add the server themselves with
   `claude mcp add mailwarden -e MAILWARDEN_TOOLS=read -- npx -y mailwarden` and disable this
-  plugin's server. Tier changes need a fresh `--auth`.
+  plugin's server. Widening the tiers needs a fresh `--auth`; narrowing does not.
 - **Second account:** `npx -y mailwarden --auth --account work`, then a second server entry with
   `MAILWARDEN_ACCOUNT=work` (README → "Multiple accounts"). One server = one mailbox, by design.
 - **Troubleshooting:** every known error message has an entry in `docs/SETUP.md` → Troubleshooting.

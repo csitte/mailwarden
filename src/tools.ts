@@ -144,7 +144,7 @@ function registerReadTools(server: McpServer): void {
     {
       description:
         "Search Gmail with native query syntax (e.g. 'in:inbox from:foo@bar.com newer_than:7d'). Returns thread summaries; read-state/category predicates are re-verified against each hit's live labels. " +
-        "Each summary carries `signals` derived from the thread's first message headers/MIME — newsletter (List-Id/List-Unsubscribe/Precedence bulk), automated (Auto-Submitted, no-reply senders), calendar (text/calendar or .ics part), replyToMismatch (Reply-To on another domain than From); empty when nothing is declared. " +
+        "Each summary carries `signals` derived from the thread's first message headers/MIME — newsletter (List-Id/List-Unsubscribe/Precedence bulk or list), automated (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), calendar (text/calendar or .ics part), replyToMismatch (a Reply-To on another domain than From — a subdomain of the same domain counts as the same); empty when nothing is declared. " +
         "Paginated: when more results exist, the response carries a nextPageToken — pass it back via pageToken to fetch the next page. " +
         "USE WHEN: locating threads by sender, subject, date, label, or read state. " +
         "DO NOT USE: to fetch a thread you already have the ID of (use get_thread). " +
@@ -231,7 +231,7 @@ function registerReadTools(server: McpServer): void {
     "triage_digest",
     {
       description:
-        "Structured overview of a mailbox slice for triage DECISIONS — sender / label / age buckets, unread and attachment counts, and header-derived signal counts (newsletter / automated / calendar / replyToMismatch, overall and per sender), instead of a raw thread list. " +
+        "Structured overview of a mailbox slice for triage DECISIONS — sender / label / age buckets, unread and attachment counts, and header-derived signals (newsletter / automated / calendar / replyToMismatch — thread counts overall, and per sender the set of signals its threads carry), instead of a raw thread list. " +
         "USE WHEN: deciding what to bulk-archive/snooze/label, or summarizing inbox state ('what's in my inbox?'). " +
         "DO NOT USE: to read a specific thread (use search/get_thread). " +
         "Samples up to `max` most-recent matches; hasMore flags that more matched than were sampled. " +
@@ -421,7 +421,7 @@ function registerManageTools(server: McpServer): void {
       description:
         "Bulk-apply label changes to every message matching a Gmail query, batched at 1000 messages per API request. " +
         "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
-        "Returns matched/modified counts, affected thread IDs (capped at 500 — modifiedThreadCount has the true total), and per-chunk failures (partial success is reported, not hidden). " +
+        "Returns matched/modified counts, matched and modified thread IDs (both lists capped at 500 — matchedThreadCount/modifiedThreadCount hold the true totals), and per-chunk failures (partial success is reported, not hidden). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
         "Note: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs — for read-state-precise bulk ops, verify with search first. " +
         "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. " +
@@ -637,7 +637,7 @@ function registerManageTools(server: McpServer): void {
         "The whole call shares a 60-second budget; threads left over when it runs out come back with `skippedOutOfTime` and a reason, so re-running with the remaining ids finishes the job. " +
         "Like unsubscribe, there is no URL parameter: every endpoint comes from that thread's own List-Unsubscribe header. Only RFC 8058 one-click senders are contacted; the rest come back with their alternatives in `options`. " +
         "Partial success is reported, never hidden: a thread that cannot be read or whose endpoint fails becomes an entry with a `reason`, and the remaining threads still run. " +
-        "Set dryRun:true to rehearse: same header reads, same per-sender dedupe, each entry reports the endpoint it `wouldCall` — and nobody is contacted. " +
+        "Set dryRun:true to rehearse: same header reads, same per-sender dedupe (as a real run with every request succeeding), and each entry a real run would contact reports the endpoint it `wouldCall`; refusals and duplicates carry none — and nobody is contacted. " +
         "USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId; dryRun first to show the user which senders would be contacted. " +
         "DO NOT USE: for one thread (use unsubscribe), or to find candidates (use list_subscriptions — it contacts nobody). " +
         "SIDE EFFECTS: up to one outbound HTTPS request per DISTINCT sender (plus up to 3 redirects each) — the only non-Google hosts mailwarden ever contacts (none with dryRun). " +
@@ -725,7 +725,7 @@ function registerManageTools(server: McpServer): void {
     {
       description:
         "Resurface all snoozed threads whose date is due (<= today), batched at 1000 messages per API request. " +
-        "Set dryRun:true to rehearse: reports the due labels and threads (dueLabels/dueThreads) exactly as the sweep would find them, and wakes nothing. " +
+        "Set dryRun:true to rehearse: reports the due labels and threads (dueLabels/dueThreads) as the sweep would find them (from the live label listing; a single snooze label with more than 5000 messages is under-counted in the rehearsal), and wakes nothing. " +
         "USE WHEN: the user asks to process due snoozes, or as a scheduled maintenance call; dryRun to answer 'what is due right now?' without acting. " +
         "SIDE EFFECTS: due threads return to the inbox marked unread (none with dryRun); safe to run repeatedly. failedCount/errors report messages a batch could not wake (their label is kept for the next sweep).",
       inputSchema: { dryRun: z.boolean().default(false) },

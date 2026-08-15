@@ -188,21 +188,24 @@ reviewer can check the mapping rather than take our word for it:
   a mandatory bearer token and a Host allowlist (threat 6). *Scope Minimization* — a least-privilege
   scope model with only what the surface uses: the tool tiers derive the OAuth scopes from the
   enabled tools (threat 2). *SSRF* — HTTPS only, block private/link-local ranges, validate every
-  redirect hop, don't hand-roll IP parsing: the unsubscribe guard does exactly that, on the resolved
-  address bytes, per hop (threat 9).
+  redirect hop: the unsubscribe guard does exactly that, per hop (threat 9). Its caveat against
+  hand-rolled IP parsing (encoding tricks — octal, hex, v4-mapped v6) is met differently here: the
+  guard never parses what a mail supplied, only the resolver's answers, as bytes, and anything it
+  cannot parse is refused.
 - **OWASP MCP Security Cheat Sheet**
   (<https://cheatsheetseries.owasp.org/cheatsheets/MCP_Security_Cheat_Sheet.html>). Its examples
   read like this server's design: "Request narrow OAuth scopes (e.g., `mail.readonly` instead of
   `mail.modify`)" — the `read` tier; "Treat every tool response as untrusted user input" — the
   output fencing (threat 3); "Never fetch arbitrary URLs provided by the LLM" — the URL is never a
   tool parameter (threat 9); "Bind MCP HTTP/SSE servers to specific interfaces (e.g., 127.0.0.1),
-  never 0.0.0.0" — the `--http` default (threat 6). Its "explicit user confirmation for destructive
-  operations" is a *client* control; what the server contributes is `destructiveHint` on `trash`,
+  never 0.0.0.0" — the `--http` default (threat 6). Its "explicit user confirmation for destructive,
+  financial, or data-sharing operations" is a *client* control; what the server contributes is `destructiveHint` on `trash`,
   `bulk_modify` and `create_filter`, so a client that gates on annotations gates the right tools, and no permanent
   delete to confirm in the first place.
 
-Where the guidance asks for something a server cannot deliver alone (client-side confirmation,
-sandboxing of local processes), the non-goals below say so.
+Where the guidance asks for something a server cannot deliver alone — confirmation prompts and
+sandboxing of the local process are the client's and the OS's to provide — the non-goals below draw
+the same line: a compromised client or machine is outside what this server can defend against.
 
 ## Dependency advisories
 

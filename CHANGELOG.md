@@ -20,15 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published files with a pinned dependency tree; the manifest (`mcpb/manifest.json`, one `user_config`
   knob: the tool tiers → `MAILWARDEN_TOOLS`) gets its `tools` from a real `tools/list` handshake against
   the staged tree, never by hand. Version discipline: the bundle version is `package.json`'s only when HEAD
-  is a clean checkout of tag `v<version>` (or that tag's CI run); otherwise it is `<version>-dev.<sha>` in
+  is a clean checkout of tag `v<version>` (or that tag's CI run); otherwise it is `<version>-dev.<sha>[.dirty]` in
   manifest AND file name, so a bundle from an unreleased `main` cannot be mistaken for the release. Checks
   before an artifact is written and again on the unpacked artifacts: handshake, version, every
   `${user_config.*}` placeholder has a default (Smithery leaves unresolved placeholders literal), strict /
   loose schema validation, size under Smithery's 25 MiB limit (6 MiB today), boot + read-tier gate from
   the UNPACKED bundle — the pack step drops files by pattern and this is the proof nothing dropped was
-  needed. Runs in CI on every push and in the publish workflow (kept as a run artifact); the release
-  attaches the strict bundle to the GitHub release and publishes the Smithery one. No server change: the
-  bundle starts `dist/index.js` the way `npx mailwarden` would.
+  needed. Runs in CI on every push and in the publish workflow (kept as a run artifact); the strict bundle
+  is the GitHub release asset, the Smithery one is what `smithery mcp publish` takes. No server change:
+  the bundle starts `dist/index.js` the way `npx mailwarden` would.
 - **Claude Code plugin packaging.** The repository root now carries `.claude-plugin/plugin.json` (server
   entry `npx -y mailwarden`, i.e. the published package — the plugin ships no code of its own) plus one
   skill, `/mailwarden:setup`, which walks a user through the OAuth setup by reading the plugin's own
@@ -39,23 +39,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   number to keep in step with `package.json`.
 - **Header-derived triage `signals` on every search hit, aggregated in `triage_digest`.** Four flags an
   agent can act on without opening the mail, each a documented header convention or MIME fact and never
-  a guess from wording: `newsletter` (`List-Id`, `List-Unsubscribe`, or `Precedence: bulk|list`),
-  `automated` (`Auto-Submitted` other than `no`, `Precedence: auto_reply`, `X-Auto-Response-Suppress`,
-  or a no-reply / mailer-daemon local-part — exact spellings only, so a person named "Noreen Reply" is
-  not flagged), `calendar` (a `text/calendar` part or an `.ics` attachment, however deep in the MIME
-  tree), `replyToMismatch` (`Reply-To` on a *different domain* than `From`; same-domain differences
-  are routine and stay silent). Read off the thread's FIRST message — its origin, so a newsletter
-  stays one after the user replies — from the `format=full` fetch `search` already makes, i.e. no
-  extra API call and available in the `read` tier. `triage_digest` reports how many sampled threads
-  carry each signal and, per sender, the union of its threads' signals. Empty means "nothing
-  declared", not "personal". A header corpus of real-world shapes (Mailchimp, GitHub, out-of-office,
-  bounce, calendar invite, phishing shape, and the edges that must NOT fire) locks the logic.
+  a guess from wording: `newsletter` (a non-blank `List-Id` or `List-Unsubscribe`, or
+  `Precedence: bulk|list`), `automated` (`Auto-Submitted` other than `no` — RFC 3834 comments and
+  `;` parameters understood —, `Precedence: auto_reply`, `X-Auto-Response-Suppress` with any value but
+  `None`, or a machine local-part: no-reply / do-not-reply / mailer-daemon / postmaster / notification(s)
+  / alert(s) / bounce(s), hyphen or underscore, quoted or bare — exact spellings only, so a person named
+  "Noreen Reply" is not flagged), `calendar` (a `text/calendar` part or an `.ics` attachment, however
+  deep in the MIME tree), `replyToMismatch` (any `Reply-To` mailbox on a domain that is neither `From`'s
+  nor a subdomain of it in either direction — `news@e.brand.example` → `help@brand.example` is how
+  marketing mail is built and stays silent; `a@brand.example` → `b@brand.example.evil` fires; domains
+  compared case-folded, IDN and Punycode unified, trailing dot ignored). Addresses are read with a
+  scanner that knows RFC 5322 quoting, comments, groups, several mailboxes and the obsolete source
+  route — a display name containing a literal `<other@x>` cannot pose as the address, so the header
+  corpus that locks the logic (RFC 3834 / 2919 / 2369 / 5322 shapes, IDN, real Apple / LinkedIn /
+  Exchange forms, and the edges that must NOT fire — 22 wrong verdicts of the first cut, all found by
+  the corpus) is what the release ships. Read off the thread's FIRST message — its origin, so a
+  newsletter stays one after the user replies — from the `format=full` fetch `search` already makes,
+  i.e. no extra API call and available in the `read` tier. `triage_digest` reports how many sampled
+  threads carry each signal and, per sender, the union of its threads' signals. Empty means "nothing
+  declared", not "personal". The same scanner now derives the *sender key* that groups
+  `triage_digest` / `list_subscriptions` and dedupes `bulk_unsubscribe` per sender (`parseSender`), so
+  a crafted display name cannot claim another sender's key there either.
 - **`dryRun` on the three tools that act on many things at once** — `bulk_modify`, `bulk_unsubscribe`,
   `sweep_snoozed`. A dry run walks the *same* path as the real call up to the first write or outbound
   request and stops there: `bulk_modify` resolves the query and reports `matchedThreads` plus
   `labelsToCreate` (names in `add` that don't exist yet — reported, not created); `bulk_unsubscribe`
-  reads every thread's headers, runs the identical per-sender dedupe and reports the endpoint each
-  thread `wouldCall` (its selection is now a pure function, `planUnsubscribe`, shared with the real
+  reads every thread's headers, runs the same per-sender dedupe (as the real run would with every
+  request succeeding) and reports the endpoint each thread that would be contacted `wouldCall` (its selection is now a pure function, `planUnsubscribe`, shared with the real
   run, so the two cannot disagree — a test holds them thread for thread); `sweep_snoozed` reports
   `dueLabels`/`dueThreads` and deletes no label, not even an empty one. Every dry-run result says
   `dryRun: true` and claims no outcome (`modified*`/`woken*`/`unsubscribed` are zero). The real
@@ -67,9 +77,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   loads only tool *names* plus these instructions at session start — use exactly this text to
   decide whether to look for mailwarden's tools at all; before, mailwarden sent none. Under 2 KB
   for every tier combination (Claude Code truncates there), and a read-only deployment does not
-  advertise snooze or filters.
+  advertise snooze or filters. Scope-gated like the registration: a `filters` tier whose stored token
+  is known to lack `gmail.settings.basic` registers no filter tools and advertises none.
 
 ### Changed
+- **README: the snooze claim is now "mailbox-side snooze", not "the feature nobody else ships".** Another
+  Gmail MCP server carries a local reminder list under the name snooze; what is unique here is that the
+  snooze lives in the mailbox (label + sweep, visible in Gmail, survives a restart). Unsubscribe added to
+  the comparison matrix.
 - **`SECURITY.md`: mapped against published guidance.** New section citing the MCP Security Best
   Practices (spec 2026-07-28) and the OWASP MCP Security Cheat Sheet, and stating which control here
   answers which recommendation (stdio/loopback+token, scope minimization = tiers, SSRF guard, output
