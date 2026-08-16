@@ -30,6 +30,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   header without offering an opt-out action. Two rows added (inbox triage overview, server-side
   filters), both showing parity where it exists. Snooze and search re-verification re-verified as
   still unique; Google's server re-checked as Developer Preview and draft-only.
+- **"Runs fully local" became "No vendor cloud — you operate the server", because the old row was
+  flattering us and two competitors at once.** `a-bonus` documents a Cloud Run deployment
+  (`TOKEN_STORE=firestore`, "no npx, no tokens, no local setup") and `taylorwilsdon` advertises
+  central hosting over streamable HTTP with OAuth 2.1 as a headline feature — neither is "fully
+  local", so a plain ✅ was wrong for both. But the same standard convicts `mailwarden`: `--http`
+  is a remote deployment path too, and the row had us at ✅ while implying the others lacked one.
+  The honest axis is not where the process runs but **who operates it**, which splits the table
+  cleanly between the one vendor-hosted server and the four you run yourself — a distinction that
+  matters, and on which `mailwarden` is deliberately *not* claiming an advantage over the other
+  self-hosted servers. The footnote now names each one's remote path. Found by the session that
+  maintains the product page, which checked the cell against `a-bonus`'s README instead of copying
+  ours.
 
 ## [0.11.0] - 2026-08-16
 
