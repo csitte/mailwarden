@@ -286,3 +286,41 @@ oben macht.
 
 Formulierung der fremden Session, die das am kürzesten fasst und deshalb hier steht: *ein Marker,
 den ein Dokument über sich selbst setzt, ist etwas anderes als ein Muster, das jemand im Text sucht.*
+
+## Nachtrag (16.08.2026): die Vergleichstabelle — der Maßstab muss über die eigene Spalte laufen
+
+Eine Vergleichstabelle ist eine Behauptung über **fremde** Systeme (siehe den Nachtrag vom 15.08.),
+mit einer Verschärfung: sie altert **still**. Code bricht, wenn seine Annahme fällt; eine Zelle bleibt
+einfach stehen. Beim Neuerheben der Tabelle standen zwei Zellen auf `—`, die es nicht mehr verdienten
+— `taylorwilsdon` und `klodr` haben Batch-Label-Änderungen (über eine ID-Liste, nicht über eine
+Query), und `taylorwilsdon` zeigt den `List-Unsubscribe`-Header an. Beide Fehler gingen **zu unseren
+Gunsten**. Das ist die Richtung, in die eine ungeprüfte Vergleichszelle immer driftet.
+
+**Der eigentliche Fund kam danach und ist die Regel wert.** Die Zeile „Runs fully local" gab uns ein
+Häkchen und `a-bonus` ebenfalls — bis die Session, die die Produktseite pflegt, die Fremdzelle gegen
+deren README prüfte statt sie zu übernehmen: dort steht ein dokumentierter Cloud-Run-Modus. Sie
+korrigierte die eine Zelle. Beim Nachziehen fiel auf, dass derselbe Maßstab **zwei weitere** Spalten
+trifft: `taylorwilsdon` bewirbt zentrales Hosting als Aushängeschild — und `mailwarden` selbst hat
+mit `--http` denselben Remote-Pfad. Die Zeile gab uns ein Häkchen und unterstellte den anderen, sie
+hätten keins.
+
+> **Ein Maßstab, der eine Fremdzelle korrigiert, ist erst dann angewendet, wenn er auch über die
+> eigene Spalte gelaufen ist.**
+
+Die Reparatur war deshalb nicht, Zellen einzeln zu entschärfen, sondern **die Achse zu wechseln**:
+nicht *wo* der Prozess läuft, sondern **wer den Server betreibt**. Wenn mehrere Zellen einer Zeile
+gleichzeitig falsch werden, ist meist die Zeilenfrage falsch gestellt — und die richtige Frage kostet
+oft einen beanspruchten Vorsprung. Hier: gegenüber den anderen selbstgehosteten Servern beansprucht
+`mailwarden` in dieser Zeile jetzt keinen mehr.
+
+**Zwei Verfahrenspunkte, die sich bewährt haben:**
+
+- **Spaltenauswahl braucht eine Regel, und die Regel gehört sichtbar unter die Tabelle.** Sterne sind
+  das falsche Maß (sie messen, wer ein Repo hübsch findet); Besucherzahlen messen, wohin jemand geht,
+  der sich gerade entscheidet. Ein daraus abgeleiteter **Rang** gehört trotzdem nicht in die Doku — er
+  altert wie eine Versionsnummer. Genau das haben wir in einer Meldung angeboten, zwei Absätze
+  nachdem wir die Regel dagegen aufgeschrieben hatten; die Gegenseite hat ihn gestrichen.
+- **Zwei Instanzen, die dieselbe Tabelle unabhängig belegen, finden mehr als eine, die sie kopiert.**
+  Der Fund oben entstand, weil die zweite Session eine Zelle *nicht* übernommen hat. Wo eine Tabelle
+  gespiegelt wird, ist das Spiegeln die billigste Prüfrunde, die es gibt — vorausgesetzt, die andere
+  Seite belegt statt abzuschreiben.
