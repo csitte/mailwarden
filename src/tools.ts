@@ -424,7 +424,7 @@ function registerManageTools(server: McpServer): void {
         "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
         "Returns matched/modified counts, matched and modified thread IDs (both lists capped at 500 — matchedThreadCount/modifiedThreadCount hold the true totals), and per-chunk failures (partial success is reported, not hidden). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
-        "WARNING: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. That index can be badly out of date on read state — measured on a real mailbox, `category:updates is:unread` matched 131 threads of which 17 were genuinely unread, so this tool would have acted on 114 already-read threads. `unverifiedPredicates` in the result names exactly which conditions were taken on the index's word; when it is non-empty and the outcome must be read-state-precise, resolve the set with search (which re-verifies) and act on those thread ids instead. " +
+        "NOTE: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. The staleness that makes search re-verify was measured on `threads.list` (132 threads returned, 114 carrying no unread message at all); the same query through the message index this tool uses returned 19 hits, none stale — same mailbox, same minute. So the known drift does not reach this path, but that is one measurement, not a guarantee: `unverifiedPredicates` in the result names the conditions taken on the index's word, and when the outcome must be read-state-precise, resolve the set with search (which verifies against live labels) and act on those thread ids instead. " +
         "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. " +
         "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
@@ -878,6 +878,14 @@ function registerFilterTools(server: McpServer): void {
         failed: { messageIds: string[]; error: string }[];
         error?: string;
       } | null = null;
+      // Deliberately NO `unverifiedPredicates` here, unlike bulk_modify — do not "fix" this by
+      // adding the field. The query is BUILT from the criteria (filterCriteriaToQuery), which wraps
+      // a caller's `query` criterion in parentheses, and parenthesised queries yield no predicates
+      // by design (deriveLabelFilters bails on boolean grouping). The field would therefore report
+      // `[]` — which means "nothing to distrust" — for criteria that do carry `is:unread` inside
+      // those parens. An empty list that actually means "could not tell" is worse than no list at
+      // all, so the caveat stays in the tool description, where it holds unconditionally.
+      //
       // Best-effort backlog cleanup: the filter is already created, so ANY failure
       // here (a failed list/label-resolve, or per-chunk modify errors) is reported
       // in `applied` — never raised — so the caller learns the rule still stands.

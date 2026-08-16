@@ -9,18 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **`bulk_modify` now names what it could not verify — `unverifiedPredicates`.** The bulk path acts on
-  Gmail's raw index by design: re-verification costs one fetch per hit and a bulk op is sized in
-  thousands, so `search` can afford it and this cannot. That trade was always in the tool description
-  as a "note"; the measurement (see *Fixed*) priced it. On a drifting mailbox
-  `bulk_modify("category:updates is:unread", remove: ["INBOX"])` archives **131** threads of which
-  **17** were genuinely unread — 114 already-read threads moved out of an inbox nobody asked to touch.
-  The result now lists the conditions the query carried that `search` would have re-verified and this
-  did not (`+CATEGORY_UPDATES`, `+UNREAD`, `-INBOX`, …); empty means there was nothing to distrust.
-  **A `dryRun` reports the same list**, because a rehearsal that re-reads the same index confirms how
-  big the set is and nothing about whether it is right — reporting only the count would have made the
-  dry run read as verification, which is the more dangerous half of the problem. `create_filter`'s
-  `applyToExisting` sweep carries the same caveat in its description. Additive: one new output field,
-  no behaviour change, no extra API call (it is a pure function over the query string).
+  the index as given: re-verification costs one fetch per hit and a bulk op is sized in thousands, so
+  `search` can afford it and this cannot. The result now lists the conditions the query carried that
+  `search` would have re-verified and this did not (`+CATEGORY_UPDATES`, `+UNREAD`, `-INBOX`, …);
+  empty means there was nothing to distrust. **A `dryRun` reports the same list**, because a rehearsal
+  that re-reads the same index confirms how big the set is and nothing about whether it is right —
+  reporting only the count would have made the dry run read as verification, which is the more
+  dangerous half of the problem. `create_filter`'s `applyToExisting` sweep carries the same caveat in
+  its description (but deliberately not the field: it builds its query from criteria and parenthesises
+  them, so the list would report `[]` — "nothing to distrust" — for criteria that do carry `is:unread`).
+  **Scope, measured rather than assumed:** the staleness documented under *Fixed* was measured on
+  `threads.list`. The same query through `messages.list`, which is what this tool uses, returned 19
+  hits with none stale — same mailbox, same minute, against 132 threads of which 114 were stale. So
+  the known drift does **not** reach this path; the field says what was not checked, it does not claim
+  the check would have found something. Additive: one new output field, no behaviour change, no extra
+  API call (it is a pure function over the query string).
 - **`scripts/probe-reverify.mjs` — hold the re-verification *premise* against a real mailbox.**
   `demo-reverify.mjs` proves what `search()` does when an index is stale, against a fake API we made
   stale on purpose; it cannot prove the premise underneath it — that Gmail's real index does this at
@@ -64,8 +67,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SECURITY.md, the code comments and the website all said Gmail's index "silently drops `is:unread` in
   some operator combinations". That entered in `cec77aa` (23.06.2026) as an unmeasured reading of a
   real symptom and was repeated everywhere since. A read-only measurement in a real mailbox (~70,000
-  messages, 15.08.2026) reproduces the symptom and refutes the explanation: `category:updates
-  is:unread` returned **131** threads of which **17** were genuinely unread (87% false positives),
+  messages, 15.08.2026) reproduces the symptom and refutes the explanation. It is **`threads.list`**
+  specifically — the call `search` goes through: `category:updates
+  is:unread` returned **131** threads of which **17** held an unread message (87% stale),
   `is:unread -in:inbox` **235** for **99** (58%) — but the same query *without* `is:unread` returns
   800+, so the predicate is plainly being applied. It is applied against a **read-state the index has
   not caught up with**, and the drift is not tied to exotic operator combinations — the plainest of the
@@ -77,7 +81,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   magnitude), age, and the fact that no thread in the second was ever archived while still unread — the
   only shape a stale read-state shows up on, so it is a mailbox without the candidate rather than a
   counter-example to a cause. A server cannot tell in advance which kind of mailbox it is in, which is
-  the argument for re-verifying at all. The behaviour mailwarden ships is unchanged
+  the argument for re-verifying at all. Narrowed once more before release: the same query through
+  **`messages.list`** in the same mailbox in the same minute returned 19 hits, **none** stale. So this
+  is not "Gmail search is unreliable" — the *thread-level* read state lags while the per-message one
+  does not, which is why `search` (threads) re-verifies and why the message-level bulk path is a
+  separate case. The behaviour mailwarden ships is unchanged
   and now better supported than before — in the same run, everything `search` dropped was genuinely
   read, and it discarded no genuinely unread mail. What changed is that the documentation now states
   what was measured, with the numbers, instead of a mechanism nobody had checked.

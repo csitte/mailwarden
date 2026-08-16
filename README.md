@@ -15,9 +15,10 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   resurface in the inbox on a date. Built on dated labels + a sweep, so it works from any client,
   is visible in Gmail itself, and survives restarts. (Where another server offers a "snooze", it is
   a local reminder list — the mail never leaves or re-enters the inbox.)
-- **Search you can trust.** Gmail's search index can answer `is:unread` from a **stale read-state**
-  — measured in one real mailbox: **87% of the hits had long been read**; in another, zero. You
-  cannot tell which mailbox you are in without looking, so `search` re-verifies every hit against
+- **Search you can trust.** Gmail's `threads.list` — the call any thread search goes through — can
+  answer `is:unread` from a **stale thread-level read state**: measured in one real mailbox, **86% of
+  the threads it returned held no unread message at all**; in a second mailbox, no drift whatsoever.
+  You cannot tell which mailbox you are in without looking, so `search` re-verifies every hit against
   its live labels. Paginated via `pageToken`/`nextPageToken`.
 - **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
   1000 messages per API request — with per-chunk partial-success reporting instead of
@@ -39,7 +40,7 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
 
 Connectors that sync or cache your mailbox can lag behind it — and even Gmail's own search index is sometimes loose (see below). `mailwarden` talks straight to the live Gmail API (no cached snapshot) and re-verifies what the index returns, so what you see is what's actually there. It's a generic Gmail capability layer — keep your own rules/logic in your AI client, not in the server.
 
-`search` goes one step further than the raw API: Gmail's `threads.list` index can answer read-state operators from a **stale copy** of that state, so `is:unread` returns mail you have long since read — in one measured mailbox the majority of what it returned. Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
+`search` goes one step further than the raw API: Gmail's `threads.list` index can answer read-state operators from a **stale copy** of that state, so `is:unread` returns threads you finished reading weeks ago — in one measured mailbox, the large majority of what came back. Since every hit is fetched live anyway, `search` re-checks the unambiguous predicates (`is:unread`/`is:read`/`is:starred`/`in:inbox`/`category:…`, with negation) against each thread's true labels and drops the index's false positives.
 
 ## Compared to other Gmail MCP servers
 
@@ -67,13 +68,15 @@ Ask an assistant to *"archive the unread promotional mail that's already skipped
 
 **Measured, not asserted.** One real mailbox (~70,000 messages), 15.08.2026, read-only:
 
-| Query | Index hits | Genuinely unread | False positives |
+| Query (`threads.list`) | Threads returned | With an unread message | Stale |
 |---|--:|--:|--:|
 | `category:updates is:unread` | 131 | 17 | **87%** |
 | `category:updates is:unread -in:inbox` | 128 | 14 | 89% |
 | `is:unread -in:inbox` | 235 | 99 | 58% |
 
-The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **read-state the index has not caught up with**: mail read weeks ago still counts as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of exotic operator combinations: the plainest query of the three shows it too — with the *lowest* share (58%) but the *most* wrong threads in absolute terms (136).
+The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **thread-level read state that has not caught up**: threads whose every message is read still count as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of exotic operator combinations: the plainest query of the three shows it too — with the *lowest* share (58%) but the *most* wrong threads in absolute terms (136).
+
+**It is the thread index specifically.** The same query, same mailbox, same minute, asked through `messages.list` instead: **19 messages, none stale.** So this is not "Gmail search is unreliable" — it is that the *thread* view of read state lags while the per-message view does not. `search` goes through `threads.list`, which is exactly why it re-verifies.
 
 **A second mailbox, measured the same way on the same day, drifted not at all** — zero raw-index hits for `is:unread`, although it is read-marked through the API many times a day. So this is a property of *a mailbox*, not of Gmail everywhere. What separates them is open: they differ in volume (roughly three orders of magnitude) and age, and the second is missing something more basic — no thread in it was ever archived while still **unread**, which is the only shape a stale read-state can show up on. So it is not a counter-example to any particular cause; it is a mailbox without the candidate.
 

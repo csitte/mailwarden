@@ -12,6 +12,11 @@
  * `deriveLabelFilters` / `threadMatchesFilters`, not a copy). Every hit that fails is a thread the
  * index returned and the query excludes: an index false positive.
  *
+ * `threads.list` is the endpoint under test on purpose — it is what `search()` calls, and the drift
+ * measured on 15.08.2026 turned out to be specific to it: the same query through `messages.list`, in
+ * the same mailbox in the same minute, returned 19 hits with none stale against 132 threads of which
+ * 114 were. Read a result here as a statement about the THREAD index, not about Gmail search at large.
+ *
  * The default queries form a small matrix: query 1 is the case the docs used to single out, 2 and 3
  * drop one operator each, 4 repeats 1 for another category. The first run of this matrix
  * (15.08.2026) is what corrected the documentation — the drift showed up in ALL of them, the plainest

@@ -508,17 +508,23 @@ export interface LabelFilter {
  * Derive label predicates from a Gmail query so search hits can be re-checked
  * against each thread's *live* labels.
  *
- * Why: Gmail's `threads.list` search index CAN answer read-state operators from a
- * copy of that state which lags the mailbox. Measured 15.08.2026 in a real mailbox
- * (72k messages): `category:updates is:unread` returned 131 threads, 17 actually
- * unread — 87% false positives; plain `is:unread -in:inbox` 235 for 99. A second
- * mailbox measured the same way drifted not at all, so this is a property of a
- * mailbox, not of Gmail everywhere — and no server can tell which one it is in
- * without checking. The predicate is NOT ignored (the same query without it returns
- * 800+), and where it drifts it is not tied to particular operator combinations —
- * an earlier version of this comment claimed both, on an unmeasured observation.
- * Because `search()` already fetches every hit live, we can drop those false
- * positives by comparing the predicates that map 1:1 to a system/category label.
+ * Why: `threads.list` CAN answer read-state operators from a thread-level copy of
+ * that state which lags the mailbox. Measured 15.08.2026 in a real mailbox (~70k
+ * messages): `category:updates is:unread` returned 132 threads, 114 of which held
+ * no unread message at all (86%); `is:unread -in:inbox` 235 for 99. The predicate is
+ * NOT ignored (the same query without it returns 800+) and it is not tied to
+ * particular operator combinations — an earlier version of this comment claimed
+ * both, on an unmeasured observation.
+ *
+ * Two limits, both measured rather than assumed. A second mailbox drifted not at all,
+ * so it is a property of a mailbox and no server can tell which one it is in without
+ * checking. And the SAME query through `users.messages.list` in the SAME mailbox in
+ * the same minute returned 19 hits, none stale — the drift sits in the THREAD index,
+ * which is exactly what `search()` queries. That is why re-verification belongs here
+ * and why the message-level bulk path is a different case (see tools.ts, bulk_modify).
+ *
+ * Because `search()` already fetches every hit live, we can drop those false positives
+ * by comparing the predicates that map 1:1 to a system/category label.
  *
  * Only unambiguous predicates are translated. Anything else (free text,
  * `label:NAME`, `from:`, `newer_than:`, …) yields no filter for that token, and

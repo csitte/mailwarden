@@ -15,10 +15,13 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 - **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
-- **Suchtreffer werden re-verifiziert.** Gmails `threads.list`-Index **kann** Read-State-Operatoren
-  aus einem veralteten Read-State beantworten (**gemessen 15.08.2026**: 131 Treffer für
-  `category:updates is:unread`, davon 17 echt ungelesen = 87 % Fehltreffer — **im selben Durchgang
-  ein zweites Postfach mit 0 Drift**). `search()` prüft jeden Treffer gegen die echten Labels.
+- **Suchtreffer werden re-verifiziert.** **`threads.list`** (nicht „der Suchindex") kann
+  Read-State-Operatoren aus einem veralteten **Thread-**Read-State beantworten (**gemessen
+  15.08.2026**: 132 Treffer für `category:updates is:unread`, davon 114 ohne eine einzige ungelesene
+  Nachricht = 86 % — **im selben Durchgang ein zweites Postfach mit 0 Drift, und dieselbe Query über
+  `messages.list` im selben Postfach in derselben Minute: 19 Treffer, 0 veraltet**). `search()` geht
+  über `threads.list` und prüft deshalb jeden Treffer gegen die echten Labels; der
+  Message-Pfad (`bulk_modify`) ist ein anderer Fall.
   **Drei Formulierungen sind verbrannt und nicht wiederzubeleben:** der Index „verwerfe `is:unread`"
   (falsch — dieselbe Query ohne das Prädikat liefert 800+, es wirkt also), es liege an bestimmten
   **Operator-Kombinationen** (falsch — auch die simpelste Query zeigt den Effekt; „größter Effekt" nur
@@ -76,8 +79,9 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   sonst weiter etwas, das die ausgelieferte Version so nicht (mehr) hält. Anlass (15.08.): der
   Vorbehalt „`bulk_modify` re-verifiziert nicht" ging als Nebensatz einer Faktenkorrektur raus;
   die Seite versprach daraufhin, Fehltreffer würden verworfen, „bevor eine Aktion sie sieht" —
-  wahr für `search`, falsch für die Bulk-Tools, und ihr eigener Musterfall („archiviere die
-  ungelesenen Promotions") ist genau der Fall, der dann 131 statt 17 Threads trifft.
+  wahr für `search`, als generelle Zusage zu weit. (Nachtrag derselben Nacht: die Drift sitzt in
+  `threads.list`; der Bulk-Pfad über `messages.list` zeigte sie im direkten Vergleich **nicht** —
+  die Zusage war trotzdem unbelegt, und der Reihenfolge-Punkt gilt unverändert.)
   Zwei Konventionen der Seite respektieren: **keine Versionsnummer und keine gezählten Aufzählungen**
   im Fließtext — beides veraltet bei jedem unserer Commits.
   `npm run site-notice` beantwortet mechanisch, ob das für die aktuelle Version passiert ist (exit ≠ 0,
