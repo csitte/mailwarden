@@ -233,3 +233,27 @@ Helfer neu (hier `parseSender` mit drei Aufrufern), ist Runde 4 nicht optional �
 oder Fall?" ist dort die ertragreichste.** Zweite Lehre: was ein Skript verifiziert, muss es auch beim
 Release-Lauf verifizieren — der Publish-Workflow legte eine Datei in den Baum, die der Dirty-Check des
 Bundle-Builds mitzählte; erst der Release-Lauf zeigte es.
+
+## Nachtrag (15.08.2026): die Runde, die keine ist — Behauptungen über fremdes Verhalten
+
+Alle Runden hier prüfen **unseren** Code und **unsere** Doku gegeneinander. Keine prüft den Satz, der
+das Ganze *begründet* — eine Aussage darüber, wie sich **Gmail** verhält. Genau dort saß acht Wochen
+lang ein Fehler: „Gmails Index verwirft `is:unread` in manchen Operator-Kombinationen" entstand als
+Beobachtung in einer Commit-Message (`cec77aa`) und stand danach in README, SECURITY.md, den
+Code-Kommentaren und auf der Website. Gemessen hatte es niemand. Die Messung (Thread 110) bestätigte
+das **Symptom** und widerlegte die **Erklärung**: das Prädikat wird angewandt, nur gegen veralteten
+Read-State, und es hängt nicht an Operator-Kombinationen.
+
+**Die Regel, die daraus folgt:** eine Behauptung über ein fremdes System braucht dieselbe Beweislast
+wie Code — eine Messung oder einen Beleg, sonst wird sie zitiert („beobachtet am …") statt behauptet.
+Der billigste Test ist fast immer die **Kontrollabfrage**: dieselbe Anfrage ohne das verdächtige
+Element. 800+ gegen 131 hätte im Juni zwanzig Minuten gekostet und die falsche Mechanik sofort
+erledigt.
+
+**Und die Falle beim Reparieren, an einem Abend dreimal zugeschnappt:** beim Korrigieren einer
+ungeprüften Behauptung entsteht leicht die nächste. Die erste Korrektur verallgemeinerte auf „betrifft
+`is:unread` allgemein" (ein zweites Postfach zeigte 0 % Drift); die zweite behauptete „größter Effekt
+auf der simpelsten Query" (stimmt absolut, in Prozent umgedreht); die Website-Session schrieb beim
+Korrigieren „the check is unconditional" neu hinein (wahr für `search`, falsch für die Bulk-Tools).
+Jede dieser drei fand jemand **anderes**. Wer eine Aussage zurücknimmt, prüft den Ersatz mit demselben
+Maß — am besten, indem eine zweite Instanz gegen die Rohdaten liest, nicht gegen den neuen Text.
