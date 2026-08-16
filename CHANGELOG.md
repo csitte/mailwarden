@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Comparison table rebuilt against the servers people actually reach for** (README, „Compared to
+  other Gmail MCP servers"). Columns are now Google's first-party server, `taylorwilsdon`,
+  `a-bonus/google-docs-mcp` and `klodr/gmail-mcp`; the hosted mcpemails.com moves into the prose.
+  Two cells were stale and are corrected: `taylorwilsdon` and `klodr` do have batch label changes
+  (by explicit message id, not over a query), and `taylorwilsdon` surfaces the `List-Unsubscribe`
+  header without offering an opt-out action. Two rows added (inbox triage overview, server-side
+  filters), both showing parity where it exists. Snooze and search re-verification re-verified as
+  still unique; Google's server re-checked as Developer Preview and draft-only.
+
 ## [0.11.0] - 2026-08-16
 
 A measurement that corrected our own central claim, a token-loss bug in `--auth`, and the two tools

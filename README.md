@@ -44,23 +44,25 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 
 ## Compared to other Gmail MCP servers
 
-Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden` among Gmail MCP servers (mailbox-side snooze, search re-verification), and one deliberate omission is a security feature, not a gap. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
+Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden` (mailbox-side snooze, search re-verification), and one deliberate omission is a security feature, not a gap. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
 
-| Capability | **mailwarden** | [taylorwilsdon](https://github.com/taylorwilsdon/google_workspace_mcp) | [Google official](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | mcpemails.com |
-|---|:--:|:--:|:--:|:--:|
-| **Mailbox-side snooze** — archive now, resurface in the inbox on a date/time or preset | ✅ | — | — | — |
-| **Search-result re-verification** — drops the index's false positives against live labels | ✅ | — | — | — |
-| **Sweep / bulk over a query** — one action across every matching thread | ✅ 1000/req, partial-success | — | — | ⚠️ bulk organize (no query re-verification) |
-| **Unsubscribe** — per-sender overview + RFC 8058 one-click opt-out, no send scope needed | ✅ | — | — | — |
-| **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose at all | ❌ sends | ⚠️ draft-only | ❌ sends |
-| **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | — | ⚠️ scope split | ⚠️ scoped keys |
-| **Token encryption at rest** (optional) | ✅ AES-256-GCM | ✅ | n/a (hosted) | ✅ AES-256-GCM |
-| **Runs fully local — no cloud copy of your mail** | ✅ | ✅ | ❌ hosted | ❌ SaaS |
-| **Structured outputs** — every tool declares an `outputSchema` | ✅ | — | — | — |
+| Capability | **mailwarden** | [Google official](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | [taylorwilsdon](https://github.com/taylorwilsdon/google_workspace_mcp) | [a-bonus](https://github.com/a-bonus/google-docs-mcp) | [klodr](https://github.com/klodr/gmail-mcp) |
+|---|:--:|:--:|:--:|:--:|:--:|
+| **Mailbox-side snooze** — archive now, resurface in the inbox on a date/time or preset | ✅ | — | — | — | — |
+| **Search-result re-verification** — drops the thread index's false positives against live labels | ✅ | — | — | — | — |
+| **Sweep / bulk over a query** — one action across every thread a search returns | ✅ 1000/req, partial-success | — | ⚠️ batch by explicit ids | — | ⚠️ batch by explicit ids |
+| **Unsubscribe** — per-sender overview + RFC 8058 one-click opt-out, no send scope needed | ✅ | — | ⚠️ header shown, no action | — | — |
+| **Inbox triage overview** — one call that buckets what is waiting | ✅ sender/label/age + header signals | — | — | ✅ heuristic flags + stats | — |
+| **Server-side filters** — rules that keep triaging with no assistant in the loop | ✅ never forwarding | — | ✅ | — | ✅ |
+| **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose at all | ⚠️ draft-only | ❌ sends | ❌ sends | ❌ sends |
+| **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | ⚠️ scope split | — | — | ⚠️ inverse: tools gated by granted scopes |
+| **Token encryption at rest** (optional) | ✅ AES-256-GCM | n/a (hosted) | ✅ | — | — |
+| **Runs fully local — no cloud copy of your mail** | ✅ | ❌ hosted | ✅ | ✅ | ✅ |
+| **Structured outputs** — every tool declares an `outputSchema` | ✅ | — | — | — | — |
 
-<sub>Snapshot as of August 2026, from each project's public docs/repo; `—` = not offered / not documented. Send capability is listed as a security property: `mailwarden`'s lack of it is intentional (see [Security & privacy](#security--privacy)).</sub>
+<sub>Snapshot as of 16 August 2026, from each project's public docs and source; `—` = not offered / not documented. Columns are the servers a reader is most likely to reach for — Google's first-party one, plus the two largest community servers — and `klodr`, which comes closest to `mailwarden`'s own least-privilege design. Send capability is listed as a security property: `mailwarden`'s lack of it is intentional (see [Security & privacy](#security--privacy)).</sub>
 
-The moat isn't any single row — it's **snooze + live re-verification together**: an actual inbox-workflow layer that acts on the mailbox's *current* state, not a cached snapshot. Where competitors have caught up (bulk actions, at-rest encryption) it's noted honestly above.
+The moat isn't any single row — it's **snooze + live re-verification together**: an actual inbox-workflow layer that acts on the mailbox's *current* state, not a cached snapshot. Where others have caught up it's noted honestly above: at-rest encryption (`taylorwilsdon`), scope-driven tool gating (`klodr`), a richer per-message triage heuristic (`a-bonus`), and bulk organize over a mailbox (the hosted mcpemails.com, which has no snooze either). What none of them do is act on a *query* and check the mailbox's answer before acting on it.
 
 ### Why re-verification matters — a concrete case
 
