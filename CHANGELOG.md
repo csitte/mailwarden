@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-16
+
+A measurement that corrected our own central claim, a token-loss bug in `--auth`, and the two tools
+that act on Gmail's index saying so themselves. No new OAuth scope, no re-authorization needed; one
+additive output field on `bulk_modify`.
+
 ### Added
 - **`bulk_modify` now names what it could not verify — `unverifiedPredicates`.** The bulk path acts on
   the index as given: re-verification costs one fetch per hit and a bulk op is sized in thousands, so
@@ -793,7 +799,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/csitte/mailwarden/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/csitte/mailwarden/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/csitte/mailwarden/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/csitte/mailwarden/compare/v0.7.0...v0.8.0
