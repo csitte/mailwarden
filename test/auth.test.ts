@@ -659,6 +659,20 @@ describe("tokenOverwriteVerdict — --auth must not replace another mailbox's to
     expect(r.ok).toBe(false);
   });
 
+  it("names the boring cause too when an identity is merely unknown", () => {
+    // Round 4 finding: the guard also fires when the check could not RUN — a dropped connection, or
+    // a project without the Gmail API enabled. Without a word about that, the message sends the
+    // reader hunting for a multi-account mixup they never made.
+    const r = tokenOverwriteVerdict({ ...base, storedEmail: null });
+    expect(refuse(r)).toMatch(/could not run|not be identified/);
+    expect(refuse(r)).toMatch(/network|Gmail API/);
+  });
+
+  it("does not offer that excuse when both accounts are known and simply differ", () => {
+    const r = tokenOverwriteVerdict({ ...base, newEmail: "business@example.com" });
+    expect(refuse(r)).not.toMatch(/network/);
+  });
+
   it("obeys --force, and says what it replaced", () => {
     const r = tokenOverwriteVerdict({ ...base, newEmail: "business@example.com", force: true });
     expect(r.ok).toBe(true);

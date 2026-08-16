@@ -450,11 +450,20 @@ export function tokenOverwriteVerdict(input: {
     return { ok: true, note: `Replacing ${tokenFile} as instructed (--force): ${what.toLowerCase()}, ${granted}.` };
   }
 
+  // When an identity is merely UNKNOWN rather than different, the likeliest cause is not a mixed-up
+  // mailbox at all — a dropped connection or a Gmail API that was never enabled lands here too. Say
+  // so, or the reader goes hunting for a multi-account mistake they never made.
+  const whyElse =
+    !storedEmail || !newEmail
+      ? `\nThis also fires when the check simply could not run — a failed network call, or a Gmail API ` +
+        `that is not enabled for this project, leaves an account unidentified.`
+      : "";
+
   return {
     ok: false,
     message:
       `Refusing to overwrite ${tokenFile}. ${what}, and ${granted}.\n` +
-      `Replacing it would leave that mailbox without a token — silently, which is the accident this check exists for.\n\n` +
+      `Replacing it would leave that mailbox without a token — silently, which is the accident this check exists for.${whyElse}\n\n` +
       `  To authorize a SECOND mailbox alongside the first:\n` +
       `      mailwarden --auth --account <name>      (writes token.<name>.json, leaves this file alone)\n` +
       `  To deliberately replace the token in ${tokenFile}:\n` +
