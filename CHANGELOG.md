@@ -50,17 +50,22 @@ additive output field on `bulk_modify`.
   product page at [csitte.at/mailwarden](https://www.csitte.at/mailwarden/) is maintained by a
   different session in a repository this one deliberately never commits to, so a release reaches the
   page only if someone posts a message on the session bridge. Three releases in a row did not, and the
-  page still described 0.7.0 while 0.10.0 was live. The check answers exactly one question — does a
-  message from us, addressed to that session, mention *this* version — and exits non-zero when it does
-  not; npm's `postversion` runs it in warn-only mode so the reminder appears while tagging. It reads
-  and never writes: the message itself is a judgement call (what on the page is now *wrong*, not what
-  is in this changelog) and stays hand-written. Where no bridge directory is mounted (CI, a fresh
-  clone) it reports SKIPPED rather than success — it never claims to have seen what it could not. The
-  matching rules are pure functions with their own tests, because the directory they normally read is
-  absent exactly where the suite runs: a version must be named plainly (`0.11.0-dev.<sha>`, the
-  unreleased-`main` bundle, is a different artifact and does not count), `0.1.0` is never read out of
-  `0.10.0`, ids match token-exact (`gmail-csitte` is not `csitte`), and a broadcast is not a notice.
-  Repo-only, like the probes and the demo — not part of the npm package.
+  page still described 0.7.0 while 0.10.0 was live. The check answers exactly one question — is there a
+  message from us to that session **declaring** `announces: <this version>` in its frontmatter — and
+  exits non-zero when there is not; npm's `postversion` runs it in warn-only mode so the reminder
+  appears while tagging. It reads and never writes: the message itself is a judgement call (what on the
+  page is now *wrong*, not what is in this changelog) and stays hand-written. Where no bridge directory
+  is mounted (CI, a fresh clone) it reports SKIPPED rather than success — it never claims to have seen
+  what it could not.
+  **The declaration replaced a body scan, and it did so because the body scan failed on its first
+  release.** Matching the version anywhere in the text reported a false OK for 0.11.0 within hours: an
+  earlier message of ours contained that version only as an *example*, in a sentence explaining this
+  check's own rules. Any text rule shares that failure mode — a version turns up in a plan, a quote, a
+  caveat — and its cost is asymmetric: a false MISSING costs a second look, a false OK costs the step
+  itself. The rules are pure functions with their own tests (the false-OK message is one of them),
+  because the directory they normally read is absent exactly where the suite runs; ids still match
+  token-exact (`gmail-csitte` is not `csitte`) and a broadcast is still not a notice. Repo-only, like
+  the probes and the demo — not part of the npm package.
 
 ### Changed
 - **Listed on Smithery as [`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden)** — it serves

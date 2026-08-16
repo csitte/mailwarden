@@ -7,6 +7,10 @@
  * session-bridge message. Three releases in a row (0.8.0 → 0.10.0) shipped without that message and
  * the page kept describing 0.7.0.
  *
+ * An announcing message declares itself with a frontmatter field — `announces: <version>`. The first
+ * cut matched the version anywhere in the body and reported a false OK on its first real release:
+ * an earlier message of ours mentioned that version as an example.
+ *
  * Two ways in:
  *   npm run site-notice          gate — exits non-zero when this version was never announced
  *   node scripts/check-site-notice.mjs --warn    same verdict, always exit 0 (npm `postversion`)
@@ -52,13 +56,13 @@ for (const root of roots) {
 const { state, hits } = noticeState(threads, version);
 
 if (state === "notified") {
-  console.log(`site-notice: OK — csitte was told about ${version}:`);
+  console.log(`site-notice: OK — csitte was told about ${version} (declared, not merely mentioned):`);
   for (const hit of hits) console.log(`             ${hit.slug}/msgs/${hit.name}`);
   process.exit(0);
 }
 
 const scanned = threads.length ? threads.map((t) => t.slug).join(", ") : "none found";
-console.error(`site-notice: MISSING — no bridge message from us to csitte mentions ${version}.`);
+console.error(`site-notice: MISSING — no message from us to csitte declares "announces: ${version}".`);
 console.error(`             Site threads scanned: ${scanned}`);
 console.error("             www.csitte.at/mailwarden/ will keep describing the previous release.");
 console.error("             Post the delta (what on the page is now wrong / missing) per CLAUDE.md,");

@@ -3,7 +3,7 @@ import { describe, it, expect } from "vitest";
 import {
   addresses,
   isSiteThread,
-  mentionsVersion,
+  announcesVersion,
   noticeState,
   readHeaders,
   resolveBridgeDir,
@@ -15,13 +15,14 @@ import {
  * rules themselves are pure functions and get their coverage here rather than from a live bridge.
  */
 
-const msg = (opts: { from?: string; to?: string; body?: string } = {}) =>
+const msg = (opts: { from?: string; to?: string; body?: string; announces?: string } = {}) =>
   [
     "---",
     `from: ${opts.from ?? "mailwarden"}`,
     `to: ${opts.to ?? "csitte"}`,
     "type: fyi",
     "date: 2026-08-15T18:28:11Z",
+    ...(opts.announces ? [`announces: ${opts.announces}`] : []),
     "---",
     "",
     opts.body ?? "mailwarden 0.11.0 ist live.",
@@ -46,41 +47,43 @@ describe("site-notice: which threads are looked at", () => {
   });
 });
 
-describe("site-notice: version matching", () => {
-  it("finds the version, with or without a v prefix", () => {
-    expect(mentionsVersion("mailwarden 0.11.0 ist live", "0.11.0")).toBe(true);
-    expect(mentionsVersion("Tag v0.11.0 gepusht", "0.11.0")).toBe(true);
-    expect(mentionsVersion("(0.11.0)", "0.11.0")).toBe(true);
+describe("site-notice: what counts as an announcement", () => {
+  it("counts a message that declares the version", () => {
+    expect(announcesVersion({ announces: "0.11.0" }, "0.11.0")).toBe(true);
+    expect(announcesVersion({ announces: "v0.11.0" }, "0.11.0")).toBe(true);
+    expect(announcesVersion({ announces: " 0.11.0 " }, "0.11.0")).toBe(true);
   });
 
-  it("does not read 0.1.0 out of 0.10.0 — the trap a substring check walks into", () => {
-    expect(mentionsVersion("Stand 0.10.0", "0.1.0")).toBe(false);
-    expect(mentionsVersion("Stand 0.10.0", "0.10.0")).toBe(true);
+  it("counts one message covering two releases", () => {
+    expect(announcesVersion({ announces: "0.10.0, 0.11.0" }, "0.11.0")).toBe(true);
   });
 
-  it("does not accept a longer version as this one", () => {
-    expect(mentionsVersion("0.11.01", "0.11.0")).toBe(false);
-    expect(mentionsVersion("0.11.0.1", "0.11.0")).toBe(false);
+  it("does NOT count a version merely mentioned in the body — the false OK that forced this rule", () => {
+    // Verbatim shape of the message that broke the first cut: it explained this very check and used
+    // the upcoming version as an example, so a body scan reported "already announced" and the
+    // postversion gate waved through the step it exists to enforce.
+    const body = [
+      "---",
+      "from: mailwarden",
+      "to: csitte",
+      "---",
+      "",
+      "ein `0.11.0-dev.<sha>`-Bundle zählt nicht als Ankündigung von 0.11.0",
+    ].join("\n");
+    const headers = readHeaders(body);
+    expect(headers.announces).toBeUndefined();
+    expect(announcesVersion(headers, "0.11.0")).toBe(false);
   });
 
-  it("counts a version that ends the sentence — the commonest spelling of all", () => {
-    expect(mentionsVersion("Live ist jetzt 0.11.0.", "0.11.0")).toBe(true);
+  it("does not confuse neighbouring versions", () => {
+    expect(announcesVersion({ announces: "0.10.0" }, "0.1.0")).toBe(false);
+    expect(announcesVersion({ announces: "0.11.0" }, "0.11.1")).toBe(false);
+    expect(announcesVersion({ announces: "0.11.0-dev.abc" }, "0.11.0")).toBe(false);
   });
 
-  it("does not read the dev bundle as the release — it is a different artifact", () => {
-    expect(mentionsVersion("das Bundle heisst 0.11.0-dev.a1b2c3", "0.11.0")).toBe(false);
-  });
-
-  it("accepts the price of that rule: a hyphenated compound alone does not count", () => {
-    // `0.11.0-Release` is syntactically a semver prerelease, so it cannot be told apart from
-    // `0.11.0-dev.<sha>`. Refusing both is the safe direction — a real announcement names the
-    // bare version somewhere, and this way a page is never assumed updated when it is not.
-    expect(mentionsVersion("das 0.11.0-Release ist raus", "0.11.0")).toBe(false);
-    expect(mentionsVersion("das 0.11.0-Release ist raus. Stand 0.11.0.", "0.11.0")).toBe(true);
-  });
-
-  it("treats the dots as literal, not as wildcards", () => {
-    expect(mentionsVersion("0x11y0", "0.11.0")).toBe(false);
+  it("treats a missing field as not announced, without throwing", () => {
+    expect(announcesVersion({}, "0.11.0")).toBe(false);
+    expect(announcesVersion(undefined, "0.11.0")).toBe(false);
   });
 });
 
@@ -110,7 +113,7 @@ describe("site-notice: addressing", () => {
 describe("site-notice: the verdict", () => {
   it("reports notified, naming the message that says so", () => {
     const state = noticeState(
-      thread([{ name: "2026-08-15T182811Z__mailwarden__7b27.md", text: msg() }]),
+      thread([{ name: "2026-08-15T182811Z__mailwarden__7b27.md", text: msg({ announces: "0.11.0" }) }]),
       "0.11.0",
     );
     expect(state.state).toBe("notified");
@@ -124,7 +127,7 @@ describe("site-notice: the verdict", () => {
       thread([
         {
           name: "2026-08-15T182811Z__mailwarden__7b27.md",
-          text: msg({ body: "0.8.0, 0.9.0 und 0.10.0 sind auf der Seite nicht abgebildet." }),
+          text: msg({ announces: "0.10.0", body: "0.8.0, 0.9.0 und 0.10.0 sind auf der Seite nicht abgebildet." }),
         },
       ]),
       "0.11.0",
@@ -138,7 +141,7 @@ describe("site-notice: the verdict", () => {
       thread([
         {
           name: "2026-08-15T190000Z__csitte__abcd.md",
-          text: msg({ from: "csitte", to: "mailwarden", body: "0.11.0 ist auf der Seite." }),
+          text: msg({ from: "csitte", to: "mailwarden", announces: "0.11.0" }),
         },
       ]),
       "0.11.0",
@@ -148,7 +151,7 @@ describe("site-notice: the verdict", () => {
 
   it("trusts the frontmatter over the filename when the two disagree", () => {
     const state = noticeState(
-      thread([{ name: "2026-08-15T182811Z__mailwarden__7b27.md", text: msg({ from: "csitte" }) }]),
+      thread([{ name: "2026-08-15T182811Z__mailwarden__7b27.md", text: msg({ from: "csitte", announces: "0.11.0" }) }]),
       "0.11.0",
     );
     expect(state.state).toBe("missing");
@@ -156,7 +159,7 @@ describe("site-notice: the verdict", () => {
 
   it("does not count a message addressed to someone else", () => {
     const state = noticeState(
-      thread([{ name: "2026-08-15T182811Z__mailwarden__7b27.md", text: msg({ to: "freddy" }) }]),
+      thread([{ name: "2026-08-15T182811Z__mailwarden__7b27.md", text: msg({ to: "freddy", announces: "0.11.0" }) }]),
       "0.11.0",
     );
     expect(state.state).toBe("missing");

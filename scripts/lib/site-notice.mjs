@@ -51,22 +51,29 @@ export function addresses(headers, id) {
 }
 
 /**
- * Does the body name this version? Bounded on both sides so `0.1.0` is never read out of `0.10.0`
- * and a `v` prefix still counts. The version is escaped — its dots are literal, not wildcards.
+ * Does this message DECLARE that it announces `version`? Read from a frontmatter field, never from
+ * the prose:
  *
- * The two sides are deliberately asymmetric. A trailing hyphen is refused because that is exactly
- * how a *different* thing spells itself: `0.11.0-dev.<sha>` is the unreleased-main bundle, and a
- * message about it must not read as an announcement of the release. Nothing analogous sits in front,
- * so a leading hyphen stays allowed. The cost is that a German compound (`das 0.11.0-Release`) is not
- * counted on its own — cheap, because every real announcement names the version plainly somewhere,
- * and the failure direction is the safe one: a second look, not a page left stale.
+ *     announces: 0.11.0
  *
- * A trailing dot is refused only when a digit follows it (`0.11.0.1` is a different version). A dot
- * that ends the sentence is the single most common way to write a version and has to keep counting.
+ * The first cut scanned the body text for the version instead, and it produced a false OK within
+ * hours — on the very first release it ran for. The offending message was our own, and it contained
+ * `0.11.0` only as an EXAMPLE, inside a sentence explaining this check's own rules. Every
+ * text-matching rule has that failure mode: a version turns up in a plan, a quote, a caveat about dev
+ * bundles, and the tool reads it as "already announced" and waves through the one step it exists to
+ * enforce. A false MISSING costs a second look; a false OK costs the thing itself.
+ *
+ * So an announcement declares itself. The field takes one version or a comma list (one message may
+ * cover two releases), compared exactly after trimming an optional `v`. What a message merely
+ * *mentions* is now irrelevant — which is the whole point.
  */
-export function mentionsVersion(text, version) {
-  const escaped = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(^|[^\\w.])v?${escaped}(?![\\w-])(?!\\.\\d)`).test(text ?? "");
+export function announcesVersion(headers, version) {
+  const raw = headers?.announces;
+  if (typeof raw !== "string") return false;
+  return raw
+    .split(",")
+    .map((v) => v.trim().replace(/^v/i, ""))
+    .includes(version.trim());
 }
 
 /**
@@ -82,7 +89,7 @@ export function noticeState(threads, version, { from = "mailwarden", to = "csitt
       const headers = readHeaders(msg.text);
       if ((headers.from ?? "").toLowerCase() !== from) continue;
       if (!addresses(headers, to)) continue;
-      if (!mentionsVersion(msg.text, version)) continue;
+      if (!announcesVersion(headers, version)) continue;
       hits.push({ slug: thread.slug, name: msg.name });
     }
   }

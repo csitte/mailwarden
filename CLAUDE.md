@@ -84,8 +84,11 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   die Zusage war trotzdem unbelegt, und der Reihenfolge-Punkt gilt unverändert.)
   Zwei Konventionen der Seite respektieren: **keine Versionsnummer und keine gezählten Aufzählungen**
   im Fließtext — beides veraltet bei jedem unserer Commits.
-  `npm run site-notice` beantwortet mechanisch, ob das für die aktuelle Version passiert ist (exit ≠ 0,
-  wenn nicht); `postversion` sagt es beim Taggen schon einmal an. Ohne Bridge-Laufwerk (CI, fremder
+  **Die Meldung trägt `announces: <version>` im Frontmatter** — daran und nur daran erkennt
+  `npm run site-notice`, dass sie erfolgt ist (exit ≠ 0, wenn nicht); `postversion` sagt es beim Taggen
+  schon einmal an. Die erste Fassung suchte die Version im Fließtext und meldete prompt einen
+  Fehlalarm, weil eine ältere Nachricht sie als *Beispiel* enthielt: ein falsches „ok" kostet den
+  Schritt selbst, ein falsches „fehlt" nur einen zweiten Blick. Ohne Bridge-Laufwerk (CI, fremder
   Klon) meldet der Check **SKIPPED**, nie „ok" — er behauptet nichts, was er nicht gesehen hat.
   Anlass: die Seite beschrieb noch 0.7.0, als 0.10.0 live war (drei Releases ohne Nachricht).
 
