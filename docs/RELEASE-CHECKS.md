@@ -257,3 +257,32 @@ auf der simpelsten Query" (stimmt absolut, in Prozent umgedreht); die Website-Se
 Korrigieren „the check is unconditional" neu hinein (wahr für `search`, falsch für die Bulk-Tools).
 Jede dieser drei fand jemand **anderes**. Wer eine Aussage zurücknimmt, prüft den Ersatz mit demselben
 Maß — am besten, indem eine zweite Instanz gegen die Rohdaten liest, nicht gegen den neuen Text.
+
+## Nachtrag zur Trefferquote (16.08.2026, Release 0.11.0)
+
+Drei Fehler, drei verschiedene Finder — und **keiner** davon war älter als ein paar Stunden. Alle
+drei entstanden beim *Korrigieren* von etwas anderem, was diesen Zyklus zum Musterfall der Regel
+oben macht.
+
+- **Runde 2 (Doku gegen Code) fand eine Hochrechnung über eine Endpunktgrenze.** Die frisch
+  geschriebene Warnung an `bulk_modify` bezifferte das Risiko mit Zahlen, die auf `threads.list`
+  gemessen waren — `bulk_modify` fragt aber `messages.list`. Nachgemessen statt argumentiert,
+  gleiches Postfach, gleiche Minute: `threads.list` 132 Treffer / 114 ohne eine ungelesene
+  Nachricht, `messages.list` 19 / 0. Die Drift sitzt im **Thread**-Index. **Lehre: eine Zahl, die
+  von Endpunkt A stammt und über Endpunkt B redet, ist eine Vermutung — und der Messaufwand war
+  hier ein einziger Skriptlauf.**
+- **Runde 4 (Fix-Commits) fand eine mitgeänderte Fehlerlage.** Die Auth-Härtung ließ zwei
+  Situationen gleich aussehen: „die Konten unterscheiden sich" und „ich konnte gar nicht prüfen"
+  (Netzfehler, Gmail-API nicht aktiviert). Frage 1 der Runde — *was hat der Fix außer dem
+  beabsichtigten Verhalten noch geändert?* — traf genau das.
+- **Der Release-Lauf selbst fand den dritten, den keine Runde hätte finden können.** Der
+  `postversion`-Check meldete **fälschlich OK**: er suchte die Version im Fließtext und fand sie in
+  einer älteren eigenen Nachricht, die sie als *Beispiel* enthielt. Tag lokal zurückgenommen,
+  Kriterium auf eine ausdrückliche Deklaration im Frontmatter umgestellt, der Fehlalarm als
+  Testfall aufgenommen. **Zwei Lehren:** ein Prüfwerkzeug, das noch nie scharf gelaufen ist, ist
+  ungeprüft — der erste echte Lauf gehört zum Test. Und: **ein falsches „ok" kostet den Schritt
+  selbst, ein falsches „fehlt" nur einen zweiten Blick; im Zweifel die Variante bauen, die eher zu
+  viel meldet.**
+
+Formulierung der fremden Session, die das am kürzesten fasst und deshalb hier steht: *ein Marker,
+den ein Dokument über sich selbst setzt, ist etwas anderes als ein Muster, das jemand im Text sucht.*
