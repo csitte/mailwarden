@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { debugEnabled, findStrayPositional, readAccountArg, resolveMode } from "../src/cli.js";
+import { createRequire } from "node:module";
+import {
+  debugEnabled,
+  findStrayPositional,
+  helpFooter,
+  REPO_URL,
+  readAccountArg,
+  resolveMode,
+} from "../src/cli.js";
 
 // This layer decides which token file an OAuth consent lands in. Three of the defects found
 // reviewing the multi-account work lived here, so each fixed behavior gets a test.
@@ -114,6 +122,34 @@ describe("debugEnabled", () => {
   it("is on for the usual affirmatives", () => {
     for (const v of ["1", "true", "yes", "TRUE", "on"]) {
       expect(debugEnabled({ MAILWARDEN_DEBUG: v })).toBe(true);
+    }
+  });
+});
+
+describe("helpFooter", () => {
+  // The signpost exists because installs vastly outnumber visits; if it ever points at a dead
+  // URL it does the opposite of its job. Hence: held against package.json, not just eyeballed.
+  const pkg = createRequire(import.meta.url)("../package.json") as {
+    bugs: { url: string };
+    repository: { url: string };
+  };
+
+  it("uses the same repository the package publishes", () => {
+    expect(pkg.bugs.url).toBe(`${REPO_URL}/issues`);
+    // `git+https://github.com/csitte/mailwarden.git` → the plain project URL.
+    expect(pkg.repository.url.replace(/^git\+/, "").replace(/\.git$/, "")).toBe(REPO_URL);
+  });
+
+  it("names the issue tracker only when something went wrong", () => {
+    // A clean run has nothing to report; inviting a report anyway just buys noise.
+    expect(helpFooter("ok")).not.toMatch(/issues/);
+    expect(helpFooter("problem")).toMatch(/issues/);
+  });
+
+  it("always names the docs, and stays one line", () => {
+    for (const state of ["ok", "problem"] as const) {
+      expect(helpFooter(state)).toContain(`${REPO_URL}#readme`);
+      expect(helpFooter(state)).not.toContain("\n");
     }
   });
 });

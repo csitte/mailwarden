@@ -9,7 +9,14 @@ import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
 import { resolveEnabledTiers, serverInstructions } from "./tiers.js";
 import { runDoctor } from "./doctor.js";
-import { CliError, debugEnabled, findStrayPositional, readAccountArg, resolveMode } from "./cli.js";
+import {
+  CliError,
+  debugEnabled,
+  findStrayPositional,
+  helpFooter,
+  readAccountArg,
+  resolveMode,
+} from "./cli.js";
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
@@ -87,11 +94,13 @@ async function main(): Promise<void> {
             "(add it to the MCP server's env).",
         );
       }
+      console.error(helpFooter("ok"));
     } catch (err) {
       console.error(
         "⚠ Token was stored, but a test call to Gmail failed:",
         err instanceof Error ? err.message : err,
       );
+      console.error(helpFooter("problem"));
       process.exitCode = 1;
     }
     return;

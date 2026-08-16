@@ -22,6 +22,7 @@ import {
   getAuth,
   type CredCheck,
 } from "./auth.js";
+import { helpFooter } from "./cli.js";
 import { Gmail } from "./gmail.js";
 import { authScopesForTiers, missingScopes, resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
@@ -290,5 +291,6 @@ export async function runDoctor(): Promise<number> {
   for (const c of checks) console.error(`  ${ICON[c.status]} ${c.name}: ${c.detail}`);
   const code = reportExitCode(checks);
   console.error(`\n${code === 0 ? "✓ Setup looks good." : "✗ Setup has problems — see the ✗ lines above."}`);
+  console.error(helpFooter(code === 0 ? "ok" : "problem"));
   return code;
 }

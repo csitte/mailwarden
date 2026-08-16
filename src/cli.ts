@@ -80,6 +80,35 @@ export function readAccountArg(args: string[]): string | undefined {
 }
 
 /**
+ * Where the project lives. Kept next to the line that prints it, and held against package.json's
+ * `bugs.url` by a test, because a link that has quietly rotted is worse than no link: it sends a
+ * user who already has a problem to a 404.
+ */
+export const REPO_URL = "https://github.com/csitte/mailwarden";
+
+/**
+ * The one line that names where the docs and the issue tracker are.
+ *
+ * mailwarden is installed far more often than it is visited — `npx` puts it to work without anyone
+ * ever seeing the repository, and until now nothing in a run said where to look when something was
+ * unclear or wrong. This is that missing signpost, not a promotion: it appears only at the end of
+ * the two modes a human sits and watches (`--auth`, `--check`), once, and never in server mode,
+ * where stderr belongs to the host's log and a link would be noise in a machine's transcript.
+ *
+ * It points at the repository rather than the product page on purpose. The README ships with the
+ * package and is corrected in the same commit as the code; a mirrored page can lag behind a fix by
+ * days, and the one thing a signpost must not do is lead somewhere out of date.
+ *
+ * `problem` adds the issue tracker. Someone whose setup just failed is the one person who both
+ * needs it and has something worth reporting — offering it after a clean run instead would be
+ * asking for noise from the people with nothing to say.
+ */
+export function helpFooter(state: "ok" | "problem"): string {
+  const docs = `Docs: ${REPO_URL}#readme`;
+  return state === "problem" ? `${docs} — report a problem: ${REPO_URL}/issues` : docs;
+}
+
+/**
  * A bare positional argument, if any — i.e. a token that is neither a flag nor the value of
  * `--account`. `mailwarden --auth work` is almost certainly a forgotten `--account`, and silently
  * ignoring it would authorize (and overwrite) the DEFAULT account while the user believes they

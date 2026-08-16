@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`--auth` and `--check` now say where the docs and the issue tracker are.** mailwarden is
+  installed far more often than it is visited — `npx` puts it to work without anyone seeing the
+  repository — and until now no run named a place to look when something was unclear or broken. One
+  line, at the end of the two modes a human sits and watches; **never in server mode**, where stderr
+  is the host's log and a link is noise in a machine's transcript. The issue tracker is named only
+  when something actually went wrong (a failing `--check`, or a consent that stored a token but
+  could not call Gmail): the person whose setup just broke is the one who both needs it and has
+  something worth reporting. It points at the repository rather than the product page because the
+  README ships with the package and is corrected in the same commit as the code, while a mirrored
+  page can lag a fix by days — and a signpost must not lead somewhere out of date. The URL is held
+  against `package.json`'s `bugs.url` and `repository.url` by a test, since a rotted link sends a
+  user who already has a problem to a 404.
+
 ### Changed
 - **Comparison table rebuilt against the servers people actually reach for** (README, „Compared to
   other Gmail MCP servers"). Columns are now Google's first-party server, `taylorwilsdon`,
