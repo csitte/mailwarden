@@ -15,7 +15,9 @@
  *   4. tool tiers still gate in the built artifact (read tier ⇒ no write tools),
  *   5. `--check` diagnoses a missing setup instead of crashing on it,
  *   6. the SHIPPED documentation is not broken for the person who installed it — every relative
- *      link resolves inside the package and every anchor points at a real heading.
+ *      link resolves inside the package and every anchor points at a real heading,
+ *   7. the comparison table's claims about other projects were checked recently enough to still be
+ *      worth printing.
  *
  * On (6): README once pointed npm users at a script that only exists in the repo. Checking it by
  * hand is unreliable in a way this file exists to avoid — an ad-hoc grep for it found two of three
@@ -33,6 +35,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { mcpSession } from "./lib/mcp-session.mjs";
 import { npm, run } from "./lib/run.mjs";
+import { tableAgeState } from "./lib/table-age.mjs";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const expectedVersion = createRequire(import.meta.url)(path.join(repoRoot, "package.json")).version;
@@ -131,6 +134,17 @@ try {
       dead.join(", ") || `${anchors.length} checked`,
     );
   }
+  // The comparison table is the only thing we ship that asserts something about OTHER projects, and
+  // it is the only thing here that can be wrong without anything breaking. This says when someone
+  // last looked — not whether the cells are right, which no script can decide.
+  const shippedReadme = readFileSync(path.join(installed, "README.md"), "utf8");
+  const tableAge = tableAgeState(shippedReadme, new Date());
+  check(
+    "README comparison table has been verified recently",
+    tableAge.state === "ok",
+    tableAge.detail,
+  );
+
   // Not in the tarball, but it is what the MCP registry publishes from — a mismatch here ships a
   // registry entry for a version npm does not have.
   const serverJsonVersion = createRequire(import.meta.url)(

@@ -156,15 +156,16 @@ Gewinn: 27 echte Opt-out-Endpunkte, keiner fälschlich blockiert.
 
 **Der mechanische Teil läuft inzwischen automatisch.** `npm run smoke` prüft gegen das
 *installierte* Paket: relative Links, Sprungmarken, Versionsgleichstand package.json ↔
-server.json, dazu Handshake, Tool-Oberfläche und `--check`. `npm run mcpb` tut dasselbe für das
+server.json, das **Alter der Vergleichstabelle** (s. u.), dazu Handshake, Tool-Oberfläche und
+`--check`. `npm run mcpb` tut dasselbe für das
 zweite Artefakt, das MCPB-Bundle (Manifest validiert, Bundle entpackt und gebootet, Größe unter
 Smitherys Limit). Nicht mehr per Prompt nachbauen — der Prompt fragt nur noch nach dem, was ein
 Skript nicht beurteilen kann:
 
 ```
 `npm run smoke` ist gelaufen und grün — es deckt relative Links, Sprungmarken,
-Versionsgleichstand, Handshake, Tool-Oberfläche und --check gegen das
-installierte Paket ab. Prüf das, was es NICHT beurteilen kann:
+Versionsgleichstand, Tabellenalter, Handshake, Tool-Oberfläche und --check gegen
+das installierte Paket ab. Prüf das, was es NICHT beurteilen kann:
  - Ist CHANGELOG [Unreleased] vollständig UND ehrlich? Steht dort jeder Commit
    seit dem letzten Tag, der Nutzerverhalten ändert, und beschreibt der Text das
    tatsächliche Verhalten statt der Absicht?
@@ -324,3 +325,16 @@ oft einen beanspruchten Vorsprung. Hier: gegenüber den anderen selbstgehosteten
   Der Fund oben entstand, weil die zweite Session eine Zelle *nicht* übernommen hat. Wo eine Tabelle
   gespiegelt wird, ist das Spiegeln die billigste Prüfrunde, die es gibt — vorausgesetzt, die andere
   Seite belegt statt abzuschreiben.
+
+**Mechanisiert ist davon genau ein Teil, seit 0.12.0 in `npm run smoke`: das Alter.** Der Inhalt einer
+Zelle ist nicht prüfbar, ohne fünf fremde Quelltexte zu lesen — das bleibt Handarbeit. Prüfbar ist, ob
+überhaupt jemand hingesehen hat: die Tabelle trägt ein Datum, das sie **über sich selbst deklariert**
+(`<!-- comparison-table-verified: … -->`, dieselbe Konstruktion wie `announces:` beim
+Site-Notice-Check, aus demselben Grund), und ein Snapshot älter als 60 Tage bricht den Lauf. Grün
+heißt damit „kürzlich nachgesehen", nie „stimmt" — ein Check, der mehr behauptet, wäre schlimmer als
+keiner. Das Budget ist bewusst weit: eine Runde, die bei jedem Release feuert, wird weggeklickt, und
+dieser Check zielt nicht auf Drift (dafür ist der Recheck da), sondern auf die Tabelle, die über viele
+Releases hinweg niemand mehr angefasst hat. Weil das Lesbare und das Maschinenlesbare
+auseinanderlaufen können, ist auch **der Satz unter der Tabelle Teil der Prüfung**: ein
+hochgesetzter Marker über einem alten Satz würde das Werkzeug zufriedenstellen und jeden Leser
+belügen.

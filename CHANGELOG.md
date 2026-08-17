@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   page can lag a fix by days — and a signpost must not lead somewhere out of date. The URL is held
   against `package.json`'s `bugs.url` and `repository.url` by a test, since a rotted link sends a
   user who already has a problem to a 404.
+- **The release smoke test now checks how old the comparison table's claims are.** That table is the
+  only thing shipped here that asserts something about *other people's* software, and it fails in a
+  way nothing else does: silently. Code breaks when its assumption stops holding; a stale cell just
+  sits there — two of them did, both in `mailwarden`'s favour, which is the direction an unverified
+  comparison always drifts. What a script can decide is not whether a cell is right (that means
+  reading five foreign codebases) but whether anyone has looked lately, so `npm run smoke` now fails
+  when the table's snapshot is more than 60 days old. A green run means *recently verified*, never
+  *correct*. The date is one the README declares about itself in a marker rather than one scraped out
+  of its prose, and the human-readable sentence under the table has to agree with it — a bumped
+  marker over an old sentence would satisfy the tool while telling every reader something false.
 
 ### Changed
 - **Comparison table rebuilt against the servers people actually reach for** (README, „Compared to

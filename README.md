@@ -46,6 +46,8 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 
 Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden` (mailbox-side snooze, search re-verification), and one deliberate omission is a security feature, not a gap. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
 
+<!-- comparison-table-verified: 2026-08-16 -->
+
 | Capability | **mailwarden** | [Google official](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | [taylorwilsdon](https://github.com/taylorwilsdon/google_workspace_mcp) | [a-bonus](https://github.com/a-bonus/google-docs-mcp) | [klodr](https://github.com/klodr/gmail-mcp) |
 |---|:--:|:--:|:--:|:--:|:--:|
 | **Mailbox-side snooze** — archive now, resurface in the inbox on a date/time or preset | ✅ | — | — | — | — |
