@@ -68,7 +68,7 @@ describe("site-notice: what counts as an announcement", () => {
       "to: csitte",
       "---",
       "",
-      "ein `0.11.0-dev.<sha>`-Bundle zählt nicht als Ankündigung von 0.11.0",
+      "a `0.11.0-dev.<sha>` bundle does not count as announcing 0.11.0",
     ].join("\n");
     const headers = readHeaders(body);
     expect(headers.announces).toBeUndefined();

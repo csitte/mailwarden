@@ -50,6 +50,13 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Tests grün. (Keine Testanzahl hier — sie war schon zweimal veraltet; die aktuelle Zahl steht
   im README-Status, der beim Release ohnehin angefasst wird.)
 - **Ein Feature = ein Commit**, Conventional Commits (`feat:`, `fix:`, `docs:`).
+- **Alles im Repo ist Englisch — auch Commit-Messages.** Code, Kommentare, Tests, README,
+  `SECURITY.md`, `CHANGELOG.md`, `docs/SETUP.md`, Tool-Beschreibungen. **Genau zwei Ausnahmen:
+  diese Datei und `docs/RELEASE-CHECKS.md`** — interne Arbeitsdokumente, die an Chris und an mich
+  gehen, nicht an Nutzer. (Anweisung 18.08.2026; die Commit-Historie davor ist deutsch und wird
+  nicht umgeschrieben.) **Deutsche Umlaute in Testdaten sind kein deutscher Text**: `"Grüße für
+  März"`, `münchen.example`, `Scanbot/zu-löschen` prüfen RFC-2047-, IDN- und Labelbehandlung und
+  bleiben, wo sie stehen.
 - **Prüfrunden vor einem Release:** `docs/RELEASE-CHECKS.md` — fertige Prompts, ein Winkel
   je Runde. Zwei Runden sind das Budget; eine nötige dritte ist ein Design-Signal. Immer
   Doku-gegen-Code und die Artefakt-Runde, dazu genau eine passende weitere. Reine
