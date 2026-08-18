@@ -338,3 +338,51 @@ Releases hinweg niemand mehr angefasst hat. Weil das Lesbare und das Maschinenle
 auseinanderlaufen können, ist auch **der Satz unter der Tabelle Teil der Prüfung**: ein
 hochgesetzter Marker über einem alten Satz würde das Werkzeug zufriedenstellen und jeden Leser
 belügen.
+
+## Nachtrag (18.08.2026): der Spiegel, dessen Versionsnummer stimmt
+
+Der Nachtrag vom 16.08. hält fest, dass ein Spiegel die Lebensdauer eines Fehlers über den Commit
+hinaus verlängert, der ihn repariert. Dieser Fall zeigt die Bauform, gegen die das keine Warnung
+mehr ist: **die Metadaten liefen mit, der Text nicht.**
+
+`codeguilds.dev` zeigte „Version 0.12.0", „Latest: 0.12.0" und das npm-Badge `v0.12.0` — über einem
+README-Körper vom Stand `0.1.7` (23.07.). Also: 116 Tests statt 789, ein `--http`-Bearer-Token als
+„optional" statt Pflicht seit 0.2.0, ein Read-Only-Modus mit vier statt acht Tools — und die
+Index-Erklärung, die wir in 0.11.0 gemessen und **zurückgezogen** haben, wörtlich weiterlebend
+(„silently drops `is:unread` in some operator combinations"). Kontrollprobe am publizierten
+npm-Tarball 0.12.0: der trägt den aktuellen Text, die Abweichung saß vollständig in deren Kopie.
+
+> **Ein Spiegel mit richtiger Versionsnummer über altem Text ist gefährlicher als ein sichtbar
+> veralteter: die stimmende Zahl nimmt dem Leser den Anlass zum zweiten Blick.**
+
+Bei Glama (16.08.) fiel die falsche Testzahl auf, weil daneben nichts sie deckte. Hier deckte die
+Version sie zu. Wer prüfen will, ob ein Spiegel aktuell ist, darf deshalb **nicht die Version
+vergleichen** — er muss einen Satz vergleichen, der sich zwischen den Versionen geändert hat. Am
+billigsten ist eine Aussage, die man selbst zurückgezogen hat: die darf nirgends mehr stehen.
+
+**Die Verschärfung liegt aber nicht beim Spiegel.** Auf diese Seite zeigte seit `f61ff10` (31.07.)
+ein Badge in Zeile 8 unseres eigenen README — deren Snippet, von uns übernommen. Es war also kein
+fremder Scrape, den jemand ungefragt angelegt hat, sondern ein Bezugsweg, den wir empfohlen haben.
+0.12.0 hatte für den `--auth`/`--check`-Signpost genau deshalb aufs Repository gezeigt und nicht auf
+die Produktseite: „a mirrored page can lag a fix by days". Dieselbe Begründung traf das Badge, nur
+nach außen gerichtet, und um elf Minor-Versionen statt um Tage.
+
+> **Jeder Zeiger, den wir setzen, ist eine Zusage über fremden Inhalt. Wer ihn nicht regelmäßig
+> nachsieht, muss ihn entfernen — nicht auf einen Refresh hoffen.**
+
+Die Reparatur war deshalb nicht, dort eine Aktualisierung zu erbitten (die Seite hätte dafür einen
+Login gebraucht und wäre beim nächsten Release wieder zurückgefallen), sondern das Badge zu
+entfernen. Die Listung selbst bleibt unangetastet; zurückgezogen ist nur unsere Empfehlung.
+
+**Und die Kontrollabfrage, ohne die der Befund eine Verallgemeinerung wäre:** `freemcp.space`,
+im selben Durchgang geprüft, spiegelt das **aktuelle** README wörtlich — 789 Tests, die
+Vergleichstabelle vom 16.08., die auf `search` beschränkte Re-Verifikation. Zwei Spiegel, gleicher
+Tag, gegensätzlicher Befund. „Spiegel sind veraltet" ist damit unbelegt; belegt ist: **plattform-
+abhängig, und von außen sieht man einer Seite nicht an, welche Sorte sie ist** — dieselbe Form wie
+beim Postfach in der `threads.list`-Messung, und derselbe Schluss: nachsehen statt annehmen.
+
+**Mechanisierbar ist davon nichts.** Der Alterscheck in `npm run smoke` prüft die Tabelle in
+*unserem* Baum; ein fremder Spiegel liegt außerhalb jedes Laufs, den wir fahren. Was in unserer Hand
+liegt, ist die Liste der Bezugswege — und die ist selbst ein Artefakt, das altert: `codeguilds.dev`
+stand in keiner Distributions-Notiz, obwohl sein Badge seit drei Wochen in unserem README hing.
+Gefunden wurde es über den Link einer *anderen* Plattform, nicht über eine eigene Liste.
