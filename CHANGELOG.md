@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Removed
+- **The CodeGuilds badge, and with it our recommendation of that listing.** The page it linked
+  to had been serving the `0.1.7` README since late July while its metadata kept tracking npm —
+  so it showed "Version 0.12.0" above a body claiming 116 tests (there are 789), an `--http`
+  bearer token that is "optional" (required since 0.2.0), a read-only mode of four tools (there
+  are eight), and the search-index explanation this project measured and withdrew in 0.11.0.
+  That last one is why this is a correction and not housekeeping: a claim we retracted stayed
+  readable for weeks behind a badge we put in our own README. Metadata that updates while the
+  text does not is the worst shape a stale mirror can take — the version is right, so nothing
+  invites a second look. 0.12.0 argued that a signpost must not lead somewhere out of date; this
+  badge led exactly there. The listing itself is untouched and may well be refreshed later — only
+  our pointer to it is withdrawn.
+
 ## [0.12.0] - 2026-08-17
 
 ### Added
