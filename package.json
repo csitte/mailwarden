@@ -62,11 +62,10 @@
     "node": ">=20"
   },
   "dependencies": {
-    "@google-cloud/local-auth": "^3.0.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "express": "^4.21.0",
-    "google-auth-library": "^9.15.1",
-    "googleapis": "^144.0.0",
+    "google-auth-library": "10.5.0",
+    "googleapis": "^176.0.0",
     "zod": "^3.23.8"
   },
   "devDependencies": {

@@ -1,6 +1,6 @@
-import { authenticate } from "@google-cloud/local-auth";
 import { google } from "googleapis";
-import type { OAuth2Client } from "google-auth-library";
+import { OAuth2Client } from "google-auth-library";
+import { runConsentFlow } from "./consent.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { readFileSync, readdirSync } from "node:fs";
@@ -309,7 +309,14 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
 
 /** Validated OAuth client credentials, or an actionable reason they're unusable. */
 export type CredCheck =
-  | { ok: true; kind: "installed" | "web"; client_id: string; client_secret: string }
+  | {
+      ok: true;
+      kind: "installed" | "web";
+      client_id: string;
+      client_secret: string;
+      /** First registered redirect URI — Google matches it exactly, so it is not ours to invent. */
+      redirect_uri: string;
+    }
   | { ok: false; message: string };
 
 /**
@@ -320,8 +327,10 @@ export type CredCheck =
  * OAuth *client* file) — none of which tell the user what to actually do.
  *
  * Pure (string in, result out) so it's unit-tested without an OAuth flow.
- * `raw` is null when the file is missing. redirect_uri validation is left to
- * local-auth, whose message for that specific case is already clear.
+ * `raw` is null when the file is missing. The redirect URI is validated here too
+ * since `@google-cloud/local-auth` was dropped (see consent.ts) — it used to be
+ * the one raising that particular error, and it was the one message of its set
+ * that was already clear, so its substance is kept.
  */
 export function checkCredentials(raw: string | null, credPath: string): CredCheck {
   if (raw === null) {
@@ -342,7 +351,7 @@ export function checkCredentials(raw: string | null, credPath: string): CredChec
   const obj = parsed as { installed?: unknown; web?: unknown };
   const kind = obj?.installed ? "installed" : obj?.web ? "web" : undefined;
   const key = (kind ? (obj as Record<string, unknown>)[kind] : undefined) as
-    | { client_id?: unknown; client_secret?: unknown }
+    | { client_id?: unknown; client_secret?: unknown; redirect_uris?: unknown }
     | undefined;
   if (!kind || !key) {
     return {
@@ -356,7 +365,33 @@ export function checkCredentials(raw: string | null, credPath: string): CredChec
       message: `${credPath} is missing client_id or client_secret. Re-download the OAuth client JSON from Google Cloud Console. See docs/SETUP.md.`,
     };
   }
-  return { ok: true, kind, client_id: key.client_id, client_secret: key.client_secret };
+  // The consent flow redirects here; Google matches the URI against what is registered for the
+  // client, so an absent or non-loopback one cannot be worked around — it has to be fixed in the
+  // Cloud Console. A "Desktop app" client always ships a loopback URI, which is why the message
+  // points at the client type rather than at the field.
+  const uris = key.redirect_uris;
+  const first = Array.isArray(uris) && typeof uris[0] === "string" ? uris[0] : undefined;
+  let host: string | undefined;
+  if (first) {
+    try {
+      host = new URL(first).hostname;
+    } catch {
+      host = undefined;
+    }
+  }
+  if (!first || (host !== "localhost" && host !== "127.0.0.1")) {
+    return {
+      ok: false,
+      message: `${credPath} has no usable loopback redirect URI (expected a "redirect_uris" entry on localhost, e.g. "http://localhost"). This is what an OAuth client of type "Desktop app" gives you — a "Web application" client redirects somewhere else and cannot complete a local consent flow. Create a Desktop app client in Google Cloud Console and download that. See docs/SETUP.md.`,
+    };
+  }
+  return {
+    ok: true,
+    kind,
+    client_id: key.client_id,
+    client_secret: key.client_secret,
+    redirect_uri: first,
+  };
 }
 
 async function persistToken(
@@ -582,7 +617,18 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
   // moment a `Ctrl-C` still helps — and the path, not the address, is what tells a multi-account
   // user that this run is about to aim at the wrong file.
   console.error(`mailwarden: authorizing → will write ${tokenPath(account)}`);
-  const client = (await authenticate({ scopes, keyfilePath: CRED_PATH })) as OAuth2Client;
+  const tokens = await runConsentFlow({
+    clientId: cred.client_id,
+    clientSecret: cred.client_secret,
+    registeredRedirect: cred.redirect_uri,
+    kind: cred.kind,
+    scopes,
+  });
+  const client = new OAuth2Client({
+    clientId: cred.client_id,
+    clientSecret: cred.client_secret,
+  });
+  client.setCredentials(tokens);
   if (!client.credentials.refresh_token) {
     throw new CliError(
       "Consent completed but Google returned no refresh token — the old token was left untouched. " +

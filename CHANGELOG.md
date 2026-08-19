@@ -40,6 +40,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   badge led exactly there. The listing itself is untouched and may well be refreshed later — only
   our pointer to it is withdrawn.
 
+### Security
+- **`@google-cloud/local-auth` is gone; the consent flow is now in this repo** (`src/consent.ts`).
+  That package is a sample helper frozen at 3.0.1 which pins `google-auth-library@^9` → `gaxios@6`,
+  where four moderate `uuid` advisories live. It could not be updated, only removed. `npm audit` now
+  reports none of them; the one remaining finding is `nanoid`, reached through `vitest → vite →
+  postcss`, which is a devDependency and ships in nothing.
+- **The callback server binds to 127.0.0.1.** local-auth called `server.listen(port)` with no host,
+  so while the consent screen was open the callback endpoint was reachable from the whole LAN.
+- **The authorization request carries a `state` parameter** and a callback is refused unless it
+  comes back unchanged (compared in constant time). Without it, anything able to reach the callback
+  could complete the flow with an authorization code of its choosing.
+- **`prompt: "consent"` is now set.** Google returns a refresh token only on a user's first
+  authorization unless asked again, which is why re-running `--auth` on a stale token could
+  previously succeed and hand back credentials that could not be refreshed. That dead end is closed
+  at the source rather than reported after the fact.
+- A consent that is never completed now **times out after five minutes** instead of leaving the
+  process waiting forever, and a request to the callback port that carries no OAuth parameters at
+  all is ignored rather than aborting a consent still in flight.
+
+### Changed
+- **`googleapis` 144 → 176, `google-auth-library` pinned to exactly `10.5.0`.** The exact pin is
+  deliberate: `googleapis` itself depends on that exact version, and a caret range resolves to a
+  newer one, leaving two copies of the library in the tree — which surfaces as a type error about
+  "separate declarations of a private property 'redirectUri'", not as anything that mentions
+  duplication. Existing tokens keep working: a live `--check` against a token stored under the old
+  stack authorized without a re-auth.
+- **`checkCredentials` now validates the redirect URI** and returns it. It has to: this used to be
+  local-auth's one genuinely clear error message, and dropping the package would otherwise have
+  dropped the diagnosis with it. A credentials file without a loopback redirect now names the
+  client type to create instead of failing somewhere inside the flow.
+
 ## [0.12.0] - 2026-08-17
 
 ### Added
