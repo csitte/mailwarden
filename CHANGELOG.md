@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`search` now says that spam and trash are outside its reach — and the docs say when to look
+  there anyway.** Gmail excludes both folders from every query that does not name them, so a plain
+  `from:someone` answers "nothing" about a mail that is sitting in spam, and nothing in the response
+  marks the omission. Measured against a live mailbox: the same `from:` query returned 0 hits by
+  default and 1 with spam included. The tool description now states the exclusion and tells a client
+  to retry with `in:spam` before reporting that mail does not exist — because the reason mail gets
+  misfiled is usually something the caller knows and the filter cannot: a signup, a password reset,
+  an order confirmation from a minute ago. A new README section, *Looking in spam*, shows the
+  queries and the two ways back (`modify_labels`, or a never-spam `create_filter`).
+- **`scripts/probe-spam.mjs`** (repo-only, read-only, aggregate output — no address, subject or
+  domain is ever printed) measures the two questions behind that change in a real mailbox: whether
+  spam is reachable at all, and whether a folder review would have anything to work with. It is what
+  produced the numbers above, and one number argues *against* building more: over one real spam
+  folder, 89% of threads carry no mailing-list machinery, so "looks unlike bulk mail" flags nearly
+  everything and filters nothing. The sharp signal — a sender the user has themselves written to —
+  fired zero times there, on full addresses; at domain granularity it produced exactly one hit, and
+  exactly one candidate domain was a freemail provider. Judging the folder stays out of the server;
+  listing it, so the conversation can judge it, is now documented.
+
 ### Removed
 - **The CodeGuilds badge, and with it our recommendation of that listing.** The page it linked
   to had been serving the `0.1.7` README since late July while its metadata kept tracking npm —

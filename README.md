@@ -106,7 +106,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 
 | Tool | What it does |
 |---|---|
-| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call |
+| `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
@@ -223,6 +223,35 @@ opt-out is beyond any client's reach — pair `unsubscribe` with `create_filter`
 Not offering an automatable option is reported as `unsubscribed:false` with the alternatives, not as an
 error. A `read`-only deployment gets `list_unsubscribe` and `list_subscriptions`, and never makes the
 request at all.
+
+## Looking in spam
+
+**A query that does not name a place never sees spam or trash.** Gmail excludes both from any
+search that does not say `in:spam` / `in:trash`, so `from:someone` returns nothing for a mail that
+is sitting in the spam folder — and nothing in the answer says so. Measured against a live mailbox:
+the same `from:` query returned 0 hits by default and 1 with spam included.
+
+This matters because of *why* mail gets misfiled. A spam filter judges a message on its own; it
+cannot know that you signed up for something a minute ago, requested a password reset, or placed an
+order — so the confirmation you are waiting for is exactly the kind of mail that lands there. You
+know what you just did. The filter does not.
+
+So when mail someone expects is missing, ask again with the place named:
+
+```text
+search("in:spam newer_than:2d")          # what got filed as spam recently
+search("in:spam from:example.com")       # the confirmation that never arrived
+```
+
+A thread returns to the inbox with `modify_labels` (remove `SPAM`, add `INBOX`), and a sender that
+keeps being misjudged is best fixed for good with a never-spam rule — `create_filter` with
+`removeLabels: ["SPAM"]` (see [Filters](#filters-persistent-auto-triage-rules)).
+
+Two things this server deliberately does not do. It does not scan the spam folder and *judge* what
+belongs there: measured over one real spam folder, 89% of it carries no mailing-list machinery at
+all, so "looks unlike bulk mail" flags nearly the whole folder and filters nothing. And it does not
+act on that judgement by itself — releasing mail from spam is a decision, and the context that makes
+it obvious ("I just registered there") lives in the conversation, not in the mailbox.
 
 ## Security & privacy
 
