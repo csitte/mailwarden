@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCallback, resolveRedirect, listenPortFor } from "../src/consent.js";
+import { parseCallback, resolveRedirect, listenPortFor, browserCommand } from "../src/consent.js";
 import { checkCredentials } from "../src/auth.js";
 
 const STATE = "s".repeat(43); // the shape crypto.randomBytes(32).toString("base64url") produces
@@ -111,6 +111,46 @@ describe("resolveRedirect / listenPortFor — the URI Google will match", () => 
 
   it("defaults a portless web redirect to 80 rather than to a random port", () => {
     expect(listenPortFor("http://localhost/cb", "web")).toBe(80);
+  });
+});
+
+describe("browserCommand — handing the URL to the platform intact", () => {
+  // The real shape: several `&`, and percent-encoding in the values.
+  const URL_ =
+    "https://accounts.google.com/o/oauth2/v2/auth?redirect_uri=http%3A%2F%2Flocalhost%3A62089%2F" +
+    "&access_type=offline&prompt=consent&state=Ab_9-x&response_type=code";
+
+  it("caret-escapes every & for cmd, and asks for a verbatim command line", () => {
+    // Regression: without this, cmd treats `&` as a command separator, the browser gets only the
+    // part before the first one, and Google answers "Required parameter is missing: response_type"
+    // — a message that points at the request rather than at how it was opened. Seen live.
+    const { cmd, args, verbatim } = browserCommand(URL_, "win32");
+    expect(cmd).toBe("cmd");
+    expect(verbatim).toBe(true);
+    const passed = args[args.length - 1];
+    expect(passed).not.toMatch(/[^^]&/); // no bare & survives
+    expect(passed.match(/\^&/g)).toHaveLength(URL_.match(/&/g)!.length);
+    // Undoing the escape must give back exactly the URL — nothing added, nothing dropped.
+    expect(passed.replace(/\^&/g, "&")).toBe(URL_);
+  });
+
+  it("keeps start's empty title argument, so the URL is not taken as the window title", () => {
+    const { args } = browserCommand(URL_, "win32");
+    expect(args.slice(0, 3)).toEqual(["/c", "start", ""]);
+  });
+
+  it("leaves percent-encoding untouched", () => {
+    const passed = browserCommand(URL_, "win32").args.at(-1)!;
+    expect(passed).toContain("http%3A%2F%2Flocalhost%3A62089%2F");
+  });
+
+  it("passes the URL through unchanged on macOS and Linux", () => {
+    expect(browserCommand(URL_, "darwin")).toEqual({ cmd: "open", args: [URL_], verbatim: false });
+    expect(browserCommand(URL_, "linux")).toEqual({
+      cmd: "xdg-open",
+      args: [URL_],
+      verbatim: false,
+    });
   });
 });
 

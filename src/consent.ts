@@ -134,16 +134,41 @@ export function listenPortFor(registered: string, kind: "installed" | "web"): nu
   return port ? Number(port) : 80;
 }
 
-/** Open the system browser without shelling out through a shell (no interpolation of the URL). */
+/**
+ * How to hand a URL to the platform's browser.
+ *
+ * Windows is the interesting one. `start` is a cmd builtin, and cmd splits its command line on
+ * `&` — of which an OAuth URL has one before every parameter. Passed through unescaped, the
+ * browser receives everything up to the first `&` and Google refuses the truncated request with
+ * "Required parameter is missing: response_type", which reads like a bug in the request we built
+ * rather than in how it was opened. Caret-escaping each `&` and passing the line verbatim keeps
+ * the URL intact; percent-encoding passes through untouched (verified on Windows 11, both with
+ * and without matching environment variables set).
+ *
+ * Pure, so the escaping is a unit test rather than something only a live consent screen catches.
+ */
+export function browserCommand(
+  url: string,
+  platform: NodeJS.Platform,
+): { cmd: string; args: string[]; verbatim: boolean } {
+  if (platform === "win32") {
+    // The empty string is `start`'s window-title argument: without it, a quoted URL would be
+    // taken as the title and nothing would open.
+    return { cmd: "cmd", args: ["/c", "start", "", url.replace(/&/g, "^&")], verbatim: true };
+  }
+  if (platform === "darwin") return { cmd: "open", args: [url], verbatim: false };
+  return { cmd: "xdg-open", args: [url], verbatim: false };
+}
+
+/** Open the system browser. Never through a shell, so the URL is never re-parsed as a command. */
 function openBrowser(url: string): void {
-  const [cmd, args] =
-    process.platform === "win32"
-      ? ["cmd", ["/c", "start", "", url]]
-      : process.platform === "darwin"
-        ? ["open", [url]]
-        : ["xdg-open", [url]];
+  const { cmd, args, verbatim } = browserCommand(url, process.platform);
   try {
-    spawn(cmd, args, { detached: true, stdio: "ignore" }).unref();
+    spawn(cmd, args, {
+      detached: true,
+      stdio: "ignore",
+      ...(verbatim ? { windowsVerbatimArguments: true } : {}),
+    }).unref();
   } catch {
     // Headless box, no xdg-open, locked-down desktop — the URL is printed either way, so this is
     // a convenience that failed, not the flow failing.
