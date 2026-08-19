@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-19
+
 ### Added
 - **`search` now says that spam and trash are outside its reach — and the docs say when to look
   there anyway.** Gmail excludes both folders from every query that does not name them, so a plain
@@ -916,7 +918,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/csitte/mailwarden/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/csitte/mailwarden/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/csitte/mailwarden/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/csitte/mailwarden/compare/v0.9.0...v0.10.0
