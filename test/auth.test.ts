@@ -7,8 +7,8 @@ import type { OverwriteCheck } from "../src/auth.js";
 
 // Stable mock instance that survives vi.resetModules() (the factory re-runs,
 // but keeps handing out this same vi.fn).
-const mocks = vi.hoisted(() => ({ authenticate: vi.fn() }));
-vi.mock("@google-cloud/local-auth", () => ({ authenticate: mocks.authenticate }));
+const mocks = vi.hoisted(() => ({ runConsentFlow: vi.fn() }));
+vi.mock("../src/consent.js", () => ({ runConsentFlow: mocks.runConsentFlow }));
 
 // auth.ts resolves its config paths from env at module load, so each test
 // stubs MAILWARDEN_DIR and imports a fresh module instance.
@@ -79,7 +79,7 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     vi.resetModules();
-    mocks.authenticate.mockReset();
+    mocks.runConsentFlow.mockReset();
     if (tmp) await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -87,9 +87,9 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "fresh-rt" });
 
     const { getAuth } = await freshAuth(tmp);
     await getAuth(true);
@@ -107,9 +107,9 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ web: { client_id: "wcid", client_secret: "wcs" } }),
+      JSON.stringify({ web: { client_id: "wcid", client_secret: "wcs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
 
     const { getAuth } = await freshAuth(tmp);
     await getAuth(true);
@@ -122,9 +122,9 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: {} });
+    mocks.runConsentFlow.mockResolvedValue({});
 
     const { getAuth } = await freshAuth(tmp);
     await expect(getAuth(true)).rejects.toThrow(/no refresh token/);
@@ -136,7 +136,7 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
   async function withStaleToken(dir: string) {
     await fs.writeFile(
       path.join(dir, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
     await fs.writeFile(
       path.join(dir, "token.json"),
@@ -147,7 +147,7 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
         refresh_token: "stale-rt",
       }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "fresh-rt" });
   }
 
   it("runs the consent flow even when a token.json already exists (re-auth is not a no-op)", async () => {
@@ -159,7 +159,7 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     // property this test has always defended: a stale token must never make --auth a silent no-op
     // that leaves the dead token in place.
     await getAuth(true).catch(() => undefined);
-    expect(mocks.authenticate).toHaveBeenCalledOnce();
+    expect(mocks.runConsentFlow).toHaveBeenCalledOnce();
   });
 
   it("refuses to replace a token it cannot identify, and leaves it untouched", async () => {
@@ -191,9 +191,9 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "first-rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "first-rt" });
 
     const { getAuth } = await freshAuth(tmp);
     await getAuth(true);
@@ -204,11 +204,11 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
 
   it("preflights a missing credentials.json before opening the browser", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
 
     const { getAuth } = await freshAuth(tmp);
     await expect(getAuth(true)).rejects.toThrow(/No OAuth credentials found/);
-    expect(mocks.authenticate).not.toHaveBeenCalled(); // failed before the consent flow
+    expect(mocks.runConsentFlow).not.toHaveBeenCalled(); // failed before the consent flow
   });
 
   it("reports an unreadable credentials.json (exists but can't be read) distinctly from missing", async () => {
@@ -216,21 +216,21 @@ describe("getAuth (interactive) — consent flow + token persistence", () => {
     // A directory at the credentials.json path → readFile fails with EISDIR
     // (not ENOENT), portably exercising the non-missing read-error branch.
     await fs.mkdir(path.join(tmp, "credentials.json"));
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
 
     const { getAuth } = await freshAuth(tmp);
     await expect(getAuth(true)).rejects.toThrow(/exists but could not be read/);
-    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expect(mocks.runConsentFlow).not.toHaveBeenCalled();
   });
 
   it("preflights a credentials.json with no installed/web client", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(path.join(tmp, "credentials.json"), JSON.stringify({ foo: 1 }));
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
 
     const { getAuth } = await freshAuth(tmp);
     await expect(getAuth(true)).rejects.toThrow(/no "installed" or "web" OAuth client/);
-    expect(mocks.authenticate).not.toHaveBeenCalled();
+    expect(mocks.runConsentFlow).not.toHaveBeenCalled();
   });
 });
 
@@ -295,7 +295,7 @@ describe("token encryption (persist + load through getAuth)", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     vi.resetModules();
-    mocks.authenticate.mockReset();
+    mocks.runConsentFlow.mockReset();
     if (tmp) await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -310,9 +310,9 @@ describe("token encryption (persist + load through getAuth)", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "fresh-rt" });
 
     const { getAuth } = await authWithKey(tmp, "pw");
     await getAuth(true);
@@ -327,9 +327,9 @@ describe("token encryption (persist + load through getAuth)", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "fresh-rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "fresh-rt" });
     // Store encrypted, then load in a fresh module instance (no in-process cache).
     const store = await authWithKey(tmp, "pw");
     await store.getAuth(true);
@@ -414,7 +414,7 @@ describe("tier-derived scopes + recorded-scope gating", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     vi.resetModules();
-    mocks.authenticate.mockReset();
+    mocks.runConsentFlow.mockReset();
     if (tmp) await fs.rm(tmp, { recursive: true, force: true });
   });
 
@@ -429,15 +429,15 @@ describe("tier-derived scopes + recorded-scope gating", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
     const granted = `${MODIFY} ${SETTINGS}`;
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt", scope: granted } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt", scope: granted });
 
     const { getAuth } = await freshAuthWithTools(tmp); // no MAILWARDEN_TOOLS → all tiers
     await getAuth(true);
 
-    expect(mocks.authenticate).toHaveBeenCalledWith(
+    expect(mocks.runConsentFlow).toHaveBeenCalledWith(
       expect.objectContaining({ scopes: [MODIFY, SETTINGS] }),
     );
     const stored = JSON.parse(await fs.readFile(path.join(tmp, "token.json"), "utf8"));
@@ -448,14 +448,14 @@ describe("tier-derived scopes + recorded-scope gating", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
     await fs.writeFile(
       path.join(tmp, "credentials.json"),
-      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } }),
+      JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } }),
     );
-    mocks.authenticate.mockResolvedValue({ credentials: { refresh_token: "rt" } });
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
 
     const { getAuth } = await freshAuthWithTools(tmp, "read");
     await getAuth(true);
 
-    expect(mocks.authenticate).toHaveBeenCalledWith(
+    expect(mocks.runConsentFlow).toHaveBeenCalledWith(
       expect.objectContaining({ scopes: [READONLY] }),
     );
   });
@@ -511,17 +511,18 @@ describe("checkCredentials — --auth preflight (pure)", () => {
   const P = "/cfg/credentials.json";
 
   it("accepts a Desktop (installed) client", () => {
-    const raw = JSON.stringify({ installed: { client_id: "cid", client_secret: "cs" } });
+    const raw = JSON.stringify({ installed: { client_id: "cid", client_secret: "cs", redirect_uris: ["http://localhost"] } });
     expect(checkCredentials(raw, P)).toEqual({
       ok: true,
       kind: "installed",
       client_id: "cid",
       client_secret: "cs",
+      redirect_uri: "http://localhost",
     });
   });
 
   it("accepts a web client", () => {
-    const raw = JSON.stringify({ web: { client_id: "wcid", client_secret: "wcs" } });
+    const raw = JSON.stringify({ web: { client_id: "wcid", client_secret: "wcs", redirect_uris: ["http://localhost"] } });
     expect(checkCredentials(raw, P)).toMatchObject({ ok: true, kind: "web", client_id: "wcid" });
   });
 
@@ -548,7 +549,7 @@ describe("checkCredentials — --auth preflight (pure)", () => {
         .message,
     ).toMatch(/missing client_id or client_secret/);
     expect(
-      (checkCredentials(JSON.stringify({ web: { client_secret: "cs" } }), P) as { message: string })
+      (checkCredentials(JSON.stringify({ web: { client_secret: "cs", redirect_uris: ["http://localhost"] } }), P) as { message: string })
         .message,
     ).toMatch(/missing client_id or client_secret/);
   });

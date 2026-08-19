@@ -15,7 +15,7 @@ function inputs(over: Partial<DoctorInputs> = {}): DoctorInputs {
   return {
     credPath: "/cfg/credentials.json",
     tokenPath: "/cfg/token.json",
-    cred: { ok: true, kind: "installed", client_id: "id", client_secret: "sec" },
+    cred: { ok: true, kind: "installed", client_id: "id", client_secret: "sec", redirect_uri: "http://localhost" },
     account: null,
     tokenState: "plaintext",
     passphraseSet: false,
@@ -175,7 +175,7 @@ describe("classifyCredRead — absent vs unreadable", () => {
 
   it("passes a successful read through to checkCredentials", () => {
     const ok = classifyCredRead(
-      { ok: true, raw: JSON.stringify({ installed: { client_id: "i", client_secret: "s" } }) },
+      { ok: true, raw: JSON.stringify({ installed: { client_id: "i", client_secret: "s", redirect_uris: ["http://localhost"] } }) },
       P,
     );
     expect(ok).toMatchObject({ ok: true, kind: "installed" });
