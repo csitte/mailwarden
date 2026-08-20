@@ -26,9 +26,12 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   `structuredContent` alongside fenced JSON text — no parsing guesswork for clients.
 - **Small attack surface.** No send tools (no exfiltration path for prompt-injected mail),
   optional read-only mode, no telemetry, no open ports by default, symlink-safe download fencing,
-  injection-fenced output. **One deliberate exception:** `unsubscribe` / `bulk_unsubscribe` (manage
-  tier) contact the opt-out endpoint named in a message's own header — the only non-Google host
-  mailwarden ever reaches, and a `read`-tier deployment makes no outbound request at all. Details under
+  injection-fenced output. And no code path that *could* send: every Gmail request passes an egress
+  checkpoint that refuses `messages.send`, every draft endpoint, permanent deletion and forwarding
+  settings, whatever a compromised or careless caller asks for. **One deliberate exception:**
+  `unsubscribe` / `bulk_unsubscribe` (manage tier) contact the opt-out endpoint named in a message's
+  own header — the only non-Google host mailwarden ever reaches, and a `read`-tier deployment makes
+  no outbound request at all. Details under
   [Security & privacy](#security--privacy) and
   [Unsubscribing](#unsubscribing--the-one-outbound-request).
 - **Correct with real-world mail.** RFC 2047 headers decoded (`=?UTF-8?B?…?=` → readable text),
@@ -299,6 +302,12 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   deployment could not send even if this binary were replaced; a `manage` one cannot send because
   there is nothing to call. (There is no send-free write scope to switch to — see
   [SECURITY.md](SECURITY.md), threat 1.)
+- **Egress guard.** "Nothing to call" is no longer only a statement about the tool list. Every
+  authenticated Gmail request passes one checkpoint that allows exactly the endpoints mailwarden
+  uses and refuses the rest — with `messages.send`, `drafts.*`, `messages.import`/`insert`,
+  permanent deletion and every non-filter `settings` endpoint named in a deny list checked first, so
+  a later edit to the allowlist cannot reopen them by accident. It guards *this server*, not the
+  token: a stolen `gmail.modify` token can still send from elsewhere.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
   directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
 - **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
@@ -470,7 +479,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (837 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (880 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

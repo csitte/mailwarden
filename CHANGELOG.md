@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Egress guard: the no-send promise is now enforced in code, not just by the absence of a tool.**
+  Every authenticated Gmail request goes through one checkpoint that refuses anything outside the
+  endpoints `mailwarden` actually calls — and `messages.send`, `drafts.send`, all draft endpoints,
+  `messages.import`/`insert`, permanent deletion and every `settings` branch except filters are named
+  in a separate deny list checked *first*, so a careless future edit to the allowlist cannot quietly
+  re-open one. Until now the promise rested entirely on the tool surface, which is only as good as
+  every future change to this codebase; `gmail.modify` is a scope Google itself accepts for sending,
+  so outside the `read` tier nothing below the tool layer said no. Tests drive the real `googleapis`
+  client through the guard, so the checkpoint is verified against the library rather than against an
+  assumption about which URLs it builds.
+
 ### Fixed
 - **The injection sanitizer covered only half of every result.** Each tool answer ships twice — as
   fenced text and as `structuredContent` for clients that read the `outputSchema` — but only the text

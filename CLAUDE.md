@@ -11,7 +11,12 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Forwarding-Regel. **Präzise formulieren:** von Google *erzwungen* ist das nur im
   `read`-Tier (`gmail.readonly`); `gmail.modify` ist bei Google für `messages.send` zulässig
   (13.08.2026 live bestätigt), dort trägt die Tool-Oberfläche die Zusage. Nie wieder
-  „die Scopes können nicht senden" schreiben.
+  „die Scopes können nicht senden" schreiben. **Seit 20.08. zusätzlich `src/egress.ts`:** ein
+  Checkpoint um `request()` des Auth-Clients, Allowlist der 15 tatsächlich genutzten Endpunkte plus
+  vorgeschaltete Denylist (send/drafts/import/insert/Hard-Delete/settings außer filters). Damit ist
+  die Zusage **im Server** erzwungen — aber weiter **nicht am Token**: ein gestohlenes
+  `gmail.modify`-Refresh-Token sendet von woanders. Wer einen Endpunkt neu benutzt, muss ihn dort
+  eintragen, sonst fliegt der Aufruf.
 - **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).

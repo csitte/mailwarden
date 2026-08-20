@@ -51,6 +51,15 @@ mailbox content).
   `mail.google.com`, `gmail.modify`, and the domain-wide-delegation-only `gmail.modify.restricted`.
   So a `read` deployment cannot send *even if the binary were replaced*; a `manage` one cannot send
   because there is nothing to call.
+- **Egress guard — the tool surface is no longer the only floor.** Every authenticated Gmail request
+  passes one checkpoint (`src/egress.ts`, wrapped around the auth client's `request`), which refuses
+  anything outside the list of endpoints `mailwarden` actually uses. `messages.send`, `drafts.send`,
+  every draft endpoint, `messages.import`/`insert`, permanent deletion and every `settings` branch
+  except filters are *additionally* named in a deny list that is checked first, so a careless future
+  addition to the allowlist cannot quietly re-open one. This is what turns "no tool would do that"
+  into "no code path in this server can", whatever a prompt-injected mail talks a model into asking
+  for. It does not harden the *token*: a stolen `gmail.modify` refresh token still sends mail from
+  somewhere else — only the `read` tier's scope prevents that.
 - **No forwarding filters.** `create_filter` can label/archive/trash/star/mark, but **never** creates
   a `forward` action — which would be a standing exfiltration channel. `list_filters` *surfaces* any
   pre-existing forwarding filter so a human can spot one.

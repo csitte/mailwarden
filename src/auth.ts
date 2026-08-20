@@ -1,6 +1,7 @@
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { runConsentFlow } from "./consent.js";
+import { guardEgress } from "./egress.js";
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import { readFileSync, readdirSync } from "node:fs";
@@ -575,7 +576,7 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
     if (cachedClient) return cachedClient;
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
     const saved = await loadSavedToken();
-    if (saved) return (cachedClient = saved);
+    if (saved) return (cachedClient = guardEgress(saved));
     // Name the account and the file we looked for, and the exact command that fills THAT file.
     // A bare `mailwarden --auth` writes the DEFAULT token.json — telling a named-account user to
     // run it would overwrite their default account's token and leave this error unchanged.
@@ -624,10 +625,14 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
     kind: cred.kind,
     scopes,
   });
-  const client = new OAuth2Client({
-    clientId: cred.client_id,
-    clientSecret: cred.client_secret,
-  });
+  // Guarded from the moment it exists, so even the probe/persist steps of `--auth`
+  // run behind the same egress checkpoint the server does.
+  const client = guardEgress(
+    new OAuth2Client({
+      clientId: cred.client_id,
+      clientSecret: cred.client_secret,
+    }),
+  );
   client.setCredentials(tokens);
   if (!client.credentials.refresh_token) {
     throw new CliError(
