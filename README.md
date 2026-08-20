@@ -303,7 +303,9 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
 - **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
   and stripped of invisible/BiDi-override characters, so clients can tell quoted mail content from
-  instructions.
+  instructions. The strip also covers Unicode tag characters and the variation selectors supplement
+  (invisible ASCII smuggling), and it applies to `structuredContent` as well as the text copy — a
+  client reading the machine-readable half gets the same sanitized content.
 - **Live API, no copy.** No mailbox mirror or search index is stored anywhere. The only local state
   is your OAuth token in `~/.mailwarden/`.
 - **Optional token encryption at rest.** `token.json` holds a refresh token; on disk it is protected
@@ -468,7 +470,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (789 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (837 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

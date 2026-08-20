@@ -12,7 +12,7 @@ import {
 } from "./unsubscribe.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { ALL_SIGNALS } from "./signals.js";
-import { fenceOutput } from "./sanitize.js";
+import { fenceOutput, sanitizeStructured } from "./sanitize.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -24,11 +24,19 @@ async function client(): Promise<Gmail> {
  * Every result carries BOTH representations: `structuredContent` (validated
  * against the tool's outputSchema, machine-readable) and a text block with the
  * same JSON fenced as untrusted content — mail bodies are attacker-supplied.
+ *
+ * Both are built from ONE sanitized object, so the hidden-character strip covers
+ * whichever copy the client actually reads. The fence stays text-only: it is a
+ * marker for a model reading prose, and it has no place inside JSON a client
+ * parses against the outputSchema.
  */
-const ok = (obj: object) => ({
-  content: [{ type: "text" as const, text: fenceOutput(JSON.stringify(obj, null, 2)) }],
-  structuredContent: obj as Record<string, unknown>,
-});
+const ok = (obj: object) => {
+  const clean = sanitizeStructured(obj) as Record<string, unknown>;
+  return {
+    content: [{ type: "text" as const, text: fenceOutput(JSON.stringify(clean, null, 2)) }],
+    structuredContent: clean,
+  };
+};
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;

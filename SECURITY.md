@@ -73,6 +73,15 @@ Model can't tell quoted mail from a command.
 - **Output fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers and stripped
   of invisible / BiDi-override characters, so the client can distinguish mailbox content from
   `mailwarden`'s own output.
+- **Both copies are sanitized, not just the readable one.** Each result ships twice: as fenced text
+  and as `structuredContent` for clients that read the `outputSchema`. Both are built from one
+  already-stripped object, so a payload hidden in the mail cannot ride in on the machine-readable
+  half. The strip covers zero-width and BiDi characters, C1 controls, and the two blocks used to
+  carry whole ASCII payloads invisibly — Unicode tag characters (`U+E0000`–`U+E007F`) and the
+  variation selectors supplement. Only characters that render as *nothing* are removed, so stripping
+  can never change what a human sees: VS15/VS16 stay, because they decide how a legitimate emoji
+  renders. The fence itself stays on the text copy — it is a marker for a model reading prose, not
+  something to bury inside JSON a client parses.
 - **Header text is not header syntax.** Where a header's *structure* matters — the `From` mailbox that
   keys `triage_digest` / `list_subscriptions` grouping and the `bulk_unsubscribe` per-sender dedupe,
   the `Reply-To` domains behind `replyToMismatch` — it is read off the raw wire form with a scanner

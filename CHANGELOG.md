@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The injection sanitizer covered only half of every result.** Each tool answer ships twice — as
+  fenced text and as `structuredContent` for clients that read the `outputSchema` — but only the text
+  copy was stripped of invisible characters. A client that prefers the structured half (the half this
+  project advertises) received mail subjects and bodies untouched. Both copies are now built from one
+  sanitized object.
+- **Invisible ASCII payloads survived the strip.** The character set knew zero-width, BiDi and C1
+  characters but not the Unicode tag block (`U+E0000`–`U+E007F`), the best-documented way to hide a
+  whole instruction inside a subject line, nor the variation selectors supplement. Both are stripped
+  now, along with soft hyphen, Arabic letter mark, Mongolian vowel separator, Hangul fillers and
+  interlinear annotation anchors. The rule is deliberately narrow — only characters that render as
+  *nothing* are removed, so VS15/VS16 stay and a legitimate emoji still renders as one.
+
 ## [0.13.0] - 2026-08-19
 
 ### Added
