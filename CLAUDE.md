@@ -110,16 +110,22 @@ Protokoll: `_session-bridge/README.md`.
 
 **Nie direkt in fremde Repos committen** (z. B. `csitte.at`) — nur über die Bridge informieren.
 
-**Bridge-Push (Watcher):** Beim Session-Start zuerst der Bridge-Start-Scan in einem
-Durchgang — keine eigene Schleife über die Dateien, die läuft auf dem Drive ins Timeout:
+**Bridge-Push (Watcher):** Beim Session-Start **zuerst armen, dann falten** — in dieser
+Reihenfolge, und ohne `--status`-Vorprüfung: Das Monitor-Tool armen mit persistent: true,
+Beschreibung "Session-Bridge: neue Nachrichten an mailwarden", Kommando mit dem Pfad, der auf diesem
+Gerät existiert:
+`bash D:/gitwork/session-broker/watch-bridge.sh mailwarden` (PC) bzw.
+`bash C:/gitwork/session-broker/watch-bridge.sh mailwarden` (Notebook).
+Liefert für diese Id schon ein Watcher, tritt der neue Arm von selbst zur Seite; ein stummer
+Rest wird dabei abgeräumt — deshalb ist Armen bedingungslos richtig. **Danach** der
+Bridge-Start-Scan in einem Durchgang — keine eigene Schleife über die Dateien, die läuft auf
+dem Drive ins Timeout:
 `bash D:/gitwork/session-broker/watch-bridge.sh --fold mailwarden` (PC) bzw.
 `bash C:/gitwork/session-broker/watch-bridge.sh --fold mailwarden` (Notebook)
 zeigt die offenen Threads mit `owner: mailwarden`; meldet er eine WARNUNG, lädt Drive noch
-nach — später wiederholen. Danach das Monitor-Tool armen — persistent: true, Beschreibung
-"Session-Bridge: neue Nachrichten an mailwarden", Kommando mit dem Pfad, der auf diesem Gerät
-existiert:
-`bash D:/gitwork/session-broker/watch-bridge.sh mailwarden` (PC) bzw.
-`bash C:/gitwork/session-broker/watch-bridge.sh mailwarden` (Notebook).
+nach — später wiederholen; meldet er ACHTUNG, ist der Arm ausgeblieben — dann jetzt armen.
+Was beim Armen schon dalag, ist Baseline und kommt über den Start-Scan; die Reihenfolge
+verliert also nichts.
 Jede Notification = neue Bridge-Nachricht an diese Session → Datei lesen, im Chat
 melden, gemäß Bridge-Protokoll reagieren. Der Watcher liest nur und ergänzt den
 Start-Scan; write-once bleibt. **Watcher nicht entwaffnen:** er überlebt `/clear` und
