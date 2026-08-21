@@ -123,7 +123,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
 | **`unsubscribe`** | One-click opt-out (RFC 8058) using the endpoint from the message's own header — the only tool that contacts a non-Google host ([details](#unsubscribing--the-one-outbound-request)) |
-| **`bulk_unsubscribe`** | The same for several threads, sequentially and **at most one request per sender**; partial success reported per thread. `dryRun: true` runs the same header reads and dedupe and reports the endpoint each thread `wouldCall` — contacting nobody |
+| **`bulk_unsubscribe`** | The same for several threads, sequentially and **at most one request per sender** (remembered across calls for as long as the server runs, so a retry contacts nobody twice); partial success reported per thread. `dryRun: true` runs the same header reads and dedupe and reports the endpoint each thread `wouldCall` — contacting nobody |
 | **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`), a date+time (`2026-06-20 9am`), or a preset (`tomorrow`, `tomorrow 9am`, `weekend`, `next week`, a weekday name, `in N days`, `in N hours`) |
 | **`unsnooze`** | Cancel a snooze, return to inbox now |
 | **`list_snoozed`** | All snoozed threads + due dates |
@@ -197,7 +197,12 @@ place mailwarden ever talks to a host that isn't Google, so the rules are tight:
   confirms your address twice. A sender is only recorded once a request actually *reached* an
   endpoint, so a refusal or a dropped connection still leaves the next thread its own try — and if
   the skipped thread advertises a *different* endpoint, the reason says so, since one sender can run
-  several lists. Capped at 25 threads and 60 seconds per call; whatever the budget doesn't cover comes
+  several lists. **That memory spans calls** for as long as the server runs, and `unsubscribe` shares
+  it: a call that times out is safe to repeat, and asking twice for the same newsletter contacts the
+  sender once. Pass `force: true` to `unsubscribe` for a deliberate second attempt — after an endpoint
+  answered 500, say. It is kept in memory only: persisting it would mean a second kind of local state
+  beside the token, which this server deliberately does not keep, so a restart forgets.
+  Capped at 25 threads and 60 seconds per call; whatever the budget doesn't cover comes
   back as `skippedOutOfTime` rather than silently undone. None of it can be reversed, which is why all
   three limits exist.
 - **SSRF guards.** https only, default port only, no credentials in the URL, and every hop — including
@@ -479,7 +484,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (880 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (888 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

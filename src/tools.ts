@@ -619,9 +619,10 @@ function registerManageTools(server: McpServer): void {
         "If the sender offers nothing automatable this returns unsubscribed:false with the alternatives in `options` — it is not an error. " +
         "USE WHEN: the user wants off a newsletter. Pair with archive/trash or create_filter to deal with mail already in the mailbox. " +
         "DO NOT USE: to check whether unsubscribing is possible (use list_unsubscribe — it contacts nobody). " +
+        "A sender already contacted in this session is reported with `duplicateOf` and NOT contacted again — safe to retry after a timeout. Pass force:true for a deliberate second attempt (e.g. the endpoint answered 500). " +
         "SIDE EFFECTS: makes an outbound HTTPS request to the sender's unsubscribe endpoint (plus up to 3 redirects) — the only non-Google host mailwarden ever contacts. " +
         "This confirms to the sender that the address is live, and it cannot be undone. The mailbox itself is not changed.",
-      inputSchema: { threadId: z.string() },
+      inputSchema: { threadId: z.string(), force: z.boolean().default(false) },
       outputSchema: {
         threadId: z.string(),
         messageId: z.string(),
@@ -630,19 +631,21 @@ function registerManageTools(server: McpServer): void {
         url: z.string().optional(),
         status: z.number().optional(),
         reason: z.string().optional(),
+        duplicateOf: z.string().optional(),
         options: unsubscribeOptionsSchema,
       },
       // openWorld: this is the one tool that reaches beyond the Gmail account.
-      // Not idempotent in effect (each call is another request to the sender).
+      // Idempotent by default: a sender already contacted in this session is
+      // refused rather than contacted again, so a retry costs them nothing.
       annotations: {
         title: "Unsubscribe from mailing list",
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: false,
+        idempotentHint: true,
         openWorldHint: true,
       },
     },
-    async ({ threadId }) => ok(await unsubscribeThread(await client(), threadId)),
+    async ({ threadId, force }) => ok(await unsubscribeThread(await client(), threadId, undefined, { force })),
   );
 
   server.registerTool(
@@ -693,7 +696,8 @@ function registerManageTools(server: McpServer): void {
         title: "Unsubscribe from several lists",
         readOnlyHint: false,
         destructiveHint: false,
-        idempotentHint: false,
+        // Idempotent in effect: re-running contacts nobody already contacted.
+        idempotentHint: true,
         openWorldHint: true,
       },
     },

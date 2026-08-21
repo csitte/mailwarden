@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **One outbound request per sender is now a rule about the sender, not about one call.**
+  `bulk_unsubscribe` never contacted a sender twice within a call, but nothing spanned calls — so a
+  client that timed out and retried, or an assistant that ran the same request twice, told the sender
+  a second time that the address is live. That is the one action mailwarden takes which reaches a
+  stranger and cannot be taken back. The record now outlives the call (in memory, for the life of the
+  server process) and `unsubscribe` shares it: repeated calls report `duplicateOf` and contact nobody.
+  A sender is still recorded only once a request has actually gone out, so a refusal leaves the next
+  thread its own try, and `unsubscribe` gained `force: true` for the deliberate retry after a failed
+  endpoint. Both tools now declare `idempotentHint: true`. Deliberately not persisted: a file would
+  be a second kind of local state beside the token, and mailwarden keeps none.
 - **Egress guard: the no-send promise is now enforced in code, not just by the absence of a tool.**
   Every authenticated Gmail request goes through one checkpoint that refuses anything outside the
   endpoints `mailwarden` actually calls — and `messages.send`, `drafts.send`, all draft endpoints,

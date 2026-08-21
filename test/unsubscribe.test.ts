@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   parseListUnsubscribe,
   validateUnsubscribeUrl,
@@ -11,11 +11,16 @@ import {
   listSubscriptions,
   bulkUnsubscribe,
   planUnsubscribe,
+  resetContactedSenders,
   type UnsubscribeDeps,
   type UnsubscribeInfo,
   type UnsubscribeOptions,
 } from "../src/unsubscribe.js";
 import { Gmail, type ThreadSummary } from "../src/gmail.js";
+
+// The "already contacted" record is process-wide by design (see unsubscribe.ts).
+// Tests share one process, so each starts from an empty one.
+beforeEach(resetContactedSenders);
 
 // ---- Pure parsing ----
 
@@ -758,6 +763,116 @@ describe("listSubscriptions", () => {
     expect(bySender["good@example.com"].optOut).toBe("one-click");
     // "unknown", not "none": we failed to look — the sender did not decline to offer.
     expect(bySender["bad@example.com"].optOut).toBe("unknown");
+  });
+});
+
+// One outbound request per sender is a rule about the sender, not about a call:
+// a client that times out and retries must not tell them twice that the address
+// is live. The record therefore spans calls for the life of the process.
+describe("already contacted — the record that outlives one call", () => {
+  const oneClick = {
+    From: "Newsletter <news@example.com>",
+    "List-Unsubscribe": "<https://new.example/u/xyz>",
+    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+  };
+
+  it("refuses a second call for the same sender, and names the first thread", async () => {
+    const { gmail } = gmailWith(oneClick);
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+
+    const first = await unsubscribeThread(gmail, "t1", deps);
+    expect(first.unsubscribed).toBe(true);
+
+    const second = await unsubscribeThread(gmail, "t2", deps);
+    expect(second.unsubscribed).toBe(false);
+    expect(second.duplicateOf).toBe("t1");
+    expect(second.reason).toMatch(/already went out to this sender in this session/);
+    expect(calls).toHaveLength(1); // the sender heard from us exactly once
+  });
+
+  it("force:true is the deliberate second attempt", async () => {
+    const { gmail } = gmailWith(oneClick);
+    const { deps, calls } = fakeDeps([{ status: 500 }, { status: 200 }]);
+
+    const failed = await unsubscribeThread(gmail, "t1", deps);
+    expect(failed.unsubscribed).toBe(false);
+    expect(failed.status).toBe(500);
+
+    // A request that reached the endpoint counts, even when it failed — otherwise a
+    // sender answering 500 would be contacted again on every retry.
+    expect((await unsubscribeThread(gmail, "t2", deps)).duplicateOf).toBe("t1");
+    expect(calls).toHaveLength(1);
+
+    const forced = await unsubscribeThread(gmail, "t2", deps, { force: true });
+    expect(forced.unsubscribed).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("does not record a sender nothing was sent to", async () => {
+    // Link-only: a refusal, no request. The next thread must get its own try.
+    const linkOnly = { From: "News <news@example.com>", "List-Unsubscribe": "<https://new.example/u>" };
+    const { gmail } = gmailWith(linkOnly);
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    expect((await unsubscribeThread(gmail, "t1", deps)).unsubscribed).toBe(false);
+    expect((await unsubscribeThread(gmail, "t2", deps)).duplicateOf).toBeUndefined();
+    expect(calls).toHaveLength(0);
+  });
+
+  it("tells senders apart — a second sender is contacted normally", async () => {
+    const { gmail: a } = gmailWith(oneClick);
+    const { gmail: b } = gmailWith({ ...oneClick, From: "Other <other@example.com>" });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    await unsubscribeThread(a, "t1", deps);
+    expect((await unsubscribeThread(b, "t2", deps)).unsubscribed).toBe(true);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("bulk_unsubscribe honours what an earlier single call already did", async () => {
+    const { gmail } = gmailWith(oneClick);
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    await unsubscribeThread(gmail, "t1", deps);
+
+    const rep = await bulkUnsubscribe(gmail, ["t2"], deps);
+    expect(rep.skippedDuplicates).toBe(1);
+    expect(rep.requests).toBe(0);
+    expect(rep.results[0].duplicateOf).toBe("t1");
+    expect(rep.results[0].reason).toMatch(/in an earlier call in this session/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a bulk run's sends are remembered by the next call too", async () => {
+    const { gmail } = gmailWith(oneClick);
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1"], deps);
+    expect(rep.requests).toBe(1);
+    expect((await unsubscribeThread(gmail, "t2", deps)).duplicateOf).toBe("t1");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a dry run predicts the skip but never creates one", async () => {
+    const { gmail } = gmailWith(oneClick);
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+
+    const dry = await bulkUnsubscribe(gmail, ["t1"], deps, { dryRun: true });
+    expect(dry.requests).toBe(1); // a real run would contact them
+    expect(calls).toHaveLength(0);
+
+    // Rehearsing must not make the real run believe it already happened.
+    const real = await unsubscribeThread(gmail, "t2", deps);
+    expect(real.unsubscribed).toBe(true);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("a dry run after a real send reports that nothing more would go out", async () => {
+    const { gmail } = gmailWith(oneClick);
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    await unsubscribeThread(gmail, "t1", deps);
+
+    const dry = await bulkUnsubscribe(gmail, ["t2"], deps, { dryRun: true });
+    expect(dry.requests).toBe(0);
+    expect(dry.skippedDuplicates).toBe(1);
+    expect(dry.results[0].wouldCall).toBeUndefined();
+    expect(calls).toHaveLength(1);
   });
 });
 

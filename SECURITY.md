@@ -189,9 +189,10 @@ only this machine can reach.
   address is refused. DNS resolution shares the request's 10-second budget, so a resolver that never
   answers cannot hold the tool call open.
 - **Bounded when repeated.** `bulk_unsubscribe` multiplies this request, so it is bounded on three
-  axes rather than one: at most 25 threads per call, **at most one request per sender** (recorded only
-  once a request has actually gone out, so a refusal or a failed connection does not suppress the next
-  thread), and one 60-second budget for the whole call — 25 × the single-request timeout would stall
+  axes rather than one: at most 25 threads per call, **at most one request per sender — for the life
+  of the server process, not just the call** (recorded only once a request has actually gone out, so a
+  refusal or a failed connection does not suppress the next thread; `unsubscribe` reads and writes the
+  same record, and `force: true` is the deliberate override), and one 60-second budget for the whole call — 25 × the single-request timeout would stall
   far past any client's patience, and threads left over are reported as untouched rather than dropped.
   Requests run sequentially, never in parallel.
 - **Tier-gated.** `unsubscribe` and `bulk_unsubscribe` live in the `manage` tier; a `read` deployment

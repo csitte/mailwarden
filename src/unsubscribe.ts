@@ -407,21 +407,107 @@ export interface UnsubscribeResult {
   status?: number;
   /** Why nothing was sent, or why the endpoint's answer was not a success. */
   reason?: string;
+  /**
+   * Set when no request was made because one had ALREADY GONE OUT to this sender —
+   * earlier in the same bulk call, or earlier in this server process. Names that
+   * thread. A sender whose earlier thread only produced a refusal (or whose request
+   * never reached the endpoint) is not recorded, so this thread still gets its own try.
+   */
+  duplicateOf?: string;
   /** Everything the message advertised, so a human can finish what we won't do. */
   options: UnsubscribeOptions;
+}
+
+/** What a sender advertised when the request to it went out. */
+interface ContactRecord {
+  threadId: string;
+  urls: string[];
+}
+
+/**
+ * Senders this process has already contacted, for the lifetime of the process.
+ *
+ * `bulk_unsubscribe` never sends twice to one sender *within* a call, but nothing
+ * spanned calls — and this is the one action mailwarden takes that reaches a
+ * stranger and cannot be taken back. A client that times out and retries, or an
+ * assistant that runs the same request twice, told the sender twice that the
+ * address is live. So the record outlives the call.
+ *
+ * Deliberately in memory only. Persisting it would mean a second kind of local
+ * state next to the token, and mailwarden keeps none (no mailbox mirror, no
+ * index) — a promise worth more than covering the restart case. What it does
+ * cover is the case that actually happens: a retry inside one server's lifetime.
+ * The `force` option exists for the deliberate second attempt, e.g. after an
+ * endpoint answered 500.
+ */
+const contactedSenders = new Map<string, ContactRecord>();
+
+/** The address a dedupe keys on: the envelope address, or the raw header if unparseable. */
+function senderKeyOf(from: string): string {
+  return parseSender(from).email || from.trim().toLowerCase();
+}
+
+/** Test seam — a fresh process starts with an empty record, tests need the same. */
+export function resetContactedSenders(): void {
+  contactedSenders.clear();
+}
+
+/** How many distinct senders this process has contacted (reported by `--check`-style callers). */
+export function contactedSenderCount(): number {
+  return contactedSenders.size;
+}
+
+export interface UnsubscribeThreadOptions {
+  /**
+   * Contact the sender even though a request already went out to it in this
+   * process. For the deliberate retry — the endpoint failed, or the first attempt
+   * was for a different list of the same sender.
+   */
+  force?: boolean;
 }
 
 /**
  * Perform the one-click opt-out for a thread, if the sender supports it.
  * Returns a structured refusal (rather than throwing) when the message offers no
  * automatable option — the caller needs the alternatives, not an error.
+ *
+ * A sender already contacted in this process is refused the same way, unless
+ * `force` is set: repeating the request tells them a second time that the address
+ * is live and buys nothing.
  */
 export async function unsubscribeThread(
   gmail: Gmail,
   threadId: string,
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
+  opts: UnsubscribeThreadOptions = {},
 ): Promise<UnsubscribeResult> {
-  return unsubscribeFromInfo(await inspectUnsubscribe(gmail, threadId), deps);
+  const info = await inspectUnsubscribe(gmail, threadId);
+  const key = senderKeyOf(info.from);
+  const earlier = key ? contactedSenders.get(key) : undefined;
+
+  if (earlier && opts.force !== true) {
+    const elsewhere = info.httpsUrls.length > 0 && !info.httpsUrls.some((u) => earlier.urls.includes(u));
+    return {
+      threadId: info.threadId,
+      messageId: info.messageId,
+      from: info.from,
+      unsubscribed: false,
+      duplicateOf: earlier.threadId,
+      reason:
+        `A request already went out to this sender in this session (thread ${earlier.threadId}) — no second one made. ` +
+        (elsewhere
+          ? "This thread advertises a DIFFERENT opt-out endpoint, so it may be a separate list from the same sender: "
+          : "Pass force:true to contact them again, e.g. if the first attempt failed: ") +
+        "re-run with force:true.",
+      options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
+    };
+  }
+
+  const res = await unsubscribeFromInfo(info, deps);
+  // Recorded only once a request actually reached an endpoint: `url` is set exactly
+  // then. A refusal must not block the next thread from the same sender.
+  if (key && res.url) contactedSenders.set(key, { threadId, urls: info.httpsUrls });
+  return res;
 }
 
 /**
@@ -676,13 +762,6 @@ export async function listSubscriptions(
 /** One thread's outcome in a bulk run — either an attempt, or why it was skipped. */
 export interface BulkUnsubscribeEntry extends UnsubscribeResult {
   /**
-   * Set when no request was made because a request had ALREADY GONE OUT for this
-   * sender earlier in the same call. A sender whose earlier thread only produced a
-   * refusal (or whose request failed before reaching the endpoint) is not recorded,
-   * so this thread still gets its own try.
-   */
-  duplicateOf?: string;
-  /**
    * Dry run only: the one-click endpoint a real run would POST to for this thread.
    * Absent when a real run would send nothing either (refusal or duplicate).
    */
@@ -768,7 +847,11 @@ export async function bulkUnsubscribe(
   // that thread ADVERTISED. Compared advertised-to-advertised: the URL actually
   // called can differ from the header's after a redirect, and comparing against that
   // would flag every redirecting sender as a second list.
-  const handled = new Map<string, { threadId: string; urls: string[] }>();
+  //
+  // Seeded from what this process has already contacted, so a retried or repeated
+  // call does not tell a sender twice that the address is live. A dry run reads the
+  // same seed (it must predict what a real run would skip) but never writes to it.
+  const handled = new Map<string, ContactRecord>(contactedSenders);
   const now = deps.now ?? (() => Date.now());
   const startedAt = now();
   let attempted = 0;
@@ -808,7 +891,7 @@ export async function bulkUnsubscribe(
     }
 
     const options = { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos };
-    const senderKey = parseSender(info.from).email || info.from.trim().toLowerCase();
+    const senderKey = senderKeyOf(info.from);
     const earlier = senderKey ? handled.get(senderKey) : undefined;
     if (earlier) {
       skippedDuplicates++;
@@ -823,7 +906,10 @@ export async function bulkUnsubscribe(
         unsubscribed: false,
         duplicateOf: earlier.threadId,
         reason:
-          `A request already went out to this sender for thread ${earlier.threadId} — no second one made.` +
+          `A request already went out to this sender for thread ${earlier.threadId}` +
+          (results.some((r) => r.threadId === earlier.threadId)
+            ? " — no second one made."
+            : " in an earlier call in this session — no second one made.") +
           (elsewhere
             ? " Note that this thread advertises a DIFFERENT opt-out endpoint (see `options.httpsUrls`), " +
               "so it may be a separate list from the same sender — call unsubscribe on it directly if you meant that one."
@@ -859,7 +945,11 @@ export async function bulkUnsubscribe(
       const res = await unsubscribeFromInfo(info, deps, perThread);
       // Record the sender only if a request actually reached an endpoint: `url` is
       // set exactly when one was made. A refusal must not suppress the next thread.
-      if (senderKey && res.url) handled.set(senderKey, { threadId, urls: info.httpsUrls });
+      if (senderKey && res.url) {
+        const record = { threadId, urls: info.httpsUrls };
+        handled.set(senderKey, record);
+        contactedSenders.set(senderKey, record); // outlives this call, see the store's comment
+      }
       if (res.url) requests++;
       results.push(res);
     } catch (err) {
