@@ -138,10 +138,16 @@ describe("table-age: against the README we actually ship", () => {
   it("finds both dates in the real file and they agree", async () => {
     const { readFileSync } = await import("node:fs");
     const text = readFileSync(new URL("../README.md", import.meta.url), "utf8");
-    const state = tableAgeState(text, NOW);
-    // Pinned clock on purpose: this asserts the file is well-formed, not that it is fresh today —
-    // the freshness verdict belongs to `npm run smoke`, which runs against the real date.
-    expect(state.state).toBe("ok");
+    // Real clock, and every state EXCEPT freshness is asserted: this test is about the file's
+    // shape — marker present, sentence present, the two agreeing, the date parseable and not in
+    // the future. Whether the table is *due* is `npm run smoke`'s verdict, which is why "stale"
+    // passes here.
+    //
+    // It used to run against the pinned NOW above, which made the shipped marker fail the moment
+    // it was re-dated past that clock — a check that needed a second date kept in sync with it.
+    // The synthetic cases still use NOW: their dates are chosen relative to it on purpose.
+    const state = tableAgeState(text, new Date());
+    expect(["ok", "stale"]).toContain(state.state);
     expect(state.declared).not.toBeNull();
   });
 });
