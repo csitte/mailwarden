@@ -32,6 +32,12 @@ describe("classifyError", () => {
     );
   });
 
+  // The two status mappings a caller meets most often were checked against the
+  // live API, not only against these shapes: a well-formed thread id that does not
+  // exist answers 404 ("Requested entity was not found." → not_found), while a
+  // malformed one answers 400 ("Invalid id value" → invalid_input). Gmail does not
+  // treat "no such thing" and "that is not an id" as the same failure, and neither
+  // do we — one is worth retrying with a different id, the other with a fixed one.
   it.each([
     [429, "rate_limited", true],
     [500, "upstream_unavailable", true],
