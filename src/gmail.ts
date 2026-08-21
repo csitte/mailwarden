@@ -1,4 +1,4 @@
-import { CliError } from "./cli.js";
+import { CliError, ToolError } from "./cli.js";
 import { google, gmail_v1 } from "googleapis";
 import type { OAuth2Client } from "google-auth-library";
 import fs from "node:fs/promises";
@@ -202,7 +202,7 @@ function isRetryableNetworkError(err: unknown): boolean {
   return typeof e?.message === "string" && /socket hang up|ECONNRESET|ETIMEDOUT|EAI_AGAIN/i.test(e.message);
 }
 
-function statusOf(err: unknown): number | undefined {
+export function statusOf(err: unknown): number | undefined {
   const e = err as { status?: unknown; code?: unknown; response?: { status?: unknown } };
   for (const s of [e?.status, e?.code, e?.response?.status]) {
     if (typeof s === "number") return s;
@@ -631,7 +631,8 @@ export class Gmail {
       // Turn a dead/revoked refresh token into an actionable message instead of
       // a cryptic OAuth error on the first Gmail call.
       if (isInvalidGrant(err)) {
-        throw new CliError(
+        throw new ToolError(
+          "needs_reauth",
           "mailwarden's saved authorization has expired or been revoked. Run `mailwarden --auth` to re-authorize.",
         );
       }
@@ -639,7 +640,8 @@ export class Gmail {
       // filters — tell the user exactly which scope is missing and how to fix it,
       // rather than surfacing a raw 403 "insufficient authentication scopes".
       if (isInsufficientScope(err)) {
-        throw new CliError(
+        throw new ToolError(
+          "insufficient_scope",
           "mailwarden's saved authorization is missing a Gmail scope this operation needs. " +
             "Filter management (list_filters/create_filter/delete_filter) needs 'gmail.settings.basic'; " +
             "a write action (label/archive/trash/snooze/sweep) needs 'gmail.modify', which a read-only grant lacks. " +

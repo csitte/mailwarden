@@ -16,6 +16,54 @@ export class CliError extends Error {
   }
 }
 
+/**
+ * What went wrong, in a form an agent can branch on. Deliberately short: every
+ * code has to answer a different question ("re-authorize?", "retry?", "fix the
+ * arguments?"), otherwise it is decoration.
+ */
+export type ToolErrorCode =
+  /** The arguments are wrong — retrying the same call cannot help. */
+  | "invalid_input"
+  /** No usable token yet: run `mailwarden --auth`. */
+  | "not_authorized"
+  /** The token was there and is dead (expired/revoked): re-authorize. */
+  | "needs_reauth"
+  /** The token lacks a scope this operation needs: re-authorize with the tier enabled. */
+  | "insufficient_scope"
+  /** mailwarden itself refuses this — no send, no permanent delete, no forwarding. */
+  | "forbidden_operation"
+  /** Google says the thread/label/filter does not exist. */
+  | "not_found"
+  /** Gmail rate limit. Retrying later is the fix. */
+  | "rate_limited"
+  /** Gmail answered 5xx. Retrying later is the fix. */
+  | "upstream_unavailable"
+  /** The request never got an answer (connection reset, timeout, DNS). */
+  | "network_error"
+  /** Anything unclassified — a bug until proven otherwise. */
+  | "internal_error";
+
+/**
+ * A `CliError` that also carries a machine-readable code, so the MCP tool layer
+ * can answer with something an agent can act on instead of prose. It extends
+ * `CliError` because the message is still written for a human: the CLI keeps
+ * printing it as a plain line, exactly as before.
+ *
+ * It lives here, next to its parent, rather than beside the classifier that reads
+ * it — so the modules that *throw* it (`gmail.ts`, `egress.ts`, `auth.ts`) need no
+ * import of a module that in turn imports them.
+ */
+export class ToolError extends CliError {
+  constructor(
+    readonly code: ToolErrorCode,
+    message: string,
+    readonly retryable: boolean = false,
+  ) {
+    super(message);
+    this.name = "ToolError";
+  }
+}
+
 /** Whether the debug escape hatch is on. `0`/`false`/`no`/`off`/empty all mean OFF. */
 export function debugEnabled(env: NodeJS.ProcessEnv): boolean {
   const v = env.MAILWARDEN_DEBUG?.trim().toLowerCase();

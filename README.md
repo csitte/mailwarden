@@ -23,7 +23,9 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   1000 messages per API request — with per-chunk partial-success reporting instead of
   all-or-nothing. The snooze sweep uses the same batch path.
 - **Structured outputs.** Every tool declares an `outputSchema` and returns validated
-  `structuredContent` alongside fenced JSON text — no parsing guesswork for clients.
+  `structuredContent` alongside fenced JSON text — no parsing guesswork for clients. Failures are
+  structured as well: a `code` and a `retryable` flag, so a client can tell "try again later" from
+  "re-authorize" without reading prose.
 - **Small attack surface.** No send tools (no exfiltration path for prompt-injected mail),
   optional read-only mode, no telemetry, no open ports by default, symlink-safe download fencing,
   injection-fenced output. And no code path that *could* send: every Gmail request passes an egress
@@ -134,6 +136,14 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
 alongside the same JSON as fenced text — clients never have to parse prose.
+
+A **failure** is structured too: `isError` plus a fenced JSON body with a `code`
+(`not_authorized`, `needs_reauth`, `insufficient_scope`, `forbidden_operation`, `not_found`,
+`rate_limited`, `upstream_unavailable`, `network_error`, `invalid_input`, `internal_error`) and a
+`retryable` flag, alongside the sentence a human reads. So "wait and try again" versus "re-run
+`mailwarden --auth`" is something a client can decide, not something it has to infer from wording
+that may be reworded next release. (No `structuredContent` on errors: that is validated against the
+tool's outputSchema, which describes a success.)
 
 ### How snooze works (no Gmail API snooze exists — we build it)
 
@@ -484,7 +494,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (888 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (901 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

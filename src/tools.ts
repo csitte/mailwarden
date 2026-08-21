@@ -13,6 +13,8 @@ import {
 import { resolveEnabledTiers } from "./tiers.js";
 import { ALL_SIGNALS } from "./signals.js";
 import { fenceOutput, sanitizeStructured } from "./sanitize.js";
+import { classifyError } from "./errors.js";
+import { ToolError } from "./cli.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -37,6 +39,44 @@ const ok = (obj: object) => {
     structuredContent: clean,
   };
 };
+
+/**
+ * The failure counterpart of `ok`. A tool that throws answers with `isError` and a
+ * fenced JSON body naming a `code` and whether a retry could help, so a client can
+ * branch on the failure instead of pattern-matching a sentence that may be
+ * reworded next commit. The sentence stays — it is what a human reads.
+ *
+ * No `structuredContent`: the SDK validates that against the tool's outputSchema,
+ * which describes a *success*. The SDK skips validation entirely for `isError`
+ * results, so the error body belongs in the text block.
+ */
+const fail = (err: unknown) => ({
+  isError: true as const,
+  content: [
+    { type: "text" as const, text: fenceOutput(JSON.stringify({ error: classifyError(err) }, null, 2)) },
+  ],
+});
+
+/**
+ * `server.registerTool` with the error envelope wrapped around the handler, so no
+ * tool can forget it. Returned as the same type it wraps, which keeps every call
+ * site (and its schema inference) exactly as it was.
+ */
+function guarded(server: McpServer): McpServer["registerTool"] {
+  const register = server.registerTool.bind(server);
+  return ((name: string, config: unknown, cb: (...args: unknown[]) => unknown) =>
+    register(
+      name as never,
+      config as never,
+      (async (...args: unknown[]) => {
+        try {
+          return await cb(...args);
+        } catch (err) {
+          return fail(err);
+        }
+      }) as never,
+    )) as McpServer["registerTool"];
+}
 
 const readOnly = { readOnlyHint: true, openWorldHint: false } as const;
 const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false } as const;
@@ -146,8 +186,9 @@ export function registerTools(server: McpServer): void {
 }
 
 function registerReadTools(server: McpServer): void {
+  const registerTool = guarded(server);
   // ---- Read / find ----
-  server.registerTool(
+  registerTool(
     "search",
     {
       description:
@@ -175,7 +216,7 @@ function registerReadTools(server: McpServer): void {
       ok(await (await client()).search(query, maxResults, pageToken)),
   );
 
-  server.registerTool(
+  registerTool(
     "get_thread",
     {
       description:
@@ -190,7 +231,7 @@ function registerReadTools(server: McpServer): void {
     async ({ threadId, full }) => ok(await (await client()).getThread(threadId, full)),
   );
 
-  server.registerTool(
+  registerTool(
     "list_labels",
     {
       description:
@@ -205,7 +246,7 @@ function registerReadTools(server: McpServer): void {
     async () => ok({ labels: await (await client()).listLabels() }),
   );
 
-  server.registerTool(
+  registerTool(
     "list_snoozed",
     {
       description:
@@ -220,7 +261,7 @@ function registerReadTools(server: McpServer): void {
     async () => ok({ snoozed: await listSnoozed(await client()) }),
   );
 
-  server.registerTool(
+  registerTool(
     "get_profile",
     {
       description:
@@ -238,7 +279,7 @@ function registerReadTools(server: McpServer): void {
     async () => ok(await (await client()).getProfile()),
   );
 
-  server.registerTool(
+  registerTool(
     "triage_digest",
     {
       description:
@@ -303,7 +344,7 @@ function registerReadTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "list_unsubscribe",
     {
       description:
@@ -327,7 +368,7 @@ function registerReadTools(server: McpServer): void {
     async ({ threadId }) => ok(await inspectUnsubscribe(await client(), threadId)),
   );
 
-  server.registerTool(
+  registerTool(
     "list_subscriptions",
     {
       description:
@@ -380,6 +421,7 @@ function registerReadTools(server: McpServer): void {
 }
 
 function registerManageTools(server: McpServer): void {
+  const registerTool = guarded(server);
   // Unlike the filters tier, manage is NOT scope-gated: gmail.modify is the default
   // grant so almost every token has it, and hasModifyScope() is `undefined` (unknown)
   // for the common encrypted/old-token case — gating here would either do nothing or
@@ -387,7 +429,7 @@ function registerManageTools(server: McpServer): void {
   // MAILWARDEN_TOOLS than the token was authorized for) fails gracefully at call time
   // via the insufficient-scope message in gmail.ts; the sweep paths warn in index.ts.
   // ---- Mailbox actions ---- (the `manage` tier: mutations, snooze, downloads)
-  server.registerTool(
+  registerTool(
     "create_label",
     {
       description:
@@ -403,7 +445,7 @@ function registerManageTools(server: McpServer): void {
     async ({ name }) => ok({ id: await (await client()).ensureLabel(name), name }),
   );
 
-  server.registerTool(
+  registerTool(
     "modify_labels",
     {
       description:
@@ -426,7 +468,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "bulk_modify",
     {
       description:
@@ -470,7 +512,7 @@ function registerManageTools(server: McpServer): void {
     },
     async ({ query, add, remove, maxMessages, dryRun }) => {
       if (add.length === 0 && remove.length === 0) {
-        throw new Error("bulk_modify needs at least one label in add or remove — nothing to do.");
+        throw new ToolError("invalid_input", "bulk_modify needs at least one label in add or remove — nothing to do.");
       }
       const gmail = await client();
       const refs = await gmail.listMessageRefs({ query, max: maxMessages });
@@ -509,7 +551,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "archive",
     {
       description:
@@ -527,7 +569,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "mark_read",
     {
       description:
@@ -542,7 +584,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "mark_unread",
     {
       description:
@@ -557,7 +599,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "trash",
     {
       description:
@@ -575,7 +617,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "untrash",
     {
       description:
@@ -591,7 +633,7 @@ function registerManageTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "download_attachment",
     {
       description:
@@ -608,7 +650,7 @@ function registerManageTools(server: McpServer): void {
       ok({ saved: await (await client()).downloadAttachment(messageId, attachmentId, destPath) }),
   );
 
-  server.registerTool(
+  registerTool(
     "unsubscribe",
     {
       description:
@@ -648,7 +690,7 @@ function registerManageTools(server: McpServer): void {
     async ({ threadId, force }) => ok(await unsubscribeThread(await client(), threadId, undefined, { force })),
   );
 
-  server.registerTool(
+  registerTool(
     "bulk_unsubscribe",
     {
       description:
@@ -706,7 +748,7 @@ function registerManageTools(server: McpServer): void {
   );
 
   // ---- Snooze (mailwarden's differentiator) ----
-  server.registerTool(
+  registerTool(
     "snooze",
     {
       description:
@@ -728,7 +770,7 @@ function registerManageTools(server: McpServer): void {
     async ({ threadId, until }) => ok(await snooze(await client(), threadId, until)),
   );
 
-  server.registerTool(
+  registerTool(
     "unsnooze",
     {
       description:
@@ -741,7 +783,7 @@ function registerManageTools(server: McpServer): void {
     async ({ threadId }) => ok(await unsnooze(await client(), threadId)),
   );
 
-  server.registerTool(
+  registerTool(
     "sweep_snoozed",
     {
       description:
@@ -769,10 +811,11 @@ function registerManageTools(server: McpServer): void {
 }
 
 function registerFilterTools(server: McpServer): void {
+  const registerTool = guarded(server);
   // ---- Filters (server-side auto-triage rules) ----
   // Its own `filters` tier: filter management needs the broader gmail.settings.basic
   // scope, which a read-only or triage-only deployment shouldn't have to grant.
-  server.registerTool(
+  registerTool(
     "list_filters",
     {
       description:
@@ -786,7 +829,7 @@ function registerFilterTools(server: McpServer): void {
     async () => ok({ filters: await (await client()).listFilters() }),
   );
 
-  server.registerTool(
+  registerTool(
     "create_filter",
     {
       description:
@@ -834,7 +877,8 @@ function registerFilterTools(server: McpServer): void {
       // size and its comparison are meaningful only as a pair — check first so a
       // lone `size` or lone `sizeComparison` gets this precise message.
       if ((size === undefined) !== (sizeComparison === undefined)) {
-        throw new Error(
+        throw new ToolError(
+          "invalid_input",
           "create_filter: 'size' and 'sizeComparison' (smaller|larger) must be given together.",
         );
       }
@@ -849,12 +893,14 @@ function registerFilterTools(server: McpServer): void {
         hasAttachment === false ||
         (typeof negatedQuery === "string" && negatedQuery !== "");
       if (!hasMatch) {
-        throw new Error(
+        throw new ToolError(
+          "invalid_input",
           "create_filter needs at least one match criterion (from/to/subject/query/negatedQuery/hasAttachment/size).",
         );
       }
       if (addLabels.length === 0 && removeLabels.length === 0) {
-        throw new Error(
+        throw new ToolError(
+          "invalid_input",
           "create_filter needs at least one label action in addLabels or removeLabels.",
         );
       }
@@ -867,7 +913,8 @@ function registerFilterTools(server: McpServer): void {
       let query: string | null = null;
       if (applyToExisting) {
         if (!hasPositive) {
-          throw new Error(
+          throw new ToolError(
+            "invalid_input",
             "create_filter: applyToExisting needs at least one positive criterion " +
               "(from/to/subject/query/hasAttachment:true/size). A rule that only excludes " +
               "(negatedQuery/hasAttachment:false) would match almost the whole mailbox — " +
@@ -876,7 +923,8 @@ function registerFilterTools(server: McpServer): void {
         }
         query = filterCriteriaToQuery(criteria);
         if (!query) {
-          throw new Error(
+          throw new ToolError(
+            "invalid_input",
             "create_filter: applyToExisting could not derive a non-empty search query from the criteria.",
           );
         }
@@ -931,7 +979,7 @@ function registerFilterTools(server: McpServer): void {
     },
   );
 
-  server.registerTool(
+  registerTool(
     "delete_filter",
     {
       description:

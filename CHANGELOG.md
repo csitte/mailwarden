@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Tool failures are machine-readable.** A failing tool answered with `isError` and a sentence,
+  which a human can act on and an agent can only pattern-match — against wording that changes with
+  any commit. Every failure now carries a `code` (`not_authorized`, `needs_reauth`,
+  `insufficient_scope`, `forbidden_operation`, `not_found`, `rate_limited`, `upstream_unavailable`,
+  `network_error`, `invalid_input`, `internal_error`) and a `retryable` flag next to the message, so
+  "wait and retry" and "re-run `mailwarden --auth`" are distinguishable without guessing. The
+  classification is a pure function over the thrown error, and the envelope is wrapped around every
+  handler at registration, so no tool can forget it. Errors carry no `structuredContent` on purpose:
+  the SDK validates that against the tool's outputSchema, which describes a success.
 - **One outbound request per sender is now a rule about the sender, not about one call.**
   `bulk_unsubscribe` never contacted a sender twice within a call, but nothing spanned calls — so a
   client that timed out and retried, or an assistant that ran the same request twice, told the sender

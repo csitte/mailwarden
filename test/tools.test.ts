@@ -190,6 +190,43 @@ describe("tool results — structured content + fenced text", () => {
     expect(JSON.stringify(res.structuredContent)).not.toMatch(/[\u200B-\u200F]|[\u{E0000}-\u{E007F}]/u);
   });
 
+  it("answers a failure with a code and a retry verdict, not just a sentence", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          get: async () => {
+            throw Object.assign(new Error("Requested entity was not found."), { code: 404 });
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "get_thread", arguments: { threadId: "gone" } });
+
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0].text.replace(/<\/?untrusted-tool-output>/g, "").trim());
+    expect(body.error).toEqual({
+      code: "not_found",
+      message: "Requested entity was not found.",
+      retryable: false,
+    });
+    // An error carries no structuredContent: the outputSchema describes a success.
+    expect(res.structuredContent).toBeUndefined();
+  });
+
+  it("codes mailwarden's own argument checks as invalid_input", async () => {
+    (getAuth as Mock).mockResolvedValue({ users: {} });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "in:inbox" }, // neither add nor remove
+    });
+    expect(res.isError).toBe(true);
+    const body = JSON.parse(res.content[0].text.replace(/<\/?untrusted-tool-output>/g, "").trim());
+    expect(body.error.code).toBe("invalid_input");
+    expect(body.error.message).toMatch(/at least one label/);
+  });
+
   it("list_unsubscribe surfaces the opt-out options through the tool's outputSchema", async () => {
     // The tool layer is where an outputSchema/structuredContent mismatch would
     // surface — the unit tests exercise the logic, this exercises the wiring.

@@ -8,7 +8,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
-import { CliError } from "./cli.js";
+import { CliError, ToolError } from "./cli.js";
 // gmail.ts does not import this module, so this stays acyclic. The invalid_grant test lives there
 // because that is where it is normally raised (the API layer), and the overwrite guard needs the
 // same judgement: a token Google rejects is dead, a token that merely timed out is not.
@@ -581,7 +581,8 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
     // A bare `mailwarden --auth` writes the DEFAULT token.json — telling a named-account user to
     // run it would overwrite their default account's token and leave this error unchanged.
     const account = activeAccount();
-    throw new CliError(
+    throw new ToolError(
+      "not_authorized",
       `Not authorized yet for ${account ? `account '${account}'` : "the default account"} ` +
         `(no token at ${tokenPath(account)}). Run \`mailwarden --auth${account ? ` --account ${account}` : ""}\` ` +
         "once to grant Gmail access.",

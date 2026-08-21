@@ -25,6 +25,8 @@
  * for.
  */
 
+import { ToolError } from "./cli.js";
+
 /** Gmail API hosts googleapis may route to. The path check is what really decides. */
 const GMAIL_HOSTS = new Set(["gmail.googleapis.com", "www.googleapis.com"]);
 
@@ -133,7 +135,8 @@ export function checkEgress(method: string, url: string): string | undefined {
 
 /** The error a refused call raises — names the endpoint and why it is shut. */
 export function egressRefusal(method: string, url: string, reason: string): Error {
-  return new Error(
+  return new ToolError(
+    "forbidden_operation",
     `mailwarden refused its own outgoing request: ${reason}. ` +
       `(${(method || "GET").toUpperCase()} ${url}) This is a deliberate block in src/egress.ts, ` +
       "not a Gmail error — no tool should be able to reach that endpoint.",
