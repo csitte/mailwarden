@@ -386,3 +386,33 @@ beim Postfach in der `threads.list`-Messung, und derselbe Schluss: nachsehen sta
 liegt, ist die Liste der Bezugswege — und die ist selbst ein Artefakt, das altert: `codeguilds.dev`
 stand in keiner Distributions-Notiz, obwohl sein Badge seit drei Wochen in unserem README hing.
 Gefunden wurde es über den Link einer *anderen* Plattform, nicht über eine eigene Liste.
+
+## Nachtrag (23.08.2026): die eigenen Zahlen sind auch nur Behauptungen
+
+Der Nachtrag vom 15.08. verlangt für Aussagen über **fremde** Systeme dieselbe Beweislast wie für
+Code. Dieser Zyklus zeigt die Innenseite davon: **auch die Zahlen über die eigene Historie sind
+Behauptungen** — und sie rutschen leichter durch, weil sie sich richtig anfühlen.
+
+Runde 1 (Eingabe-Korpus über `src/egress.ts`) fand einen echten Backstop-Fehler. Der CHANGELOG-Text
+dazu schrieb dem SSRF-Korpus „13 falsche Verdikte, die **vier Code-Reviews** übersehen hatten" gut.
+Die vier Runden gehören zur **Multi-Account**-Geschichte; die Tabelle ganz oben in diesem Dokument
+belegt die echte Gegenüberstellung: Code-nochmal-lesen **1**, Korpus **13**. Der Satz war plausibel,
+weil er aus einer anderen, wahren Geschichte stammte.
+
+Runde 2 fand **sechs** solcher Stellen, alle in Text, der **Stunden alt** war, und keine brauchte
+eine Änderung von außen, um falsch zu werden. Die schwerste war eine **Zusage über die Zukunft**:
+„ein neuer Gmail-Endpunkt zeigt sich als fehlschlagender Test statt als stille Lücke." Der Korpus
+ist ein **Snapshot** des Discovery-Dokuments, und kein Test hier geht ins Netz — ein später
+hinzugefügter Endpunkt zeigt sich erst, wenn jemand regeneriert.
+
+> **Ein Prüfwerkzeug beschreibt man am besten mit dem, was es beim nächsten Lauf tut — nicht mit dem,
+> was es beim nächsten Jahr täte.** Wer „zeigt sich als fehlschlagender Test" schreibt, verspricht
+> eine Live-Abfrage; wer einen Snapshot hat, muss das Wort Snapshot benutzen.
+
+Zwei Betriebs-Gotchas derselben Runde, beide Kodierung: ein Patch-Skript mit `latin1` gelesen zerlegt
+den **Em-Dash** in den Ankern, und Backslashes in einem Regex-Literal überleben die Kette
+Bash-Heredoc → JS-Template-Literal **nicht** (`String.fromCharCode(92)` statt Escape-Ebenen). Dazu:
+**die Zeilenenden im Repo sind gemischt** (README LF, `SECURITY.md`/`CHANGELOG.md` CRLF) — ein
+Patch-Skript muss das EOL je Datei aus dem Inhalt bestimmen, und `grep -c` auf CR lügt in Git Bash,
+`cat -A` nicht. Und: **vor dem Formatieren die `devDependencies` lesen** — hier gibt es weder
+prettier noch eslint, ein `npx prettier --write` hätte fremden Stil eingeschleppt.

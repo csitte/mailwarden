@@ -16,7 +16,12 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   vorgeschaltete Denylist (send/drafts/import/insert/Hard-Delete/settings außer filters). Damit ist
   die Zusage **im Server** erzwungen — aber weiter **nicht am Token**: ein gestohlenes
   `gmail.modify`-Refresh-Token sendet von woanders. Wer einen Endpunkt neu benutzt, muss ihn dort
-  eintragen, sonst fliegt der Aufruf.
+  eintragen, sonst fliegt der Aufruf. **Die beiden Listen sind bewusst asymmetrisch (23.08.):** die
+  Denylist matcht einen **normalisierten** Pfad (Upload-Präfixe gestrippt, Mehrfach-Slashes gefaltet),
+  weil `googleapis` bei `media` auf `/upload/gmail/v1/...` zielt — ein realer Sendeweg, den auf
+  `/gmail/v1` verankerte Regeln nie sahen. Die **Allowlist matcht weiter roh** und darf das nie
+  ändern: sonst bekäme jeder erlaubte Endpunkt eine zweite, ungeprüfte Schreibweise. Merksatz:
+  **Denylist so breit wie die API wirklich ist, Allowlist so eng wie mailwarden wirklich ist.**
 - **Kein Hard-Delete.** Nur `trash`/`untrash` (wiederherstellbar).
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
