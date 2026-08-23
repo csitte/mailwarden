@@ -30,10 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hand-written, which defends only against the spellings someone thought of — the same lesson the
   SSRF guards taught, where a generated corpus found 13 wrong verdicts that four code reviews had
   missed. `test/egress-corpus.test.ts` takes all 79 methods from Gmail's discovery document
-  (rev 20260810) and crosses them with the spellings Google actually serves: canonical, media upload,
-  resumable upload, doubled slashes, trailing slash, query string, an address as `userId`. Endpoints
-  mailwarden does not call must be refused; the dangerous classes must be refused *by the deny list
-  itself*, not by falling off the allowlist. Two more tests drive the real `googleapis` client, so
+  (rev 20260810). Each is checked in its canonical form — an endpoint mailwarden does not call must be
+  refused — and the dangerous classes are checked again in every spelling Google actually serves
+  (media upload, resumable upload, doubled slashes, trailing slash, query string, an address as
+  `userId`), where the deny list itself has to be the one refusing them rather than the allowlist. Two more tests drive the real `googleapis` client, so
   the upload URLs and the redirected host are the library's, not hand-built.
 
 ## [0.14.0] - 2026-08-21

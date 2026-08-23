@@ -67,8 +67,10 @@ mailbox content).
   option, either of which can aim an authenticated call at a host of someone else's choosing without
   a line of mailwarden changing. Both are refused before the access token leaves the process. Every
   method in Gmail's own discovery document is driven through the guard in
-  [`test/egress-corpus.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/egress-corpus.test.ts), in each spelling Google answers to, so
-  a new endpoint shows up as a failing test rather than as a silent gap. It does not harden the
+  [`test/egress-corpus.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/egress-corpus.test.ts):
+  each one in its canonical form, and every endpoint in the classes named above additionally in each
+  spelling Google answers to. A new Gmail endpoint therefore shows up as a failing test rather than
+  as a silent gap. It does not harden the
   *token*: a stolen `gmail.modify` refresh token still sends mail from
   somewhere else — only the `read` tier's scope prevents that.
 - **No forwarding filters.** `create_filter` can label/archive/trash/star/mark, but **never** creates
