@@ -14,27 +14,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   actually uploaded — both spellings are in Gmail's own discovery document. The deny rules were
   anchored at `/gmail/v1` and never saw that route. Nothing was reachable: those URLs are not on the
   allowlist either, so they were refused anyway. But they were refused by the fallback, and the deny
-  list exists precisely so a later allowlist entry cannot re-open a send — a plausible one (uploading
-  an attachment) would have. The deny list now matches a normalized path with upload prefixes
+  list exists precisely so a later allowlist entry cannot re-open a send, and a broadly written one
+  would have: allow uploads for attachments without anchoring the path tightly, and the send route
+  comes with it. The deny list now matches a normalized path with upload prefixes
   stripped and repeated slashes collapsed; the allowlist deliberately keeps matching the raw path, so
   an upload URL can only ever be refused, never allowed.
 - **A request redirected to another host is refused, and now says what redirected it.**
   `googleapis` rewrites the hostname from `GOOGLE_CLOUD_UNIVERSE_DOMAIN` in the environment, and a
-  `rootUrl` client option does the same — either can aim an authenticated Gmail call at a host of
-  someone else's choosing without a line of mailwarden changing. The guard already refused these;
+  `rootUrl` client option does the same — either can aim an authenticated Gmail call at another host
+  without a line of mailwarden changing. The environment is not mailwarden's to control: an MCP
+  client config carries an `env` block per server entry, and those get copied between setups. The guard already refused these;
   what was missing was the diagnosis, because "request to a non-Gmail host" reads like a bug in
   mailwarden rather than as an environment that redirected it.
 
 ### Added
 - **Every endpoint Gmail documents is now tested against the egress guard.** The previous tests were
   hand-written, which defends only against the spellings someone thought of — the same lesson the
-  SSRF guards taught, where a generated corpus found 13 wrong verdicts that four code reviews had
-  missed. `test/egress-corpus.test.ts` takes all 79 methods from Gmail's discovery document
+  SSRF guards taught, where re-reading the code adversarially produced one finding and a generated
+  corpus produced 13. `test/egress-corpus.test.ts` takes all 79 methods from Gmail's discovery document
   (rev 20260810). Each is checked in its canonical form — an endpoint mailwarden does not call must be
   refused — and the dangerous classes are checked again in every spelling Google actually serves
   (media upload, resumable upload, doubled slashes, trailing slash, query string, an address as
-  `userId`), where the deny list itself has to be the one refusing them rather than the allowlist. Two more tests drive the real `googleapis` client, so
-  the upload URLs and the redirected host are the library's, not hand-built.
+  `userId`), where the deny list itself has to be the one refusing them rather than the allowlist.
+  Two more tests drive the real `googleapis` client, so the upload URLs and the redirected host are
+  the library's, not hand-built.
 
 ## [0.14.0] - 2026-08-21
 

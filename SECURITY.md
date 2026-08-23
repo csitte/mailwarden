@@ -64,13 +64,15 @@ mailbox content).
   that route; it used to be refused for falling off the allowlist instead, i.e. by exactly the rule the
   deny list exists to outlive. The checkpoint also stops a request whose *host* was rewritten:
   `googleapis` honours `GOOGLE_CLOUD_UNIVERSE_DOMAIN` from the environment and a `rootUrl` client
-  option, either of which can aim an authenticated call at a host of someone else's choosing without
-  a line of mailwarden changing. Both are refused before the access token leaves the process. Every
+  option, either of which can aim an authenticated call at another host without a line of mailwarden
+  changing — and the environment is not mailwarden's to control, since an MCP client config carries
+  an `env` block per server entry. Both are refused before the access token leaves the process. Every
   method in Gmail's own discovery document is driven through the guard in
   [`test/egress-corpus.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/egress-corpus.test.ts):
   each one in its canonical form, and every endpoint in the classes named above additionally in each
-  spelling Google answers to. A new Gmail endpoint therefore shows up as a failing test rather than
-  as a silent gap. It does not harden the
+  spelling Google answers to. That table is a snapshot of the revision it was generated from, not a
+  live query — no test here reaches the network — so a Gmail endpoint added later surfaces when the
+  table is regenerated, not on its own. It does not harden the
   *token*: a stolen `gmail.modify` refresh token still sends mail from
   somewhere else — only the `read` tier's scope prevents that.
 - **No forwarding filters.** `create_filter` can label/archive/trash/star/mark, but **never** creates

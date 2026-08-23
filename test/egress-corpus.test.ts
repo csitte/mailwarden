@@ -9,8 +9,10 @@ import { checkEgress } from "../src/egress.js";
  * https://gmail.googleapis.com/$discovery/rest?version=v1`) crossed with the
  * spellings Google actually serves.
  *
- * Refresh it by re-running that request and regenerating the table below; a new
- * Gmail endpoint should show up here as a failing test, not as a silent gap.
+ * The table below is a snapshot of that revision — no test here reaches the
+ * network — so it does not notice an endpoint Google adds later. Re-run the
+ * request and regenerate it when the guard's surface is in question; the length
+ * assertion is what makes a changed surface fail rather than pass quietly.
  */
 const ENDPOINTS: Array<[method: string, path: string, id: string]> = [
   ["POST", "/gmail/v1/users/me/drafts", "gmail.users.drafts.create"],
