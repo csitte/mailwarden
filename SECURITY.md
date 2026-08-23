@@ -58,7 +58,18 @@ mailbox content).
   except filters are *additionally* named in a deny list that is checked first, so a careless future
   addition to the allowlist cannot quietly re-open one. This is what turns "no tool would do that"
   into "no code path in this server can", whatever a prompt-injected mail talks a model into asking
-  for. It does not harden the *token*: a stolen `gmail.modify` refresh token still sends mail from
+  for. The deny list matches a *normalized* path, because `/gmail/v1/...` is not the only spelling
+  Google serves: hand a method `media` and `googleapis` targets `/upload/gmail/v1/...` instead —
+  which is how a large message would really be uploaded. Rules anchored at `/gmail/v1` never saw
+  that route; it used to be refused for falling off the allowlist instead, i.e. by exactly the rule the
+  deny list exists to outlive. The checkpoint also stops a request whose *host* was rewritten:
+  `googleapis` honours `GOOGLE_CLOUD_UNIVERSE_DOMAIN` from the environment and a `rootUrl` client
+  option, either of which can aim an authenticated call at a host of someone else's choosing without
+  a line of mailwarden changing. Both are refused before the access token leaves the process. Every
+  method in Gmail's own discovery document is driven through the guard in
+  [`test/egress-corpus.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/egress-corpus.test.ts), in each spelling Google answers to, so
+  a new endpoint shows up as a failing test rather than as a silent gap. It does not harden the
+  *token*: a stolen `gmail.modify` refresh token still sends mail from
   somewhere else — only the `read` tier's scope prevents that.
 - **No forwarding filters.** `create_filter` can label/archive/trash/star/mark, but **never** creates
   a `forward` action — which would be a standing exfiltration channel. `list_filters` *surfaces* any

@@ -321,7 +321,11 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   authenticated Gmail request passes one checkpoint that allows exactly the endpoints mailwarden
   uses and refuses the rest — with `messages.send`, `drafts.*`, `messages.import`/`insert`,
   permanent deletion and every non-filter `settings` endpoint named in a deny list checked first, so
-  a later edit to the allowlist cannot reopen them by accident. It guards *this server*, not the
+  a later edit to the allowlist cannot reopen them by accident — including through the
+  `/upload/gmail/v1/...` route `googleapis` takes when a method is handed `media`. A request whose
+  host was rewritten (`GOOGLE_CLOUD_UNIVERSE_DOMAIN`, a `rootUrl` option) is refused before the token
+  leaves the process. Every method in Gmail's discovery document is tested against the guard. It
+  guards *this server*, not the
   token: a stolen `gmail.modify` token can still send from elsewhere.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
   directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
@@ -494,7 +498,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (901 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (986 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
 
 ## License
 

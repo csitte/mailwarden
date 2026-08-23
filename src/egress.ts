@@ -99,6 +99,26 @@ const ALLOWED: Rule[] = [
 ];
 
 /**
+ * The path the deny list is matched against.
+ *
+ * googleapis does not only build `/gmail/v1/...`. Hand a method `media` and the
+ * library targets `/upload/gmail/v1/...` instead (`uploadType=resumable` lands on
+ * the same path) — checked against the installed library, not assumed. Those are
+ * real send paths: `users.messages.send` with `media` is how a large message is
+ * uploaded, and `users.drafts.create` behaves the same way. A deny rule anchored
+ * at `/gmail/v1` never sees them.
+ *
+ * So the deny list matches the normalised path: upload prefixes stripped, repeated
+ * slashes collapsed. `ALLOWED` deliberately does *not* get this treatment and keeps
+ * matching the raw path, so an upload URL can only ever be refused, never allowed.
+ * The asymmetry is the point — the deny list should be as wide as the API really
+ * is, the allowlist as narrow as mailwarden really is.
+ */
+function denyPath(pathname: string): string {
+  return pathname.replace(/\/{2,}/g, "/").replace(/^\/(?:resumable\/)?upload(?=\/gmail\/)/, "");
+}
+
+/**
  * Decide whether one outgoing request may leave.
  *
  * Pure, so the whole policy is testable without a network or a token: returns
@@ -118,12 +138,17 @@ export function checkEgress(method: string, url: string): string | undefined {
   if (OAUTH_HOSTS.has(hostname)) return undefined;
 
   if (!GMAIL_HOSTS.has(hostname)) {
-    return `request to a non-Gmail host (${hostname}) — mailwarden's Gmail client only ever talks to Google`;
+    return (
+      `request to a non-Gmail host (${hostname}) — mailwarden's Gmail client only ever talks to Google. ` +
+      "googleapis rewrites the host when GOOGLE_CLOUD_UNIVERSE_DOMAIN is set or a rootUrl option is " +
+      "passed; mailwarden sets neither, so an authenticated request aimed anywhere else stops here."
+    );
   }
 
+  const deny = denyPath(pathname);
   for (const rule of FORBIDDEN) {
     if (rule.method && rule.method !== verb) continue;
-    if (rule.path.test(pathname)) return rule.what;
+    if (rule.path.test(deny)) return rule.what;
   }
 
   for (const rule of ALLOWED) {

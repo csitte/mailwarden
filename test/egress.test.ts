@@ -166,4 +166,56 @@ describe("guardEgress — in front of the real googleapis client", () => {
     expect(guardEgress(guarded).request).toBe(first);
     expect(guardEgress(auth)).toBe(auth);
   });
+
+
+  /**
+   * These two are why the deny list normalises the path. Handing a method
+   * `media` makes googleapis target `/upload/gmail/v1/...`, which the rules used
+   * to miss — the call was still refused, but by the allowlist rather than by the
+   * rule that names it. The URLs below are not hand-written: the library builds
+   * them.
+   */
+  it("blocks a media send, which googleapis routes to the /upload path", async () => {
+    const { gmail, calls } = guardedClient();
+    await expect(
+      gmail.users.messages.send({
+        userId: "me",
+        media: { mimeType: "message/rfc822", body: "raw" },
+      }),
+    ).rejects.toThrow(/sending mail/);
+    await expect(
+      gmail.users.messages.send({
+        userId: "me",
+        uploadType: "resumable",
+        media: { mimeType: "message/rfc822", body: "raw" },
+      }),
+    ).rejects.toThrow(/sending mail/);
+    await expect(
+      gmail.users.drafts.create({
+        userId: "me",
+        media: { mimeType: "message/rfc822", body: "raw" },
+      }),
+    ).rejects.toThrow(/composing mail/);
+    expect(calls).toEqual([]);
+  });
+
+  /**
+   * googleapis-common reads GOOGLE_CLOUD_UNIVERSE_DOMAIN straight from the
+   * environment and rewrites the hostname with it. mailwarden never sets it, but
+   * it does not own the environment either — so an authenticated request can be
+   * aimed at a host of someone else's choosing without a line of mailwarden
+   * changing. The guard is what makes that inert.
+   */
+  it("blocks a request the environment redirected to another host", async () => {
+    const previous = process.env.GOOGLE_CLOUD_UNIVERSE_DOMAIN;
+    process.env.GOOGLE_CLOUD_UNIVERSE_DOMAIN = "attacker.example";
+    try {
+      const { gmail, calls } = guardedClient();
+      await expect(gmail.users.labels.list({ userId: "me" })).rejects.toThrow(/non-Gmail host/);
+      expect(calls).toEqual([]); // the access token never reached that host
+    } finally {
+      if (previous === undefined) delete process.env.GOOGLE_CLOUD_UNIVERSE_DOMAIN;
+      else process.env.GOOGLE_CLOUD_UNIVERSE_DOMAIN = previous;
+    }
+  });
 });
