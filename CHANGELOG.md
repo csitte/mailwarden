@@ -49,6 +49,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `MAILWARDEN_TOOLS=read` and has no `archive` tool to reach for — that is the tier doing the work,
   not the account boundary. The claim now reads per-call, and names the configuration rule that
   actually holds the line: at most one mailbox per client configuration carries write tools.
+- **The multi-account section covers more than two mailboxes.** It was written for a pair and read
+  as if a fourth entry were just a fourth line of JSON. Two things scale with the count: every full
+  instance advertises 25 tools (8 `read` + 14 `manage` + 3 `filters`), and every registered account
+  adds its tool surface to the same model context. Both are answered by the same configuration —
+  one mailbox with write tools, the rest on `read` — which also leaves those entries on a
+  `gmail.readonly` token, the one scope where no-send is enforced by Google rather than by
+  mailwarden's tool surface. Also stated outright, because it is easy to assume otherwise: no tool
+  reads across mailboxes, so a question about all four is four calls the caller combines.
 
 ## [0.14.0] - 2026-08-21
 

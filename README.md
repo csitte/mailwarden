@@ -440,8 +440,8 @@ mailwarden --auth --account personal    # stores token.personal.json
 ```
 
 Run them side by side by registering the server **once per account**, each with its own
-`MAILWARDEN_ACCOUNT`. Every instance is fully isolated — its own token, its own granted scopes, its
-own tool surface — so nothing can act on the wrong mailbox:
+`MAILWARDEN_ACCOUNT`. Every instance carries its own token, its own granted scopes and its own tool
+surface, and a tool call acts on the account of the entry that carries it and on no other:
 
 ```json
 {
@@ -468,6 +468,48 @@ useful to keep setups apart entirely, but it does not give you a second account 
 `mailwarden --check` shows the active account and lists the others it finds. With no
 `MAILWARDEN_ACCOUNT` set, everything uses the default `token.json` exactly as before — this is fully
 backward compatible.
+
+### More than two accounts
+
+Two entries are the easy case. Past that, two properties of this design start to matter.
+
+**Each instance brings its own tools.** The tier split is 8 `read` + 14 `manage` + 3 `filters`, so a
+full instance advertises 25 tools and four of them advertise 100. Clients that search their tool
+surface on demand absorb that; clients that hold every definition in context do not.
+
+**Several accounts in one client share one model context.** The account boundary binds a *call* to
+one mailbox — it does not stop text read from one mailbox from prompting a call against another,
+because all of those tool surfaces are in front of the same model. That is a limit of the boundary,
+not a defect in it; see threat 8 in [SECURITY.md](SECURITY.md).
+
+One move answers both: **give exactly one mailbox write tools and leave the rest on `read`.**
+
+```json
+{
+  "mcpServers": {
+    "gmail-main":   { "command": "npx", "args": ["-y", "mailwarden"], "env": { "MAILWARDEN_ACCOUNT": "main" } },
+    "gmail-work":   { "command": "npx", "args": ["-y", "mailwarden"], "env": { "MAILWARDEN_ACCOUNT": "work",   "MAILWARDEN_TOOLS": "read" } },
+    "gmail-club":   { "command": "npx", "args": ["-y", "mailwarden"], "env": { "MAILWARDEN_ACCOUNT": "club",   "MAILWARDEN_TOOLS": "read" } },
+    "gmail-archive":{ "command": "npx", "args": ["-y", "mailwarden"], "env": { "MAILWARDEN_ACCOUNT": "archive","MAILWARDEN_TOOLS": "read" } }
+  }
+}
+```
+
+Three things follow at once: the `read` entries only ever ask for `gmail.readonly`, the one scope in
+which no-send is enforced by Google rather than by mailwarden's tool surface; the four instances add
+up to 49 tools rather than 100; and an instruction injected into any of them finds no write tool for
+another mailbox to reach for. When one of the read-only mailboxes does need cleaning up, hand that
+entry `manage` for as long as the work takes instead of permanently.
+
+Separate clients — or separate sessions — remove the shared context entirely, at the price of never
+having two mailboxes in view at once. Worth it when several mailboxes genuinely need write tools;
+otherwise the tier split is the cheaper boundary.
+
+**No tool reads across mailboxes.** `search`, `triage_digest` and `list_subscriptions` each serve
+the one account their instance was configured with, so a question like "which newsletter writes to
+all four" is four calls whose answers the caller combines. In a setup this size it is worth calling
+`get_profile` before the first action that changes anything — it names the mailbox actually on the
+other end.
 
 ## From source
 
