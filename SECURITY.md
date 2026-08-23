@@ -157,14 +157,28 @@ prompt-injected instruction tries to reach the other one: *"archive everything i
 
 - **The account is not a tool parameter.** No tool takes an `account` argument. A process serves
   **exactly one** account, chosen by `MAILWARDEN_ACCOUNT` in the MCP server's configuration — that is,
-  outside the model's reach. There is no call the model can emit that switches mailbox, so a
-  compromised model is confined to the account whose server entry invoked it.
+  outside the model's reach. There is no call the model can emit that switches mailbox: a call acts
+  on the account of the server entry that carries it, and on no other.
 - **Per-account authority stays distinct.** Because the account is fixed before any tool is
   registered, tool tiers and OAuth scopes are resolved **per instance**: the work entry can run
   `MAILWARDEN_TOOLS=read` against a `gmail.readonly` token while the private entry has the full
   surface. Each account has its own token file, its own granted scopes, and its own tool surface.
   Selecting the account per call would instead force one tool surface across mailboxes of differing
   authority — the read-only mailbox would inherit the write tools of the other.
+
+**Read the first point narrowly: it binds a call to one mailbox, it does not keep two mailboxes out
+of one conversation.** The boundary is per *call*, not per model context. Register several accounts
+in one client and all of those tool surfaces stand in front of the same model at the same time, so
+injected text read from one mailbox can still emit a call against another. What it cannot do is make
+that call land anywhere other than where its own server entry points.
+
+In the scenario above the attack therefore fails on the **tier**, not on the account boundary: the
+work entry runs `MAILWARDEN_TOOLS=read`, so no `archive` tool exists for that mailbox for the model
+to reach for. Give both entries the full surface and the same instruction would go through. The rule
+that follows is a configuration one: **at most one mailbox per client configuration carries write
+tools**, and a session that needs to write in a second one is given them for that session rather
+than permanently. Keeping each account in a client (or a session) of its own closes the gap
+entirely, at the price of never seeing two mailboxes at once.
 
 The deliberate cost: one server entry per account, which is more configuration than a per-call
 account argument. That is the trade being made — configuration effort for a boundary the model

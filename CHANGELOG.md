@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Two more tests drive the real `googleapis` client, so the upload URLs and the redirected host are
   the library's, not hand-built.
 
+### Changed
+- **The multi-account isolation claim is narrowed to what it covers.** Threat 8 said a compromised
+  model was "confined to the account whose server entry invoked it". True of a single *call* — the
+  account is fixed before any tool is registered, so a call acts on its own entry's mailbox and no
+  other. Not true of the *model*: with several accounts registered in one client, every one of those
+  tool surfaces stands in front of the same model, so injected text read from one mailbox can emit a
+  call against another. The threat's own example survives only because the second mailbox runs
+  `MAILWARDEN_TOOLS=read` and has no `archive` tool to reach for — that is the tier doing the work,
+  not the account boundary. The claim now reads per-call, and names the configuration rule that
+  actually holds the line: at most one mailbox per client configuration carries write tools.
+
 ## [0.14.0] - 2026-08-21
 
 ### Added
