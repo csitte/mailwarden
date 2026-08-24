@@ -12,7 +12,10 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   `read`-Tier (`gmail.readonly`); `gmail.modify` ist bei Google für `messages.send` zulässig
   (13.08.2026 live bestätigt), dort trägt die Tool-Oberfläche die Zusage. Nie wieder
   „die Scopes können nicht senden" schreiben. **Seit 20.08. zusätzlich `src/egress.ts`:** ein
-  Checkpoint um `request()` des Auth-Clients, Allowlist der 15 tatsächlich genutzten Endpunkte plus
+  Checkpoint um `request()` des Auth-Clients, Allowlist der 15 tatsächlich genutzten Endpunkte —
+  **das sind 13 Einträge in `ALLOWED`**, weil einer `modify|trash|untrash` in einem Ausdruck
+  zusammenfasst; wer die Datei zählt, kommt auf 13, wer Endpunkte zählt, auf 15 (csitte kam bei der
+  Verifikation auf 14, und das kam aus genau dieser Doppeldeutigkeit) — plus
   vorgeschaltete Denylist (send/drafts/import/insert/Hard-Delete/settings außer filters). Damit ist
   die Zusage **im Server** erzwungen — aber weiter **nicht am Token**: ein gestohlenes
   `gmail.modify`-Refresh-Token sendet von woanders. Wer einen Endpunkt neu benutzt, muss ihn dort
