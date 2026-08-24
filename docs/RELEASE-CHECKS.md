@@ -416,3 +416,45 @@ Bash-Heredoc → JS-Template-Literal **nicht** (`String.fromCharCode(92)` statt 
 Patch-Skript muss das EOL je Datei aus dem Inhalt bestimmen, und `grep -c` auf CR lügt in Git Bash,
 `cat -A` nicht. Und: **vor dem Formatieren die `devDependencies` lesen** — hier gibt es weder
 prettier noch eslint, ein `npx prettier --write` hätte fremden Stil eingeschleppt.
+
+## Nachtrag (24.08.2026): das Beispiel, das die Zusage bestätigt und die Begründung nicht prüft
+
+Diese Runde war **keine** Prüfrunde. Auslöser war eine Nutzerfrage — „ich habe 4 Gmail-Accounts, wie
+könnte mailwarden damit umgehen" —, und sie legte eine Zusage frei, die seit dem Multi-Account-Feature
+zu weit gefasst war: `SECURITY.md` Bedrohung 8 behauptete, ein kompromittiertes Modell sei „confined
+to the account whose server entry invoked it". Wahr für den einzelnen **Aufruf**, falsch für das
+**Modell**: mehrere Konten in einem Client heißt, alle Tool-Flächen stehen gleichzeitig vor demselben
+Modell.
+
+Bemerkenswert ist, **warum es so lange stand**. Das Bedrohungsmodell führt ein Beispiel mit —
+lesendes Arbeitspostfach neben schreibendem privatem — und in diesem Beispiel hält die Zusage
+tatsächlich. Nur nicht aus dem angegebenen Grund: das lesende Postfach hat schlicht kein
+`archive`-Werkzeug. Die Trennung leistete das **Tier**, die Zusage schrieb sie der **Account-Grenze**
+zu. Jede Lektüre bestätigte den Absatz, weil das Beispiel funktionierte.
+
+> **Ein Beispiel prüft die Zusage, nicht ihre Begründung.** Wo ein Absatz „deshalb" sagt, muss der
+> Beleg das *deshalb* treffen — ein Fall, der aus einem zweiten Grund gutgeht, sieht identisch aus.
+> Kontrollfrage: welches Beispiel wäre nötig, damit die Zusage **allein** an der genannten Ursache
+> hängt? Hier: zwei Postfächer mit **gleicher** Autorität. Dort fällt sie.
+
+Was die Frage nach vier statt zwei Konten außerdem zeigte: eine Doku, die einen Fall am Paar
+erklärt, lässt die **Bedingung** als Beispiel-Detail durchgehen. Bei zwei Postfächern liest man sie
+mit, bei vier nicht mehr. **Nutzerfragen nach einem Anwendungsfall, den die Doku nur am Rand
+behandelt, sind Prüfrunden** — sie kosten nichts und treffen die Stellen, an denen niemand einen
+Winkel angesetzt hat.
+
+Zwei Beobachtungen aus derselben Runde, beide über die Bridge:
+
+- **Die Produktseite hatte den Fehler nicht mitgespiegelt.** Sie begründete die Trennung bereits über
+  das fehlende Schreibwerkzeug. Zum **zweiten Mal** ist der Spiegel präziser als das Original, und
+  zwar weil csitte Fremdaussagen belegt statt sie abzuschreiben. Der Nachtrag vom 18.08. hält fest,
+  dass ein Spiegel die Lebensdauer eines Fehlers verlängert; die andere Hälfte ist: **ein Spiegel,
+  der belegt statt abzuschreiben, ist eine Prüfrunde, die uns nichts kostet.**
+- **Zahlen in einer Belegliste sind gefährlicher als im Fließtext.** csittes Verifikation gegen das
+  publizierte Paket — die richtige Methode — nannte „genau vierzehn Endpunkte" für die
+  Egress-Allowlist. Es sind **13 Einträge** in `ALLOWED` und **15 Endpunkte** (einer fasst
+  `modify|trash|untrash` zusammen); vierzehn ist keine von beiden. Auf der Seite fing es deren Regel
+  „keine Zählungen im Fließtext" ab. In einer Belegliste greift die Regel nicht — dort ist die Zahl
+  ja der Beleg. **Eine Prüfung gegen das publizierte Paket ist so viel wert wie ihre Zählung.**
+  Unser Anteil: `CLAUDE.md` nannte nur die 15, ohne die 13 daneben — beide Zählweisen stehen jetzt
+  dort.
