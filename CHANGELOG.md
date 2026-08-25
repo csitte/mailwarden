@@ -5,6 +5,15 @@ All notable changes to **mailwarden** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+- **Comparison table: `klodr` does declare an `outputSchema` — for one tool.** Its
+  `src/tools/output-schemas.ts` covers `download_email` and calls that the "first wave", with the
+  remaining JSON-output tools tracked for a later release. The cell said "not offered"; it now says
+  so per tool. Found by csitte.at checking every cell of the row against the other project's source
+  before mirroring it, rather than copying our table.
+
 ## [0.14.1] - 2026-08-25
 
 ### Fixed

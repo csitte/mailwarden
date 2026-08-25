@@ -105,6 +105,14 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   wahr für `search`, als generelle Zusage zu weit. (Nachtrag derselben Nacht: die Drift sitzt in
   `threads.list`; der Bulk-Pfad über `messages.list` zeigte sie im direkten Vergleich **nicht** —
   die Zusage war trotzdem unbelegt, und der Reihenfolge-Punkt gilt unverändert.)
+  **Zu jeder gemeldeten Eigenschaft dazusagen, seit wann der Code sie hält** (Bitte von csitte,
+  25.08.): sie wählen Formulierungen auch danach aus, wie lange etwas schon trägt — ein Satz über
+  eine Absicht, die der Code seit gestern erfüllt, ist ein anderer als einer über eine, die seit
+  Monaten hält. Anlass: der „two lists kept apart"-Satz stand vom 21. bis 25.08. auf der Seite und
+  hielt erst ab 0.14.1. **Und: eine Behauptung über den Stand der anderen Seite wird geprüft, nicht
+  erinnert** (beidseitige Regel seit 25.08.) — unsere Notiz „csitte-Tabelle überfällig" war so
+  falsch wie deren „vierzehn Endpunkte"; csitte prüft jede Tabellenzelle gegen den fremden Quellcode
+  und fand so unsere falsche klodr-Zelle (`—` statt „ein Tool").
   Zwei Konventionen der Seite respektieren: **keine Versionsnummer und keine gezählten Aufzählungen**
   im Fließtext — beides veraltet bei jedem unserer Commits.
   **Die Meldung trägt `announces: <version>` im Frontmatter** — daran und nur daran erkennt

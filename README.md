@@ -64,7 +64,7 @@ Most Gmail MCP servers cover the same read/label/send surface. Two capabilities 
 | **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | ⚠️ scope split | — | — | ⚠️ inverse: tools gated by granted scopes |
 | **Token encryption at rest** (optional) | ✅ AES-256-GCM | n/a (hosted) | ✅ | — | — |
 | **No vendor cloud — you operate the server** | ✅ | ❌ Google-hosted | ✅ | ✅ | ✅ |
-| **Structured outputs** — every tool declares an `outputSchema` | ✅ | — | — | — | — |
+| **Structured outputs** — every tool declares an `outputSchema` | ✅ | — | — | — | ⚠️ one tool (`download_email`), more planned |
 
 <sub>Snapshot as of 20 August 2026, from each project's public docs and source; `—` = not offered / not documented. Columns are the servers a reader is most likely to reach for — Google's first-party one, plus the two largest community servers — and `klodr`, which comes closest to `mailwarden`'s own least-privilege design. Send capability is listed as a security property: `mailwarden`'s lack of it is intentional (see [Security & privacy](#security--privacy)). The last row asks who *operates* the server, not where it happens to run: self-hosting is common ground here, and every community server on this table offers some remote deployment except `klodr` (stdio only) — `mailwarden` via `--http`, `taylorwilsdon` over streamable HTTP with OAuth 2.1, `a-bonus` on Cloud Run. Running one of them on your own host is not a cloud copy; running it on the vendor's is.</sub>
 
