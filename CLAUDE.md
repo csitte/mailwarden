@@ -78,7 +78,10 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Änderungen `docs/SETUP.md`, bei Sicherheitsaussagen `SECURITY.md`.
 - **Release** (nur auf Ansage): erst alles außer der Version pushen und **CI grün abwarten**, dann
   `npm version <patch|minor>` (synct `server.json`; CHANGELOG vorher `[Unreleased]` → Version +
-  Link-Ref) und pushen. **Achtung `push.followTags=true`:** ein `git push` nimmt den Tag
+  Link-Ref) und pushen. **`npm version` blockt der Auto-Mode-Klassifizierer (25.08.):** Chris führt
+  genau diesen einen Befehl selbst aus (`! npm version patch` im Prompt), alles davor und danach
+  läuft normal — nicht per Hand an `package.json` und `git tag` vorbeiarbeiten, die Sperre gilt
+  sichtbar dem irreversiblen Schritt. **Achtung `push.followTags=true`:** ein `git push` nimmt den Tag
   automatisch mit, der Publish-Lauf startet also sofort — die Reihenfolge „taggen, dann in Ruhe
   schauen" gibt es hier nicht. Das ist vertretbar, weil `publish.yml` Build, Tests, `npm run smoke`
   und `npm run mcpb` selbst vor dem irreversiblen `npm publish` fährt. CI publisht npm und
