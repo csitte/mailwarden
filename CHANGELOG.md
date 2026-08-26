@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A test now guards the no-send promise against being overstated.** Every sentence in the
+  repository that ties "mailwarden does not send" to an OAuth *scope* must appear in an allow list
+  with a reason — the same shape as the egress guard, where a new endpoint fails the call until
+  someone enters it. Google enforces no-send only for `gmail.readonly`; it accepts `gmail.modify`
+  on `messages.send`, so a claim anchored on the scope is false for every tier but one. That exact
+  sentence had been written and shipped twice (six files in 2026-08-13, the Workspace-neighbour
+  section in 0.15.0) while a rule in `CLAUDE.md` forbade it both times — a rule you have to
+  remember is not a control. The net matches the *shape* of the claim in both languages rather
+  than particular wordings, which is what the 2026-08-13 grep got wrong.
+
+### Fixed
+- **`src/unsubscribe.ts` explained a refusal with the scope instead of the tool.** The comment said
+  `mailto:` opt-outs are impossible because there is "no send scope" — but the `manage` tier holds
+  `gmail.modify`, which Google does accept for sending. The reason is that no send tool exists and
+  the egress guard refuses the endpoint. Found by the new guard on its first run.
+
 ## [0.15.1] - 2026-08-26
 
 ### Fixed

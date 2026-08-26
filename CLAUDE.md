@@ -11,7 +11,7 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Forwarding-Regel. **Präzise formulieren:** von Google *erzwungen* ist das nur im
   `read`-Tier (`gmail.readonly`); `gmail.modify` ist bei Google für `messages.send` zulässig
   (13.08.2026 live bestätigt), dort trägt die Tool-Oberfläche die Zusage. Nie wieder
-  „die Scopes können nicht senden" schreiben. **Seit 20.08. zusätzlich `src/egress.ts`:** ein
+  „die Scopes können nicht senden" schreiben. **Das prüft seit 26.08. ein Test** (`test/send-claims.test.ts` + `scripts/lib/send-claims.mjs`): jede scope-verankerte No-Send-Aussage muss in einer Allowlist stehen — dieselbe Mechanik wie beim Egress-Guard. Eine neue Formulierung bricht `npm test`, bis jemand sie einträgt. Anlass: die Regel stand hier schon und wurde trotzdem zweimal verletzt (13.08. in sechs Dateien, 26.08. in 0.15.0 ausgeliefert). **Seit 20.08. zusätzlich `src/egress.ts`:** ein
   Checkpoint um `request()` des Auth-Clients, Allowlist der 15 tatsächlich genutzten Endpunkte —
   **das sind 13 Einträge in `ALLOWED`**, weil einer `modify|trash|untrash` in einem Ausdruck
   zusammenfasst; wer die Datei zählt, kommt auf 13, wer Endpunkte zählt, auf 15 (csitte kam bei der

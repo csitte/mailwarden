@@ -17,7 +17,10 @@
  *    via `List-Unsubscribe-Post`. A plain `https:` link is meant for a human in a
  *    browser and is surfaced, not fetched.
  *  - **`mailto:` opt-outs are never performed** — they would require sending mail,
- *    which mailwarden cannot do (no send scope). They are reported for the human.
+ *    which mailwarden has no tool for, and whose endpoint the egress guard refuses. NOT
+ *    because the granted scope lacks the capability: in the `manage` tier that scope is
+ *    `gmail.modify`, which Google does accept on `messages.send`. They are reported for
+ *    the human.
  *  - **SSRF guards:** https only, default port, no credentials in the URL, and
  *    every hop (including redirects) must resolve exclusively to public addresses.
  */
