@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-08-26
+
 ### Fixed
 - **The new "next to a Workspace server" section overstated the no-send promise.** It said the mail
   half "authorizes with `gmail.readonly` or `gmail.modify` and has no compose path at all" — which
@@ -1078,7 +1080,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/csitte/mailwarden/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/csitte/mailwarden/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/csitte/mailwarden/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/csitte/mailwarden/compare/v0.13.0...v0.14.0
