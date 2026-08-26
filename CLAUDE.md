@@ -122,6 +122,13 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   Schritt selbst, ein falsches „fehlt" nur einen zweiten Blick. Ohne Bridge-Laufwerk (CI, fremder
   Klon) meldet der Check **SKIPPED**, nie „ok" — er behauptet nichts, was er nicht gesehen hat.
   Anlass: die Seite beschrieb noch 0.7.0, als 0.10.0 live war (drei Releases ohne Nachricht).
+  **Der Check sieht nur Threads, deren Slug `mailwarden` UND `csitte` enthält**
+  (`SITE_THREAD_PATTERN` in `scripts/lib/site-notice.mjs` — bewusst eng, ein Scan über alle ~80
+  Threads lief einmal ins Tool-Timeout). Die Release-Meldung gehört deshalb in
+  `061-mailwarden-doku-csitte-update`; eine in einem anders benannten Thread ist für den Check
+  unsichtbar und erzeugt ein „MISSING", obwohl sie draußen ist. Aufgefallen 26.08. beim Anlegen von
+  `162-mailwarden-tabelle-least-privilege-korrektur` — als Ort für eine Faktenkorrektur richtig, als
+  Ort für ein `announces:` wertlos. **Sachthemen dürfen eigene Threads haben, das `announces:` nicht.**
 
 ## Session-Bridge
 
