@@ -36,7 +36,8 @@
     "auth": "tsx src/index.ts --auth",
     "sweep": "tsx src/index.ts --sweep",
     "smoke": "node scripts/smoke-package.mjs",
-    "mcpb": "node scripts/build-mcpb.mjs"
+    "mcpb": "node scripts/build-mcpb.mjs",
+    "table-sources": "node scripts/check-comparison-sources.mjs"
   },
   "keywords": [
     "mcp",

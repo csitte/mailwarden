@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The comparison table now records which revision each claim was read at.**
+  `docs/comparison-sources.json` names, per column, what was read and at which foreign commit;
+  `npm run table-sources` compares those against the projects' current HEADs and says which
+  columns are worth re-reading. The existing age check answers *when we last looked*, which is
+  the weaker question — a table can be a week old and right because nothing changed, or a day
+  old and wrong because the other project shipped that morning. That is exactly how
+  `taylorwilsdon`'s least-privilege cell came to say "not offered" after he had added tool
+  tiers. Deliberately not a gate: an active project moves daily, and a check that always fails
+  is one nobody reads. What *is* gated (in the test suite, no network needed) is that every
+  column in the README has a source entry and every entry says what was read — including
+  `shaBasis`, which distinguishes a revision that was written down at the time from one
+  reconstructed afterwards. Adopted from csitte.at's rule "no matrix cell without our own
+  evidence"; their recorded SHA for `taylorwilsdon` and ours matched on 2026-08-26.
 - **A test now guards the no-send promise against being overstated.** Every sentence in the
   repository that ties "mailwarden does not send" to an OAuth *scope* must appear in an allow list
   with a reason — the same shape as the egress guard, where a new endpoint fails the call until

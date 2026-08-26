@@ -1,0 +1,56 @@
+{
+  "$comment": [
+    "What was read, and at which revision, for every column of the comparison table in README.md.",
+    "",
+    "The table is the one thing this project ships that makes claims about other people's software,",
+    "and it goes wrong without anything breaking. `npm run smoke` already checks how OLD it is;",
+    "this file makes it checkable whether the other side has MOVED since we looked, which is the",
+    "question that actually decides whether a cell still holds. `npm run table-sources` compares",
+    "each `sha` against that project's current HEAD and names the columns worth re-reading.",
+    "",
+    "Adopted from csitte.at, whose rule is 'no matrix cell without our own evidence' — they record",
+    "the foreign HEAD before mirroring a row. On 2026-08-26 their recorded SHA for taylorwilsdon",
+    "and ours matched, which is how a claim about a third party should be confirmable at all.",
+    "",
+    "`shaBasis` is deliberately part of the record: `recorded` means the SHA was read at the time",
+    "of checking, `inferred` means it was reconstructed afterwards from the commit history (safe",
+    "only when the repository did not move between the check and the reconstruction). Never write",
+    "`recorded` for a SHA nobody wrote down — that is the exact habit this file exists to break."
+  ],
+  "columns": [
+    {
+      "column": "Google official",
+      "kind": "docs",
+      "url": "https://developers.google.com/workspace/gmail/api/reference/mcp",
+      "verified": "2026-08-26",
+      "note": "No repository to pin: a hosted server documented on a web page, so only the date carries. Read the tool reference itself, not the Cloud blog. Still Developer Preview; ten tools, by name: create_draft, get_message, get_thread, label_message, label_thread, list_drafts, list_labels, search_threads, unlabel_message, unlabel_thread. No send, trash, filters or unsubscribe."
+    },
+    {
+      "column": "taylorwilsdon",
+      "kind": "repo",
+      "repo": "taylorwilsdon/google_workspace_mcp",
+      "sha": "b10fb78b5dfae1fa8f100474a753723b10b64548",
+      "shaBasis": "recorded",
+      "verified": "2026-08-26",
+      "note": "Read auth/scopes.py (TOOL_SCOPES_MAP and TOOL_READONLY_SCOPES_MAP are keyed by SERVICE, not by tool), main.py (set_enabled_tools receives the service list), core/tool_registry.py (read-only filters the registered tools), and the README for the tier names. Same SHA csitte.at recorded independently on the same day."
+    },
+    {
+      "column": "a-bonus",
+      "kind": "repo",
+      "repo": "a-bonus/google-docs-mcp",
+      "sha": "e225f5ef961e29cb01d40ddaecf116a39020e578",
+      "shaBasis": "inferred",
+      "verified": "2026-08-16",
+      "note": "Cells date from the 2026-08-16 round (12 Gmail tools, triageInbox heuristics, the AES find is in downloadProxy.ts and is NOT token encryption). The SHA was not written down then; it is reconstructed from the commit history, where this commit (2026-08-10) was already HEAD on the day of the check and still is. Re-read and mark as `recorded` at the next round."
+    },
+    {
+      "column": "klodr",
+      "kind": "repo",
+      "repo": "klodr/gmail-mcp",
+      "sha": "59ced4187bc92299d051a54b1adad321bda181fb",
+      "shaBasis": "inferred",
+      "verified": "2026-08-25",
+      "note": "The Structured-outputs cell was corrected on 2026-08-25 by reading src/tools/output-schemas.ts (one tool, download_email, called the 'first wave'). This commit is from 2026-07-27 and has been HEAD since; later pushes were Dependabot branches, so what was read then still describes this revision."
+    }
+  ]
+}

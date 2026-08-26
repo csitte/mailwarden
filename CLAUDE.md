@@ -70,6 +70,13 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   nicht umgeschrieben.) **Deutsche Umlaute in Testdaten sind kein deutscher Text**: `"Grüße für
   März"`, `münchen.example`, `Scanbot/zu-löschen` prüfen RFC-2047-, IDN- und Labelbehandlung und
   bleiben, wo sie stehen.
+- **Vergleichstabelle:** vor einer Vergleichsrunde `npm run table-sources` — sagt, welche Spalten
+  sich seit unserer Prüfung **bewegt** haben (Fremd-HEAD gegen den in `docs/comparison-sources.json`
+  vermerkten SHA). Der Alterscheck im Smoke weiß nur, *wann* wir geschaut haben; das ist die
+  schwächere Frage. Kein Gate (fremde Repos bewegen sich täglich) — gated ist nur, dass **jede
+  Spalte einen Beleg hat**, im Testlauf. `shaBasis: recorded` heißt: beim Prüfen notiert;
+  `inferred` heißt: nachträglich rekonstruiert. Nie `recorded` schreiben für einen SHA, den
+  niemand notiert hat — genau diese Gewohnheit soll die Datei brechen.
 - **Prüfrunden vor einem Release:** `docs/RELEASE-CHECKS.md` — fertige Prompts, ein Winkel
   je Runde. Zwei Runden sind das Budget; eine nötige dritte ist ein Design-Signal. Immer
   Doku-gegen-Code und die Artefakt-Runde, dazu genau eine passende weitere. Reine
