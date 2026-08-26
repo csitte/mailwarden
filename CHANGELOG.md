@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The new "next to a Workspace server" section overstated the no-send promise.** It said the mail
+  half "authorizes with `gmail.readonly` or `gmail.modify` and has no compose path at all" — which
+  attaches the guarantee to the scope. Gmail *does* accept `gmail.modify` on `messages.send`; only
+  the `read` tier's `gmail.readonly` is enforced by Google. The section now says where the promise
+  rests per tier (token on `read`, tool surface on `manage`) and names the egress guard as the
+  floor under both. The rest of the README and `SECURITY.md` already drew this line correctly —
+  the new paragraph was the one place that did not. Caught by csitte.at while mirroring the
+  section, before they published the loose wording.
+
 ## [0.15.0] - 2026-08-26
 
 ### Added

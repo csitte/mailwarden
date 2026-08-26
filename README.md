@@ -77,9 +77,12 @@ from one place, a broad server like `taylorwilsdon/google_workspace_mcp` covers 
 will, and the two are not mutually exclusive. Adding both is a reasonable setup, and the reason to is
 the token, not the tool count: a suite server that can send mail holds a credential that can send
 mail, for every mailbox it is pointed at. Giving Gmail to `mailwarden` instead means the mail half of
-your setup authorizes with `gmail.readonly` or `gmail.modify` and has no compose path at all — an
-injected message in your inbox has nowhere to send anything, and [the egress
-guard](#security--privacy) enforces that in the server rather than trusting the tool list.
+your setup has no compose, reply, forward or send tool at all. Where that promise rests differs by
+tier, and the distinction matters: on `read` Google enforces it at the token (`gmail.readonly`,
+which the send endpoints reject), while on `manage` it rests on the tool surface — Gmail *does*
+accept `gmail.modify` for sending, so the scope alone is no guarantee. In both cases [the egress
+guard](#security--privacy) refuses `messages.send` and every draft endpoint in the server itself,
+so an injected message in your inbox has no tool to reach for and no endpoint to reach.
 
 Practical shape: point the suite server at the services you want and disable its Gmail tools
 (`--disabled-tools`, or a tier that omits them), and run `mailwarden` alongside for mail. Keep the
