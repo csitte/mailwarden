@@ -50,7 +50,7 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 
 Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden` (mailbox-side snooze, search re-verification), and one deliberate omission is a security feature, not a gap. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
 
-<!-- comparison-table-verified: 2026-08-20 -->
+<!-- comparison-table-verified: 2026-08-26 -->
 
 | Capability | **mailwarden** | [Google official](https://developers.google.com/workspace/gmail/api/guides/configure-mcp-server) | [taylorwilsdon](https://github.com/taylorwilsdon/google_workspace_mcp) | [a-bonus](https://github.com/a-bonus/google-docs-mcp) | [klodr](https://github.com/klodr/gmail-mcp) |
 |---|:--:|:--:|:--:|:--:|:--:|
@@ -61,14 +61,30 @@ Most Gmail MCP servers cover the same read/label/send surface. Two capabilities 
 | **Inbox triage overview** — one call that buckets what is waiting | ✅ sender/label/age + header signals | — | — | ✅ heuristic flags + stats | — |
 | **Server-side filters** — rules that keep triaging with no assistant in the loop | ✅ never forwarding | — | ✅ | — | ✅ |
 | **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose at all | ⚠️ draft-only | ❌ sends | ❌ sends | ❌ sends |
-| **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | ⚠️ scope split | — | — | ⚠️ inverse: tools gated by granted scopes |
+| **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | ⚠️ scope split | ✅ tiers + `--read-only` | — | ⚠️ inverse: tools gated by granted scopes |
 | **Token encryption at rest** (optional) | ✅ AES-256-GCM | n/a (hosted) | ✅ | — | — |
 | **No vendor cloud — you operate the server** | ✅ | ❌ Google-hosted | ✅ | ✅ | ✅ |
 | **Structured outputs** — every tool declares an `outputSchema` | ✅ | — | — | — | ⚠️ one tool (`download_email`), more planned |
 
-<sub>Snapshot as of 20 August 2026, from each project's public docs and source; `—` = not offered / not documented. Columns are the servers a reader is most likely to reach for — Google's first-party one, plus the two largest community servers — and `klodr`, which comes closest to `mailwarden`'s own least-privilege design. Send capability is listed as a security property: `mailwarden`'s lack of it is intentional (see [Security & privacy](#security--privacy)). The last row asks who *operates* the server, not where it happens to run: self-hosting is common ground here, and every community server on this table offers some remote deployment except `klodr` (stdio only) — `mailwarden` via `--http`, `taylorwilsdon` over streamable HTTP with OAuth 2.1, `a-bonus` on Cloud Run. Running one of them on your own host is not a cloud copy; running it on the vendor's is.</sub>
+<sub>Snapshot as of 26 August 2026, from each project's public docs and source; `—` = not offered / not documented. Columns are the servers a reader is most likely to reach for — Google's first-party one, plus the two largest community servers — and `klodr`, which comes closest to `mailwarden`'s own least-privilege design. Send capability is listed as a security property: `mailwarden`'s lack of it is intentional (see [Security & privacy](#security--privacy)). The last row asks who *operates* the server, not where it happens to run: self-hosting is common ground here, and every community server on this table offers some remote deployment except `klodr` (stdio only) — `mailwarden` via `--http`, `taylorwilsdon` over streamable HTTP with OAuth 2.1, `a-bonus` on Cloud Run. Running one of them on your own host is not a cloud copy; running it on the vendor's is.</sub>
 
-The moat isn't any single row — it's **snooze + live re-verification together**: an actual inbox-workflow layer that acts on the mailbox's *current* state, not a cached snapshot. Where others have caught up it's noted honestly above: at-rest encryption (`taylorwilsdon`), scope-driven tool gating (`klodr`), a richer per-message triage heuristic (`a-bonus`), and bulk organize over a mailbox (the hosted mcpemails.com, which has no snooze either). What none of them do is act on a *query* and check the mailbox's answer before acting on it.
+The moat isn't any single row — it's **snooze + live re-verification together**: an actual inbox-workflow layer that acts on the mailbox's *current* state, not a cached snapshot. Where others have caught up it's noted honestly above: at-rest encryption (`taylorwilsdon`), scope-driven tool gating (`klodr` inversely, and `taylorwilsdon` the same way we do it — his `--read-only` and tool tiers pick the scope map the OAuth flow then requests, checked in `auth/scopes.py` on 26 August 2026, not inferred from his README), a richer per-message triage heuristic (`a-bonus`), and bulk organize over a mailbox (the hosted mcpemails.com, which has no snooze either). What none of them do is act on a *query* and check the mailbox's answer before acting on it.
+
+### Running it next to a Workspace server
+
+`mailwarden` is a Gmail server, not a Workspace suite — if you want Calendar, Drive, Docs and Sheets
+from one place, a broad server like `taylorwilsdon/google_workspace_mcp` covers ground this one never
+will, and the two are not mutually exclusive. Adding both is a reasonable setup, and the reason to is
+the token, not the tool count: a suite server that can send mail holds a credential that can send
+mail, for every mailbox it is pointed at. Giving Gmail to `mailwarden` instead means the mail half of
+your setup authorizes with `gmail.readonly` or `gmail.modify` and has no compose path at all — an
+injected message in your inbox has nowhere to send anything, and [the egress
+guard](#security--privacy) enforces that in the server rather than trusting the tool list.
+
+Practical shape: point the suite server at the services you want and disable its Gmail tools
+(`--disabled-tools`, or a tier that omits them), and run `mailwarden` alongside for mail. Keep the
+[tier rule](#more-than-two-accounts) in mind — at most one mailbox per client config should carry
+writing tiers.
 
 ### Why re-verification matters — a concrete case
 
@@ -541,7 +557,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (986 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (998 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 

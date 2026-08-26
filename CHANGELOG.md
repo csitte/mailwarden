@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pay for it silently.
 
 ### Changed
+- **`CONTRIBUTING.md`** — build/test loop, the design rules that are not up for grabs (no send, no
+  hard delete, no cache, tiers gate scopes), what to do when a change needs a new egress endpoint,
+  and why the allow and deny lists in `src/egress.ts` are asymmetric on purpose.
+- **README: how to run mailwarden next to a broad Workspace server.** The two are not mutually
+  exclusive, and the argument for splitting mail off is the token rather than the tool count.
 - **BREAKING (tool output): `bulk_modify` reports `submitted*`, not `modified*`.**
   `modifiedMessages`/`modifiedThreadCount`/`modifiedThreads` are now
   `submittedMessages`/`submittedThreadCount`/`submittedThreads`; `create_filter`'s `applied` block
@@ -27,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed in `taylorwilsdon/google_workspace_mcp` (#1047, 2026-08-21), found there and checked here.
 
 ### Fixed
+- **Comparison table: `taylorwilsdon` derives OAuth scopes from enabled tools too.** The cell said
+  "not offered". His `auth/scopes.py` picks `TOOL_READONLY_SCOPES_MAP` over `TOOL_SCOPES_MAP` in
+  read-only mode and builds the requested scope set from the enabled tool list — the same coupling
+  this project claims, reached from the other direction (his tiers exist for context economy). Read
+  in his source on 2026-08-26, not inferred from his README. The row now says
+  `✅ tiers + --read-only`.
 - **Comparison table: `klodr` does declare an `outputSchema` — for one tool.** Its
   `src/tools/output-schemas.ts` covers `download_email` and calls that the "first wave", with the
   remaining JSON-output tools tracked for a later release. The cell said "not offered"; it now says
