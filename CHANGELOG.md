@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-26
+
 ### Added
 - **`bulk_modify` can verify what actually landed** — `verify: true` reads the labels back after the
   batch and returns `verified` `{applied, notApplied, unverifiable}`. `unverifiable` is deliberately
@@ -15,6 +17,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   thread in one request — so a query-driven sweep costs one read per *thread*, not per message, and
   it needs no new entry in the egress allow list. Off by default, because a routine sweep should not
   pay for it silently.
+
+### Changed
+- **BREAKING (tool output): `bulk_modify` reports `submitted*`, not `modified*`.**
+  `modifiedMessages`/`modifiedThreadCount`/`modifiedThreads` are now
+  `submittedMessages`/`submittedThreadCount`/`submittedThreads`; `create_filter`'s `applied` block
+  follows. The old names claimed an outcome nobody had measured: `users.messages.batchModify` answers
+  `204 No Content` and silently ignores ids it does not recognise, so the count was the length of the
+  input list, not a count of anything Gmail did. For an agent caller a false success is worse than an
+  error, because it suppresses the retry that would have fixed it. Prompted by the same bug being
+  fixed in `taylorwilsdon/google_workspace_mcp` (#1047, 2026-08-21), found there and checked here.
+- **`CONTRIBUTING.md`** — build/test loop, the design rules that are not up for grabs (no send, no
+  hard delete, no cache, tiers gate scopes), what to do when a change needs a new egress endpoint,
+  and why the allow and deny lists in `src/egress.ts` are asymmetric on purpose.
+- **README: how to run mailwarden next to a broad Workspace server.** The two are not mutually
+  exclusive, and the argument for splitting mail off is the token rather than the tool count.
 
 ### Fixed
 - **`get_thread` with `full: false` no longer reports an empty attachment list it never checked.**
@@ -26,23 +43,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `attachments: []` from a `full: false` fetch and was nearly archived as attachment-less. Same
   class of defect as the `bulk_modify` counts below: a value nobody measured, presented as a
   measurement.
-
-### Changed
-- **`CONTRIBUTING.md`** — build/test loop, the design rules that are not up for grabs (no send, no
-  hard delete, no cache, tiers gate scopes), what to do when a change needs a new egress endpoint,
-  and why the allow and deny lists in `src/egress.ts` are asymmetric on purpose.
-- **README: how to run mailwarden next to a broad Workspace server.** The two are not mutually
-  exclusive, and the argument for splitting mail off is the token rather than the tool count.
-- **BREAKING (tool output): `bulk_modify` reports `submitted*`, not `modified*`.**
-  `modifiedMessages`/`modifiedThreadCount`/`modifiedThreads` are now
-  `submittedMessages`/`submittedThreadCount`/`submittedThreads`; `create_filter`'s `applied` block
-  follows. The old names claimed an outcome nobody had measured: `users.messages.batchModify` answers
-  `204 No Content` and silently ignores ids it does not recognise, so the count was the length of the
-  input list, not a count of anything Gmail did. For an agent caller a false success is worse than an
-  error, because it suppresses the retry that would have fixed it. Prompted by the same bug being
-  fixed in `taylorwilsdon/google_workspace_mcp` (#1047, 2026-08-21), found there and checked here.
-
-### Fixed
 - **Comparison table: `taylorwilsdon` derives OAuth scopes from enabled tools too.** The cell said
   "not offered". His `auth/scopes.py` picks `TOOL_READONLY_SCOPES_MAP` over `TOOL_SCOPES_MAP` in
   read-only mode and builds the requested scope set from the enabled tool list — the same coupling
@@ -1065,7 +1065,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.14.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/csitte/mailwarden/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/csitte/mailwarden/compare/v0.14.0...v0.14.1
 [0.14.0]: https://github.com/csitte/mailwarden/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/csitte/mailwarden/compare/v0.12.0...v0.13.0
