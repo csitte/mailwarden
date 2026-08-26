@@ -43,12 +43,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `attachments: []` from a `full: false` fetch and was nearly archived as attachment-less. Same
   class of defect as the `bulk_modify` counts below: a value nobody measured, presented as a
   measurement.
-- **Comparison table: `taylorwilsdon` derives OAuth scopes from enabled tools too.** The cell said
-  "not offered". His `auth/scopes.py` picks `TOOL_READONLY_SCOPES_MAP` over `TOOL_SCOPES_MAP` in
-  read-only mode and builds the requested scope set from the enabled tool list — the same coupling
-  this project claims, reached from the other direction (his tiers exist for context economy). Read
-  in his source on 2026-08-26, not inferred from his README. The row now says
-  `✅ tiers + --read-only`.
+- **Comparison table: `taylorwilsdon` does narrow OAuth scopes — but not by tier.** The cell said
+  "not offered", which was wrong: his `--read-only` switches the OAuth flow from `TOOL_SCOPES_MAP`
+  to `TOOL_READONLY_SCOPES_MAP`, so the token really is asked for less. The coupling stops short of
+  ours, though. Both maps are keyed by *service* (`gmail`, `drive`, `calendar`, …) and `main.py`
+  passes the service list, so a tool tier changes which tools register without changing what the
+  token may do — `--tool-tier core --tools gmail` still requests the full Gmail scopes. The row now
+  says `⚠️ --read-only narrows scopes; tiers narrow tools only`. Read in his source on 2026-08-26;
+  the service-vs-tool distinction was caught by csitte.at, who checked the claim against their own
+  clone of his repository before mirroring it — the second time their verification corrected ours.
 - **Comparison table: `klodr` does declare an `outputSchema` — for one tool.** Its
   `src/tools/output-schemas.ts` covers `download_email` and calls that the "first wave", with the
   remaining JSON-output tools tracked for a later release. The cell said "not offered"; it now says
