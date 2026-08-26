@@ -120,7 +120,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
-| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `modifiedThreadCount` has the total). Acts on the **raw index**, so `unverifiedPredicates` names the conditions it could not vouch for (see below). `dryRun: true` resolves the query and reports the matched threads and the labels it would create, touching nothing |
+| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `submittedThreadCount` has the total). Counts say **`submitted`**, because `messages.batchModify` answers `204` with no body and ignores unknown ids silently; `verify: true` reads the labels back and returns `verified` `{applied, notApplied, unverifiable}` — the only observed outcome on offer. Acts on the **raw index**, so `unverifiedPredicates` names the conditions it could not vouch for (see below). `dryRun: true` resolves the query and reports the matched threads and the labels it would create, touching nothing |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
@@ -171,9 +171,10 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
   This requires at least one *positive* criterion (`from`/`to`/`subject`/`query`/`hasAttachment:true`/`size`):
   an exclusion-only rule (`negatedQuery` or `hasAttachment:false`) is refused for `applyToExisting`
   because it would match almost the whole mailbox — create such a filter without the flag.
-  The outcome comes back under `applied` (the `query` used, `matchedMessages`/`modifiedMessages`/`modifiedThreadCount`
+  The outcome comes back under `applied` (the `query` used, `matchedMessages`/`submittedMessages`/`submittedThreadCount`
   counts, `capped` when the match set hit `maxMessages`, per-chunk `failed`, and an `error` string if the whole
-  pass failed); it's `null` when `applyToExisting` was not set. The filter is created first, so a partial or
+  pass failed); it's `null` when `applyToExisting` was not set. The backlog pass does not verify what landed —
+  `bulk_modify`'s `verify` does; re-run it with the same query when the sweep's outcome has to be certain. The filter is created first, so a partial or
   failed backlog pass is *reported* in `applied`, never raised — the rule still stands.
 - **No forwarding** — see [Security & privacy](#security--privacy).
 - Requires the `gmail.settings.basic` scope; re-run `--auth` once if you authorized an older version.

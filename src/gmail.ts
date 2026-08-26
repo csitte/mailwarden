@@ -64,11 +64,29 @@ export interface MessageRef {
   threadId: string;
 }
 
+/** What a re-read after the batch found, per submitted message id. */
+export interface VerifiedBatchModify {
+  /** Messages whose end state carries the requested change. */
+  applied: number;
+  /** Submitted ids read back WITHOUT the change — silently ignored by Gmail, or changed back since. */
+  notApplied: string[];
+  /** Submitted ids whose end state could not be read at all (thread gone, or the re-read failed). */
+  unverifiable: string[];
+}
+
 /** Outcome of a chunked batch-modify — partial success is reported, not hidden. */
 export interface BatchModifyResult {
-  modifiedMessages: number;
-  modifiedThreads: string[];
+  /**
+   * Message ids handed to `messages.batchModify` — what was ASKED FOR, not what
+   * Gmail did. The API answers `204 No Content` and silently ignores ids it does
+   * not recognise, so a submitted count can never double as a modified count.
+   * `verified` is the only field that reports an observed outcome.
+   */
+  submittedMessages: number;
+  submittedThreads: string[];
   failed: { messageIds: string[]; error: string }[];
+  /** Present only when the caller asked to verify (costs one extra read per thread). */
+  verified?: VerifiedBatchModify;
 }
 
 /** A Gmail filter's match conditions — the subset mailwarden accepts/surfaces. */
@@ -570,6 +588,53 @@ export function threadMatchesFilters(labelIds: string[], filters: LabelFilter[])
 }
 
 /**
+ * Does a message's end state carry the requested label change? Both lists are label
+ * IDS (already resolved from names), not display names.
+ *
+ * The check is end-state, not diff: a message that already had the label counts as
+ * applied. That is the honest reading of "is it the way the caller asked for it to
+ * be" — batchModify itself is idempotent, so no-op and did-something are the same
+ * request, and only the end state is observable afterwards.
+ */
+export function labelChangeApplied(
+  labelIds: readonly string[],
+  addLabelIds: readonly string[],
+  removeLabelIds: readonly string[],
+): boolean {
+  const have = new Set(labelIds);
+  return addLabelIds.every((id) => have.has(id)) && !removeLabelIds.some((id) => have.has(id));
+}
+
+/**
+ * Split submitted message ids into applied / not applied / unverifiable against the
+ * labels read back after a batch. Pure: `endState` maps message id to its live label
+ * ids, and an id missing from that map is `unverifiable` — never `notApplied`.
+ *
+ * That distinction is the whole point. `messages.batchModify` returns `204 No Content`
+ * and ignores unknown ids silently, so "we sent 500 ids" and "500 messages changed"
+ * are different claims; reporting the first as the second hands an agent a false
+ * success, which is worse than an error because it suppresses the retry that would
+ * have fixed it.
+ */
+export function classifyBatchModify(
+  submittedIds: readonly string[],
+  endState: ReadonlyMap<string, readonly string[]>,
+  addLabelIds: readonly string[],
+  removeLabelIds: readonly string[],
+): VerifiedBatchModify {
+  let applied = 0;
+  const notApplied: string[] = [];
+  const unverifiable: string[] = [];
+  for (const id of submittedIds) {
+    const labels = endState.get(id);
+    if (!labels) unverifiable.push(id);
+    else if (labelChangeApplied(labels, addLabelIds, removeLabelIds)) applied++;
+    else notApplied.push(id);
+  }
+  return { applied, notApplied, unverifiable };
+}
+
+/**
  * The predicates a query carries that `search` WOULD re-verify — for the tools that act on the raw
  * index instead (`bulk_modify`, and `create_filter`'s applyToExisting sweep).
  *
@@ -909,15 +974,21 @@ export class Gmail {
    * Batch label changes via `messages.batchModify` — one request per 1000
    * messages instead of one modify per thread. A failed chunk is reported in
    * `failed` and does NOT abort the remaining chunks (partial success).
+   *
+   * A chunk that returns without throwing proves the REQUEST was accepted, not
+   * that any label moved: `batchModify` answers `204 No Content` and drops ids it
+   * does not recognise without a word. The counts below therefore say "submitted",
+   * and `opts.verify` is what turns a claim into a measurement.
    */
   async batchModifyMessages(
     refs: MessageRef[],
     add: string[] = [],
     remove: string[] = [],
+    opts: { verify?: boolean } = {},
   ): Promise<BatchModifyResult> {
     const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
-    const modifiedThreads = new Set<string>();
-    let modifiedMessages = 0;
+    const submittedThreads = new Set<string>();
+    const submittedIds: string[] = [];
     const failed: BatchModifyResult["failed"] = [];
     for (let i = 0; i < refs.length; i += Gmail.BATCH_MODIFY_CHUNK) {
       const chunk = refs.slice(i, i + Gmail.BATCH_MODIFY_CHUNK);
@@ -928,8 +999,10 @@ export class Gmail {
             requestBody: { ids: chunk.map((r) => r.id), addLabelIds, removeLabelIds },
           }),
         );
-        modifiedMessages += chunk.length;
-        for (const r of chunk) modifiedThreads.add(r.threadId);
+        for (const r of chunk) {
+          submittedIds.push(r.id);
+          submittedThreads.add(r.threadId);
+        }
       } catch (err) {
         failed.push({
           messageIds: chunk.map((r) => r.id),
@@ -937,7 +1010,54 @@ export class Gmail {
         });
       }
     }
-    return { modifiedMessages, modifiedThreads: [...modifiedThreads], failed };
+    const result: BatchModifyResult = {
+      submittedMessages: submittedIds.length,
+      submittedThreads: [...submittedThreads],
+      failed,
+    };
+    if (opts.verify && submittedIds.length > 0) {
+      result.verified = classifyBatchModify(
+        submittedIds,
+        await this.readLabelsBack([...submittedThreads]),
+        addLabelIds,
+        removeLabelIds,
+      );
+    }
+    return result;
+  }
+
+  /**
+   * Read every message's labels back for the given threads, as `messageId -> labelIds`.
+   *
+   * `threads.get` with format `minimal` answers for ALL messages of a thread in one
+   * request, so verifying a query-driven bulk change costs one read per THREAD, not
+   * one per message. It also stays inside what the egress guard already allows
+   * (`GET /threads/{id}`) — `GET /messages/{id}` is deliberately not on that list,
+   * and adding an endpoint just to verify would widen the allow list for a read we
+   * can already make.
+   *
+   * A thread that cannot be re-read is simply absent from the map, which lands its
+   * messages in `unverifiable`: not knowing an outcome and knowing a bad one are
+   * different answers, and only one of them justifies a retry.
+   */
+  private async readLabelsBack(threadIds: string[]): Promise<Map<string, string[]>> {
+    const out = new Map<string, string[]>();
+    for (let i = 0; i < threadIds.length; i += GET_CONCURRENCY) {
+      const chunk = threadIds.slice(i, i + GET_CONCURRENCY);
+      const metas = await Promise.all(
+        chunk.map((id) =>
+          this.req(() => this.api.users.threads.get({ userId: "me", id, format: "minimal" })).catch(
+            () => null,
+          ),
+        ),
+      );
+      for (const meta of metas) {
+        for (const m of meta?.data.messages ?? []) {
+          if (m.id) out.set(m.id, m.labelIds ?? []);
+        }
+      }
+    }
+    return out;
   }
 
   async trash(threadId: string): Promise<void> {

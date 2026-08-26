@@ -13,6 +13,8 @@ import {
   deriveLabelFilters,
   unverifiedPredicates,
   threadMatchesFilters,
+  labelChangeApplied,
+  classifyBatchModify,
   parseMessage,
   decodeRfc2047,
   decodeAddressHeader,
@@ -255,6 +257,60 @@ describe("deriveLabelFilters — Bug 5: re-verify is:unread & co against live la
   it("disables filtering for quoted queries (a literal is:unread inside a phrase is not a predicate)", () => {
     expect(deriveLabelFilters('subject:"bitte is:unread prüfen"')).toEqual([]);
     expect(deriveLabelFilters('"exact phrase" is:unread')).toEqual([]);
+  });
+});
+
+describe("labelChangeApplied / classifyBatchModify", () => {
+  it("counts a message as applied only when every add is present and every remove is gone", () => {
+    expect(labelChangeApplied(["A", "B"], ["A"], [])).toBe(true);
+    expect(labelChangeApplied(["A", "B"], ["A", "B"], [])).toBe(true);
+    expect(labelChangeApplied(["A"], ["A", "B"], [])).toBe(false); // one add missing
+    expect(labelChangeApplied(["A", "INBOX"], ["A"], ["INBOX"])).toBe(false); // remove still there
+    expect(labelChangeApplied(["A"], ["A"], ["INBOX"])).toBe(true);
+    expect(labelChangeApplied([], [], ["INBOX"])).toBe(true);
+  });
+
+  it("treats an already-correct message as applied (end state, not diff)", () => {
+    // batchModify is idempotent, so 'was already labelled' and 'we labelled it' are
+    // indistinguishable afterwards — claiming otherwise would need a before-state we
+    // deliberately do not keep (no cache).
+    expect(labelChangeApplied(["Label_todo"], ["Label_todo"], [])).toBe(true);
+  });
+
+  it("splits submitted ids into applied / notApplied / unverifiable", () => {
+    const endState = new Map<string, string[]>([
+      ["m1", ["Label_todo"]],
+      ["m2", ["INBOX"]],
+    ]);
+    expect(classifyBatchModify(["m1", "m2", "m3"], endState, ["Label_todo"], ["INBOX"])).toEqual({
+      applied: 1,
+      notApplied: ["m2"],
+      unverifiable: ["m3"],
+    });
+  });
+
+  it("an id absent from the end state is unverifiable, never notApplied", () => {
+    // The difference decides what a caller does next: notApplied justifies a retry,
+    // unverifiable justifies a second look. Collapsing them invents a fact.
+    const res = classifyBatchModify(["gone"], new Map(), ["Label_x"], []);
+    expect(res.unverifiable).toEqual(["gone"]);
+    expect(res.notApplied).toEqual([]);
+    expect(res.applied).toBe(0);
+  });
+
+  it("a message with no labels at all is notApplied, not unverifiable", () => {
+    // Known end state that happens to be empty — that IS an observation.
+    const res = classifyBatchModify(["m1"], new Map([["m1", []]]), ["Label_x"], []);
+    expect(res.notApplied).toEqual(["m1"]);
+    expect(res.unverifiable).toEqual([]);
+  });
+
+  it("reports nothing for an empty submission", () => {
+    expect(classifyBatchModify([], new Map(), ["A"], ["B"])).toEqual({
+      applied: 0,
+      notApplied: [],
+      unverifiable: [],
+    });
   });
 });
 
@@ -1321,9 +1377,11 @@ describe("Gmail.listMessageRefs / batchModifyMessages", () => {
     expect(batchCalls[1].ids).toHaveLength(500);
     expect(batchCalls[0].addLabelIds).toEqual(["INBOX"]);
     expect(batchCalls[0].removeLabelIds).toEqual(["Label_due"]);
-    expect(res.modifiedMessages).toBe(1500);
-    expect(res.modifiedThreads).toHaveLength(750);
+    expect(res.submittedMessages).toBe(1500);
+    expect(res.submittedThreads).toHaveLength(750);
     expect(res.failed).toHaveLength(0);
+    // Nothing was read back, so nothing is claimed about what actually landed.
+    expect(res.verified).toBeUndefined();
   });
 
   it("reports a failed chunk and still processes the remaining chunks", async () => {
@@ -1346,8 +1404,143 @@ describe("Gmail.listMessageRefs / batchModifyMessages", () => {
     expect(res.failed).toHaveLength(1);
     expect(res.failed[0].messageIds).toHaveLength(1000);
     expect(res.failed[0].error).toBe("quota");
-    expect(res.modifiedMessages).toBe(500); // second chunk still went through
-    expect(res.modifiedThreads).toHaveLength(500);
+    expect(res.submittedMessages).toBe(500); // second chunk still went through
+    expect(res.submittedThreads).toHaveLength(500);
+  });
+
+  it("verify:true reads labels back and reports what actually landed", async () => {
+    const getCalls: string[] = [];
+    const api: any = {
+      users: {
+        messages: { batchModify: async () => ({}) },
+        threads: {
+          get: async (req: any) => {
+            getCalls.push(req.id);
+            // t1: both messages carry the change. t2: m3 was silently ignored by
+            // batchModify (still INBOX, no ToDo) — the case a submitted count hides.
+            if (req.id === "t1") {
+              return {
+                data: {
+                  messages: [
+                    { id: "m1", labelIds: ["Label_todo"] },
+                    { id: "m2", labelIds: ["Label_todo", "STARRED"] },
+                  ],
+                },
+              };
+            }
+            return { data: { messages: [{ id: "m3", labelIds: ["INBOX"] }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const refs = [
+      { id: "m1", threadId: "t1" },
+      { id: "m2", threadId: "t1" },
+      { id: "m3", threadId: "t2" },
+    ];
+    const res = await gmail.batchModifyMessages(refs, ["Label_todo"], ["INBOX"], { verify: true });
+
+    expect(res.submittedMessages).toBe(3); // what we asked for
+    expect(res.verified).toEqual({ applied: 2, notApplied: ["m3"], unverifiable: [] });
+    // One read per THREAD, not per message — three messages, two gets.
+    expect(getCalls.sort()).toEqual(["t1", "t2"]);
+  });
+
+  it("verify uses threads.get (the allowed endpoint), format minimal", async () => {
+    const reqs: any[] = [];
+    const api: any = {
+      users: {
+        messages: { batchModify: async () => ({}) },
+        threads: {
+          get: async (req: any) => {
+            reqs.push(req);
+            return { data: { messages: [{ id: "m1", labelIds: ["INBOX"] }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await gmail.batchModifyMessages([{ id: "m1", threadId: "t1" }], ["INBOX"], [], {
+      verify: true,
+    });
+    expect(reqs[0]).toMatchObject({ userId: "me", id: "t1", format: "minimal" });
+  });
+
+  it("a thread that cannot be re-read makes its messages unverifiable, not failed", async () => {
+    const api: any = {
+      users: {
+        messages: { batchModify: async () => ({}) },
+        threads: {
+          get: async (req: any) => {
+            if (req.id === "t2") throw Object.assign(new Error("gone"), { status: 404 });
+            return { data: { messages: [{ id: "m1", labelIds: ["Label_todo"] }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.batchModifyMessages(
+      [
+        { id: "m1", threadId: "t1" },
+        { id: "m2", threadId: "t2" },
+      ],
+      ["Label_todo"],
+      [],
+      { verify: true },
+    );
+    expect(res.verified).toEqual({ applied: 1, notApplied: [], unverifiable: ["m2"] });
+    expect(res.failed).toHaveLength(0); // the batch itself was fine
+  });
+
+  it("does not verify a chunk that failed — only submitted ids are checked", async () => {
+    let call = 0;
+    const api: any = {
+      users: {
+        messages: {
+          batchModify: async () => {
+            call++;
+            if (call === 1) throw Object.assign(new Error("quota"), { status: 403 });
+            return {};
+          },
+        },
+        threads: {
+          get: async () => ({ data: { messages: [{ id: "m-1000", labelIds: ["Label_x"] }] } }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const refs = Array.from({ length: 1001 }, (_, i) => ({ id: `m-${i}`, threadId: `t-${i}` }));
+    const res = await gmail.batchModifyMessages(refs, ["Label_x"], [], { verify: true });
+    expect(res.failed[0].messageIds).toHaveLength(1000);
+    expect(res.submittedMessages).toBe(1);
+    expect(res.verified).toEqual({ applied: 1, notApplied: [], unverifiable: [] });
+  });
+
+  it("skips the read-back entirely when nothing was submitted", async () => {
+    let gets = 0;
+    const api: any = {
+      users: {
+        messages: {
+          batchModify: async () => {
+            throw Object.assign(new Error("quota"), { status: 403 });
+          },
+        },
+        threads: {
+          get: async () => {
+            gets++;
+            return { data: { messages: [] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.batchModifyMessages([{ id: "m1", threadId: "t1" }], ["INBOX"], [], {
+      verify: true,
+    });
+    expect(res.submittedMessages).toBe(0);
+    expect(res.verified).toBeUndefined();
+    expect(gets).toBe(0);
   });
 
   it("resolves label names for batch calls (same rules as modifyLabels)", async () => {

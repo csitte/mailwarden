@@ -403,8 +403,8 @@ describe("sweepSnoozed", () => {
         batchCalls.push({ refs: [...refs], add, remove });
         if (opts.failChunks) {
           return {
-            modifiedMessages: 0,
-            modifiedThreads: [],
+            submittedMessages: 0,
+            submittedThreads: [],
             failed: [{ messageIds: refs.map((r) => r.id), error: "boom" }],
           };
         }
@@ -413,8 +413,8 @@ describe("sweepSnoozed", () => {
           remaining = remaining.filter((r) => !ids.has(r.id));
         }
         return {
-          modifiedMessages: refs.length,
-          modifiedThreads: [...new Set(refs.map((r) => r.threadId))],
+          submittedMessages: refs.length,
+          submittedThreads: [...new Set(refs.map((r) => r.threadId))],
           failed: [],
         };
       },
@@ -527,7 +527,7 @@ describe("sweepSnoozed", () => {
       async batchModifyMessages(refs: any[]) {
         swept.push(...refs.map((r) => r.id));
         remaining = [];
-        return { modifiedMessages: refs.length, modifiedThreads: ["th-0"], failed: [] };
+        return { submittedMessages: refs.length, submittedThreads: ["th-0"], failed: [] };
       },
       async deleteLabel() {},
     };
@@ -566,8 +566,8 @@ describe("sweepSnoozed", () => {
         batchCalls.push({ add, remove });
         remaining = [];
         return {
-          modifiedMessages: refs.length,
-          modifiedThreads: [...new Set(refs.map((r) => r.threadId))],
+          submittedMessages: refs.length,
+          submittedThreads: [...new Set(refs.map((r) => r.threadId))],
           failed: [],
         };
       },

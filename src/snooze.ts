@@ -344,7 +344,10 @@ export async function sweepSnoozed(gmail: Gmail, today = new Date(), opts: Sweep
       // UNREAD is deliberate: a resurfaced thread is marked unread so it
       // stands out in the inbox again, like Gmail's own snooze highlight.
       const res = await gmail.batchModifyMessages(refs, ["INBOX", "UNREAD"], remove);
-      for (const t of res.modifiedThreads) woken.add(t);
+      // Submitted, not confirmed — but the sweep re-lists this label until it drains
+      // (and stops on a failing chunk), so a message that did NOT move keeps the label
+      // and comes back around next iteration. The loop is the verification here.
+      for (const t of res.submittedThreads) woken.add(t);
       if (res.failed.length > 0) {
         // A failing chunk won't drain — stop this label; it stays for the next
         // sweep instead of burning the iteration budget on repeat failures.

@@ -146,8 +146,10 @@ const filterSummarySchema = z.object({
 const filterAppliedSchema = z.object({
   query: z.string(),
   matchedMessages: z.number(),
-  modifiedMessages: z.number(),
-  modifiedThreadCount: z.number(),
+  // Handed to the API, not confirmed changed — the backlog sweep does not verify
+  // (bulk_modify's `verify` does). See BatchModifyResult on why 204 is not proof.
+  submittedMessages: z.number(),
+  submittedThreadCount: z.number(),
   // True when more messages matched than maxMessages — the rest were left untouched.
   capped: z.boolean(),
   failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
@@ -474,7 +476,9 @@ function registerManageTools(server: McpServer): void {
       description:
         "Bulk-apply label changes to every message matching a Gmail query, batched at 1000 messages per API request. " +
         "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
-        "Returns matched/modified counts, matched and modified thread IDs (both lists capped at 500 — matchedThreadCount/modifiedThreadCount hold the true totals), and per-chunk failures (partial success is reported, not hidden). " +
+        "Returns matched/submitted counts, matched and submitted thread IDs (both lists capped at 500 — matchedThreadCount/submittedThreadCount hold the true totals), and per-chunk failures (partial success is reported, not hidden). " +
+        "IMPORTANT: `submittedMessages` is how many ids were handed to the API, NOT how many messages changed — `messages.batchModify` answers 204 with no body and ignores ids it does not recognise without a word, so an accepted request is not a performed one. " +
+        "Set verify:true to read the labels back afterwards and get `verified` {applied, notApplied[], unverifiable[]} — the only field here that reports an observed outcome. It costs one extra read per affected thread, so it is off by default; use it when a wrong 'done' would be acted on (trashing, or anything the user is told completed). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
         "NOTE: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. The staleness that makes search re-verify was measured on `threads.list` (132 threads returned, 114 carrying no unread message at all); the same query through the message index this tool uses returned 19 hits, none stale — same mailbox, same minute. So the known drift does not reach this path, but that is one measurement, not a guarantee: `unverifiedPredicates` in the result names the conditions taken on the index's word, and when the outcome must be read-state-precise, resolve the set with search (which verifies against live labels) and act on those thread ids instead. " +
         "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. " +
@@ -489,15 +493,29 @@ function registerManageTools(server: McpServer): void {
         remove: z.array(z.string()).default([]),
         maxMessages: z.number().int().min(1).max(10000).default(1000),
         dryRun: z.boolean().default(false),
+        // Off by default: verification costs one threads.get per affected thread,
+        // which a routine sweep should not pay silently.
+        verify: z.boolean().default(false),
       },
       outputSchema: {
         dryRun: z.boolean(),
         matchedMessages: z.number(),
         matchedThreadCount: z.number(),
         matchedThreads: z.array(z.string()),
-        modifiedMessages: z.number(),
-        modifiedThreadCount: z.number(),
-        modifiedThreads: z.array(z.string()),
+        // "submitted", not "modified": the API accepted these ids, which is not the
+        // same as having changed them. Only `verified` below reports what was observed.
+        submittedMessages: z.number(),
+        submittedThreadCount: z.number(),
+        submittedThreads: z.array(z.string()),
+        // Present only with verify:true. `unverifiable` is not `notApplied` — the end
+        // state could not be read, which is a reason to look again, not to retry blindly.
+        verified: z
+          .object({
+            applied: z.number(),
+            notApplied: z.array(z.string()),
+            unverifiable: z.array(z.string()),
+          })
+          .optional(),
         // True when the match set was truncated at maxMessages — more remain unprocessed.
         capped: z.boolean(),
         // Conditions in the query that search would have re-verified and this tool did not
@@ -510,7 +528,7 @@ function registerManageTools(server: McpServer): void {
       // destructive: add:['TRASH'] over a broad query bulk-trashes existing mail.
       annotations: { title: "Bulk modify by query", ...write, destructiveHint: true },
     },
-    async ({ query, add, remove, maxMessages, dryRun }) => {
+    async ({ query, add, remove, maxMessages, dryRun, verify }) => {
       if (add.length === 0 && remove.length === 0) {
         throw new ToolError("invalid_input", "bulk_modify needs at least one label in add or remove — nothing to do.");
       }
@@ -532,20 +550,31 @@ function registerManageTools(server: McpServer): void {
         return ok({
           dryRun: true,
           ...shared,
-          modifiedMessages: 0,
-          modifiedThreadCount: 0,
-          modifiedThreads: [],
+          submittedMessages: 0,
+          submittedThreadCount: 0,
+          submittedThreads: [],
           labelsToCreate: await gmail.unknownLabelNames(add),
           failed: [],
         });
       }
-      const res = await gmail.batchModifyMessages(refs, add, remove);
+      const res = await gmail.batchModifyMessages(refs, add, remove, { verify });
       return ok({
         dryRun: false,
         ...shared,
-        modifiedMessages: res.modifiedMessages,
-        modifiedThreadCount: res.modifiedThreads.length,
-        modifiedThreads: res.modifiedThreads.slice(0, 500),
+        submittedMessages: res.submittedMessages,
+        submittedThreadCount: res.submittedThreads.length,
+        submittedThreads: res.submittedThreads.slice(0, 500),
+        // Id lists are capped like the thread lists above: a 10k sweep where nothing
+        // applied must not flood the model context with ids.
+        ...(res.verified
+          ? {
+              verified: {
+                applied: res.verified.applied,
+                notApplied: res.verified.notApplied.slice(0, 500),
+                unverifiable: res.verified.unverifiable.slice(0, 500),
+              },
+            }
+          : {}),
         failed: res.failed,
       });
     },
@@ -934,8 +963,8 @@ function registerFilterTools(server: McpServer): void {
       let applied: {
         query: string;
         matchedMessages: number;
-        modifiedMessages: number;
-        modifiedThreadCount: number;
+        submittedMessages: number;
+        submittedThreadCount: number;
         capped: boolean;
         failed: { messageIds: string[]; error: string }[];
         error?: string;
@@ -958,8 +987,8 @@ function registerFilterTools(server: McpServer): void {
           applied = {
             query,
             matchedMessages: refs.length,
-            modifiedMessages: res.modifiedMessages,
-            modifiedThreadCount: res.modifiedThreads.length,
+            submittedMessages: res.submittedMessages,
+            submittedThreadCount: res.submittedThreads.length,
             capped: refs.length >= maxMessages,
             failed: res.failed,
           };
@@ -967,8 +996,8 @@ function registerFilterTools(server: McpServer): void {
           applied = {
             query,
             matchedMessages: 0,
-            modifiedMessages: 0,
-            modifiedThreadCount: 0,
+            submittedMessages: 0,
+            submittedThreadCount: 0,
             capped: false,
             failed: [],
             error: err instanceof Error ? err.message : String(err),

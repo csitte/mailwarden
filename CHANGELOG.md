@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`bulk_modify` can verify what actually landed** — `verify: true` reads the labels back after the
+  batch and returns `verified` `{applied, notApplied, unverifiable}`. `unverifiable` is deliberately
+  not `notApplied`: an end state that could not be read is a reason to look again, not to retry.
+  The read-back goes through `threads.get` (format `minimal`), which answers for every message of a
+  thread in one request — so a query-driven sweep costs one read per *thread*, not per message, and
+  it needs no new entry in the egress allow list. Off by default, because a routine sweep should not
+  pay for it silently.
+
+### Changed
+- **BREAKING (tool output): `bulk_modify` reports `submitted*`, not `modified*`.**
+  `modifiedMessages`/`modifiedThreadCount`/`modifiedThreads` are now
+  `submittedMessages`/`submittedThreadCount`/`submittedThreads`; `create_filter`'s `applied` block
+  follows. The old names claimed an outcome nobody had measured: `users.messages.batchModify` answers
+  `204 No Content` and silently ignores ids it does not recognise, so the count was the length of the
+  input list, not a count of anything Gmail did. For an agent caller a false success is worse than an
+  error, because it suppresses the retry that would have fixed it. Prompted by the same bug being
+  fixed in `taylorwilsdon/google_workspace_mcp` (#1047, 2026-08-21), found there and checked here.
+
 ### Fixed
 - **Comparison table: `klodr` does declare an `outputSchema` — for one tool.** Its
   `src/tools/output-schemas.ts` covers `download_email` and calls that the "first wave", with the

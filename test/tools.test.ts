@@ -433,6 +433,59 @@ describe("tool results — structured content + fenced text", () => {
     expect(res.structuredContent).toEqual({ id: "Label_9", name: "todo" });
   });
 
+  it("bulk_modify verify:true reports what landed — and does not claim it without the flag", async () => {
+    const threadGets: string[] = [];
+    const api = () => ({
+      users: {
+        messages: {
+          list: async () => ({
+            data: {
+              messages: [
+                { id: "m1", threadId: "t1" },
+                { id: "m2", threadId: "t2" },
+              ],
+            },
+          }),
+          batchModify: async () => ({}),
+        },
+        threads: {
+          get: async (req: any) => {
+            threadGets.push(req.id);
+            // t1 left the inbox as asked; t2 silently did not.
+            return req.id === "t1"
+              ? { data: { messages: [{ id: "m1", labelIds: [] }] } }
+              : { data: { messages: [{ id: "m2", labelIds: ["INBOX"] }] } };
+          },
+        },
+      },
+    });
+
+    (getAuth as Mock).mockResolvedValue(api());
+    let client = await connect();
+    const plain: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "from:news@x.com", remove: ["INBOX"] },
+    });
+    // Without the flag the tool states what it submitted and claims nothing more.
+    expect(plain.structuredContent.submittedMessages).toBe(2);
+    expect(plain.structuredContent.verified).toBeUndefined();
+    expect(threadGets).toHaveLength(0); // and pays for no extra reads
+
+    (getAuth as Mock).mockResolvedValue(api());
+    client = await connect();
+    const checked: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "from:news@x.com", remove: ["INBOX"], verify: true },
+    });
+    expect(checked.structuredContent.submittedMessages).toBe(2); // unchanged: still 2 sent
+    expect(checked.structuredContent.verified).toEqual({
+      applied: 1,
+      notApplied: ["m2"],
+      unverifiable: [],
+    });
+    expect(threadGets.sort()).toEqual(["t1", "t2"]);
+  });
+
   it("bulk_modify lists by query, batches, and reports partial success", async () => {
     const batchBodies: any[] = [];
     (getAuth as Mock).mockResolvedValue({
@@ -466,9 +519,9 @@ describe("tool results — structured content + fenced text", () => {
       matchedMessages: 3,
       matchedThreadCount: 2,
       matchedThreads: ["t1", "t2"],
-      modifiedMessages: 3,
-      modifiedThreadCount: 2,
-      modifiedThreads: ["t1", "t2"],
+      submittedMessages: 3,
+      submittedThreadCount: 2,
+      submittedThreads: ["t1", "t2"],
       capped: false, // 3 matched, well under the default maxMessages
       // `category:promotions` is a predicate search would have re-verified and this tool did not.
       unverifiedPredicates: ["+CATEGORY_PROMOTIONS"],
@@ -523,9 +576,9 @@ describe("tool results — structured content + fenced text", () => {
       matchedMessages: 3,
       matchedThreadCount: 2,
       matchedThreads: ["t1", "t2"],
-      modifiedMessages: 0,
-      modifiedThreadCount: 0,
-      modifiedThreads: [],
+      submittedMessages: 0,
+      submittedThreadCount: 0,
+      submittedThreads: [],
       capped: false,
       // `from:` maps to no label, so there is nothing the index could be stale about here.
       unverifiedPredicates: [],
@@ -783,8 +836,8 @@ describe("tool results — structured content + fenced text", () => {
     expect(res.structuredContent.applied).toMatchObject({
       query: 'from:"news@x.com"',
       matchedMessages: 2,
-      modifiedMessages: 2,
-      modifiedThreadCount: 2,
+      submittedMessages: 2,
+      submittedThreadCount: 2,
       capped: false,
       failed: [],
     });
