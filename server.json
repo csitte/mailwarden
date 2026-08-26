@@ -6,12 +6,12 @@
     "url": "https://github.com/csitte/mailwarden",
     "source": "github"
   },
-  "version": "0.15.0",
+  "version": "0.15.1",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "mailwarden",
-      "version": "0.15.0",
+      "version": "0.15.1",
       "transport": {
         "type": "stdio"
       },
