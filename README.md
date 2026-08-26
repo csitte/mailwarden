@@ -128,7 +128,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | Tool | What it does |
 |---|---|
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
-| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata |
+| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |
@@ -557,7 +557,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (998 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (1001 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 

@@ -43,6 +43,19 @@ export interface ParsedMessage {
   attachments: Attachment[];
 }
 
+/** A message as Gmail's `metadata` format can answer for it: headers and labels, no content. */
+export type MessageHeaders = Omit<ParsedMessage, "plaintextBody" | "htmlBody" | "attachments">;
+
+/**
+ * `getThread`'s answer. The two shapes are deliberately not interchangeable: the
+ * metadata one has no content fields at all rather than empty ones, so "no
+ * attachments" cannot be read off a request that never asked for them. `metadataOnly`
+ * names which shape came back without the caller having to probe for a missing field.
+ */
+export type GetThreadResult =
+  | { threadId: string; messages: ParsedMessage[]; metadataOnly?: undefined }
+  | { threadId: string; messages: MessageHeaders[]; metadataOnly: true };
+
 export interface LabelInfo {
   id: string;
   name: string;
@@ -867,7 +880,19 @@ export class Gmail {
     };
   }
 
-  async getThread(threadId: string, full = true): Promise<{ threadId: string; messages: ParsedMessage[] }> {
+  /**
+   * A thread's messages. `full` fetches bodies and attachment metadata; `full: false`
+   * uses Gmail's `metadata` format, which carries headers and labels but no payload
+   * parts at all.
+   *
+   * That difference is why the metadata answer OMITS `plaintextBody`, `htmlBody` and
+   * `attachments` instead of returning `""` / `[]`: those values were never fetched,
+   * and an empty attachment list is indistinguishable from a message that genuinely
+   * has none. A caller acting on "no attachments" would be acting on a value nobody
+   * measured — reported 2026-08-26 after an invoice with a 203 KB PDF came back as
+   * `attachments: []` and was nearly archived as attachment-less.
+   */
+  async getThread(threadId: string, full = true): Promise<GetThreadResult> {
     const res = await this.req(() =>
       this.api.users.threads.get({
         userId: "me",
@@ -875,7 +900,13 @@ export class Gmail {
         format: full ? "full" : "metadata",
       }),
     );
-    return { threadId, messages: (res.data.messages ?? []).map((m) => parseMessage(m)) };
+    const messages = (res.data.messages ?? []).map((m) => parseMessage(m));
+    if (full) return { threadId, messages };
+    return {
+      threadId,
+      metadataOnly: true,
+      messages: messages.map(({ plaintextBody, htmlBody, attachments, ...header }) => header),
+    };
   }
 
   /**

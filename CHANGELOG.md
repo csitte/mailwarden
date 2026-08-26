@@ -16,6 +16,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it needs no new entry in the egress allow list. Off by default, because a routine sweep should not
   pay for it silently.
 
+### Fixed
+- **`get_thread` with `full: false` no longer reports an empty attachment list it never checked.**
+  Gmail's `metadata` format carries no payload parts, so bodies and attachment metadata were
+  returned as `""`/`[]` for every message — including one with a 203 KB PDF attached. The metadata
+  answer now **omits** `plaintextBody`, `htmlBody` and `attachments` and sets `metadataOnly: true`;
+  the tool description documents the `full` option for the first time and says when not to use it.
+  Reported 2026-08-26 by two sessions using mailwarden daily, after an invoice came back as
+  `attachments: []` from a `full: false` fetch and was nearly archived as attachment-less. Same
+  class of defect as the `bulk_modify` counts below: a value nobody measured, presented as a
+  measurement.
+
 ### Changed
 - **`CONTRIBUTING.md`** — build/test loop, the design rules that are not up for grabs (no send, no
   hard delete, no cache, tiers gate scopes), what to do when a change needs a new egress endpoint,

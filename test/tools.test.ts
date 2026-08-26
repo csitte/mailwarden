@@ -190,6 +190,41 @@ describe("tool results — structured content + fenced text", () => {
     expect(JSON.stringify(res.structuredContent)).not.toMatch(/[\u200B-\u200F]|[\u{E0000}-\u{E007F}]/u);
   });
 
+  it("get_thread full:false validates against the schema with the content fields absent", async () => {
+    // The outputSchema has to ALLOW the omission, or the SDK would reject the very
+    // result that avoids the false "no attachments" claim.
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  threadId: "t1",
+                  labelIds: ["INBOX"],
+                  payload: { headers: [{ name: "Subject", value: "Invoice" }] },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "get_thread",
+      arguments: { threadId: "t1", full: false },
+    });
+
+    expect(res.isError).toBeFalsy();
+    expect(res.structuredContent.metadataOnly).toBe(true);
+    const msg = res.structuredContent.messages[0];
+    expect(msg.subject).toBe("Invoice");
+    expect("attachments" in msg).toBe(false);
+    expect("plaintextBody" in msg).toBe(false);
+  });
+
   it("answers a failure with a code and a retry verdict, not just a sentence", async () => {
     (getAuth as Mock).mockResolvedValue({
       users: {

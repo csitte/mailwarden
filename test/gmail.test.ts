@@ -1023,8 +1023,73 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
     expect(res.messages).toHaveLength(2);
     expect(res.messages[0]).toMatchObject({ id: "m1", subject: "s1", plaintextBody: "hi" });
 
-    await gmail.getThread("th-1", false);
+    const meta = await gmail.getThread("th-1", false);
     expect(getCalls[1].format).toBe("metadata");
+    expect(meta.metadataOnly).toBe(true);
+  });
+
+  it("getThread full:false OMITS body and attachment fields — it never claims an empty set", async () => {
+    // The regression this guards: `metadata` format carries no payload parts, so an
+    // attachment list built from it is empty for every message, including ones with a
+    // 203 KB PDF attached. Shipping that as `attachments: []` reads as "no attachment"
+    // and nearly got an invoice archived (reported 2026-08-26).
+    const api: any = {
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  threadId: "th-1",
+                  labelIds: ["INBOX"],
+                  payload: { headers: [{ name: "Subject", value: "Invoice" }] },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.getThread("th-1", false);
+
+    expect(res.metadataOnly).toBe(true);
+    const msg = res.messages[0] as Record<string, unknown>;
+    // Headers survive — that is what this format is for.
+    expect(msg).toMatchObject({ id: "m1", subject: "Invoice", labelIds: ["INBOX"] });
+    // The three unmeasured fields are absent, not empty.
+    expect("attachments" in msg).toBe(false);
+    expect("plaintextBody" in msg).toBe(false);
+    expect("htmlBody" in msg).toBe(false);
+  });
+
+  it("getThread full:true still carries content fields and sets no metadataOnly flag", async () => {
+    const api: any = {
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  threadId: "th-1",
+                  payload: {
+                    headers: [{ name: "Subject", value: "s" }],
+                    mimeType: "text/plain",
+                    body: { data: b64url("body") },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.getThread("th-1", true);
+    expect(res.metadataOnly).toBeUndefined();
+    expect(res.messages[0]).toMatchObject({ plaintextBody: "body", attachments: [] });
   });
 
   it("getThreadSubject uses a metadata-only fetch and defaults to empty", async () => {

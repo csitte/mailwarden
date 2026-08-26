@@ -222,12 +222,24 @@ function registerReadTools(server: McpServer): void {
     "get_thread",
     {
       description:
-        "Fetch a full thread by ID: headers, plaintext + HTML bodies, and attachment metadata. " +
+        "Fetch a thread by ID: headers, plaintext + HTML bodies, and attachment metadata. " +
+        "`full` defaults to true and should stay true whenever content matters. `full: false` is a headers-and-labels fetch for when a thread is too large to read or only its metadata is of interest — it does NOT fetch bodies or attachment metadata, and the result then omits `plaintextBody`, `htmlBody` and `attachments` entirely and sets `metadataOnly: true`. " +
+        "The fields are omitted rather than empty on purpose: an empty attachment list from a request that never looked is indistinguishable from a message that truly has none, and treating it as 'no attachment' has already nearly caused an invoice to be archived as attachment-less. If `search` reported `hasAttachments: true`, or the sender matters, use full: true. " +
         "USE WHEN: reading a thread's content after finding it via search. " +
         "DO NOT USE: with a message ID — this takes thread IDs. " +
         "SIDE EFFECTS: none (does not mark as read).",
       inputSchema: { threadId: z.string(), full: z.boolean().default(true) },
-      outputSchema: { threadId: z.string(), messages: z.array(parsedMessageSchema) },
+      outputSchema: {
+        threadId: z.string(),
+        // Content fields are optional because `full: false` genuinely has no answer for
+        // them — see the description; do not "fix" this by defaulting them to ""/[].
+        messages: z.array(
+          parsedMessageSchema.partial({ plaintextBody: true, htmlBody: true, attachments: true }),
+        ),
+        // Present only on a full:false fetch, so the caller never has to infer which
+        // shape it got from a field that happens to be missing.
+        metadataOnly: z.literal(true).optional(),
+      },
       annotations: { title: "Get thread", ...readOnly },
     },
     async ({ threadId, full }) => ok(await (await client()).getThread(threadId, full)),
