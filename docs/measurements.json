@@ -1,0 +1,55 @@
+{
+  "$comment": [
+    "Every figure this project publishes as a measurement, with where it came from.",
+    "",
+    "Why: the re-verification numbers appear in eight places across README, SECURITY, the tool",
+    "descriptions shipped in dist/, CLAUDE.md and two scripts. On 2026-08-26 a question from",
+    "csitte.at about one of them cost half an hour, because the figure was found in one bridge",
+    "thread while the measurement it came from was in another — and the first, wrong conclusion",
+    "was that our number was a typo. It was not; there were two measurements, and nothing next to",
+    "the number said which.",
+    "",
+    "The same lookup also showed the figures had drifted apart in the repository itself: the",
+    "README table said 131 threads for `category:updates is:unread` while six other places said",
+    "132 for the same query, both dated 15.08. Two measurements, one date, no way to tell.",
+    "",
+    "So: define each measurement once, here, and let a test check that what the prose says matches.",
+    "A figure that is not in this file is a figure nobody can trace back."
+  ],
+  "measurements": {
+    "threads-list-drift-2026-08-15": {
+      "what": "Three raw-index queries through threads.list, each hit re-read for its true labels.",
+      "mailbox": "private mailbox, roughly 70,000 messages",
+      "date": "2026-08-15",
+      "endpoint": "threads.list",
+      "source": "session-bridge thread 110-gmail-index-reverify-messung, message 2026-08-15T213648Z from the gmail session — the full table, measured on request",
+      "queries": [
+        { "query": "(category:updates is:unread)", "hits": 131, "withUnread": 17, "stale": 114 },
+        { "query": "(category:updates is:unread -in:inbox)", "hits": 128, "withUnread": 14, "stale": 114 },
+        { "query": "(is:unread -in:inbox)", "hits": 235, "withUnread": 99, "stale": 136 }
+      ],
+      "control": "The same queries without `is:unread` return 800+ threads, so the predicate is applied rather than dropped.",
+      "caution": "csitte.at cites the SECOND row (128 hits / 14 with an unread message) because their page uses that query, with `-in:inbox`. Do not read their figures and ours as disagreeing: different query, and a night apart from the endpoint split below."
+    },
+    "endpoint-split-2026-08-16": {
+      "what": "The same query through both endpoints, minutes apart, to locate where the drift sits.",
+      "mailbox": "same mailbox as above",
+      "date": "2026-08-16",
+      "source": "session-bridge thread 061-mailwarden-doku-csitte-update, message 2026-08-16T071051Z — a follow-up measured that night because our own wording had jumped an endpoint boundary",
+      "queries": [
+        { "query": "category:updates is:unread", "endpoint": "threads.list", "hits": 132, "stale": 114 },
+        { "query": "category:updates is:unread", "endpoint": "messages.list", "hits": 19, "stale": 0 }
+      ],
+      "caution": "The threads.list figure here is 132, one more than the 131 measured the evening before for the same query — a message arrived in between. Both are correct for their moment. What this measurement is FOR is the endpoint contrast (132/114 against 19/0), not the absolute count; quote it with its own date, never as '15.08.'."
+    },
+    "second-mailbox-2026-08-15": {
+      "what": "A second mailbox measured the same way on the same day, as a control.",
+      "mailbox": "business mailbox (gmail-csitte session)",
+      "date": "2026-08-15",
+      "endpoint": "threads.list",
+      "source": "session-bridge thread 110-gmail-index-reverify-messung, message 2026-08-15T211036Z from the gmail-csitte session",
+      "queries": [{ "query": "is:unread", "hits": 0, "stale": 0 }],
+      "caution": "Zero drift here is why the claim is 'a property of a mailbox', not of Gmail. It is not a counter-example to any cause: no thread in that mailbox was ever archived while still unread, which is the only shape a stale read-state can take."
+    }
+  }
+}

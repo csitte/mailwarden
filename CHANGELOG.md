@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Every published measurement figure now names the measurement it came from.**
+  `docs/measurements.json` records each one — mailbox, date, endpoint, query, and the bridge
+  thread it is written down in — and a test refuses any figure in the prose that no measurement
+  accounts for. The figures appear in eight places, including tool descriptions that ship inside
+  `dist/`, and none of them said which run produced them. That cost real time on 2026-08-26: asked
+  which figure held, the first source found gave the wrong answer ("ours is a typo"), and acting on
+  it would have replaced one correct figure with another correct figure measured elsewhere.
+- **Fixed while recording them: two measurements had merged into one date.** The README table said
+  131 threads for `category:updates is:unread`, six other places said 132 for the same query, and
+  both were dated 15.08. Both figures are right — 131 was measured that evening, 132 the night
+  after when the query was re-run across both endpoints, and a message had arrived in between. Only
+  the labelling was wrong. Each figure now carries its own date, and a test keeps 132 from being
+  dated to the 15th again.
 - **The comparison table now records which revision each claim was read at.**
   `docs/comparison-sources.json` names, per column, what was read and at which foreign commit;
   `npm run table-sources` compares those against the projects' current HEADs and says which

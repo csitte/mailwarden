@@ -268,8 +268,8 @@ oben macht.
 - **Runde 2 (Doku gegen Code) fand eine Hochrechnung über eine Endpunktgrenze.** Die frisch
   geschriebene Warnung an `bulk_modify` bezifferte das Risiko mit Zahlen, die auf `threads.list`
   gemessen waren — `bulk_modify` fragt aber `messages.list`. Nachgemessen statt argumentiert,
-  gleiches Postfach, gleiche Minute: `threads.list` 132 Treffer / 114 ohne eine ungelesene
-  Nachricht, `messages.list` 19 / 0. Die Drift sitzt im **Thread**-Index. **Lehre: eine Zahl, die
+  gleiches Postfach, gleiche Minute (in der Nacht auf den 16.08., nicht am 15.):
+  `threads.list` 132 Treffer / 114 ohne eine ungelesene Nachricht, `messages.list` 19 / 0. Die Drift sitzt im **Thread**-Index. **Lehre: eine Zahl, die
   von Endpunkt A stammt und über Endpunkt B redet, ist eine Vermutung — und der Messaufwand war
   hier ein einziger Skriptlauf.**
 - **Runde 4 (Fix-Commits) fand eine mitgeänderte Fehlerlage.** Die Auth-Härtung ließ zwei

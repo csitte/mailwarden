@@ -540,9 +540,12 @@ export interface LabelFilter {
  * against each thread's *live* labels.
  *
  * Why: `threads.list` CAN answer read-state operators from a thread-level copy of
- * that state which lags the mailbox. Measured 15.08.2026 in a real mailbox (~70k
- * messages): `category:updates is:unread` returned 132 threads, 114 of which held
- * no unread message at all (86%); `is:unread -in:inbox` 235 for 99. The predicate is
+ * that state which lags the mailbox. Measured in a real mailbox (~70k messages): on
+ * 15.08.2026 `category:updates is:unread` returned 131 threads through `threads.list`,
+ * 114 of which held no unread message at all (87%), and `is:unread -in:inbox` 235 for 99.
+ * Re-measured the following night it was 132 for 114 — a message had arrived; both stand,
+ * which is why every figure here names its own measurement (`docs/measurements.json`).
+ * The predicate is
  * NOT ignored (the same query without it returns 800+) and it is not tied to
  * particular operator combinations — an earlier version of this comment claimed
  * both, on an unmeasured observation.

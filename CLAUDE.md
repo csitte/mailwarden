@@ -29,9 +29,11 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
 - **Live-API, kein Cache.** Kein Mailbox-Spiegel, kein Suchindex. Einziger lokaler Zustand:
   `~/.mailwarden/` (`credentials.json`, `token.json`, ggf. `token.<account>.json`).
 - **Suchtreffer werden re-verifiziert.** **`threads.list`** (nicht „der Suchindex") kann
-  Read-State-Operatoren aus einem veralteten **Thread-**Read-State beantworten (**gemessen
-  15.08.2026**: 132 Treffer für `category:updates is:unread`, davon 114 ohne eine einzige ungelesene
-  Nachricht = 86 % — **im selben Durchgang ein zweites Postfach mit 0 Drift, und dieselbe Query über
+  Read-State-Operatoren aus einem veralteten **Thread-**Read-State beantworten (**gemessen 15.08.2026**:
+  131 Treffer für `category:updates is:unread`, davon 114 ohne eine einzige ungelesene Nachricht
+  = 87 %; **in der Nacht darauf über beide Endpunkte nachgemessen 132/114** — eine Mail kam dazwischen,
+  beide Zahlen stehen, und **welche Zahl aus welcher Messung stammt, steht in
+  `docs/measurements.json`** (ein Test prüft, dass keine Zahl ohne Beleg im Repo steht) — **im selben Durchgang ein zweites Postfach mit 0 Drift, und dieselbe Query über
   `messages.list` im selben Postfach in derselben Minute: 19 Treffer, 0 veraltet**). `search()` geht
   über `threads.list` und prüft deshalb jeden Treffer gegen die echten Labels; der
   Message-Pfad (`bulk_modify`) ist ein anderer Fall.
