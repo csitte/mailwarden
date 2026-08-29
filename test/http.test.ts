@@ -7,6 +7,7 @@ import {
   buildAllowedHosts,
   hostHeaderAllowed,
   bearerAuthorized,
+  downloadFenceWarning,
   type HttpConfig,
 } from "../src/http.js";
 
@@ -137,5 +138,46 @@ describe("bearerAuthorized", () => {
     expect(bearerAuthorized("s3cret", "Bearer wrong")).toBe(false);
     expect(bearerAuthorized("s3cret", "s3cret")).toBe(false); // missing "Bearer " prefix
     expect(bearerAuthorized("s3cret", undefined)).toBe(false);
+  });
+});
+
+
+describe("downloadFenceWarning — an unfenced download_attachment over HTTP", () => {
+  it("warns when the fence is unset and the download tool is registered", () => {
+    // src/gmail.ts names this exact exposure in a comment; until now nothing acted on it.
+    const w = downloadFenceWarning({});
+    expect(w).toMatch(/MAILWARDEN_DOWNLOAD_DIR is not set/);
+    expect(w).toMatch(/any authorized client can write to any path/);
+    // A warning is only useful if it says what to do about it.
+    expect(w).toMatch(/MAILWARDEN_TOOLS=read/);
+  });
+
+  it("says nothing once the fence is configured", () => {
+    expect(downloadFenceWarning({ MAILWARDEN_DOWNLOAD_DIR: "/srv/downloads" })).toBeNull();
+  });
+
+  it("says nothing for a read-only deployment — it has no download_attachment", () => {
+    // download_attachment is registered in the manage tier. Warning about a tool the
+    // deployment never exposes would train the operator to ignore the warning.
+    expect(downloadFenceWarning({ MAILWARDEN_TOOLS: "read" })).toBeNull();
+    expect(downloadFenceWarning({ MAILWARDEN_READONLY: "1" })).toBeNull();
+  });
+
+  it("warns for any tier selection that includes manage", () => {
+    expect(downloadFenceWarning({ MAILWARDEN_TOOLS: "read,manage" })).not.toBeNull();
+    expect(downloadFenceWarning({ MAILWARDEN_TOOLS: "manage" })).not.toBeNull();
+    expect(downloadFenceWarning({ MAILWARDEN_TOOLS: "read,filters" })).toBeNull();
+  });
+
+  it("prefers the fence over the tier check — a fenced manage deployment is fine", () => {
+    expect(
+      downloadFenceWarning({ MAILWARDEN_TOOLS: "manage", MAILWARDEN_DOWNLOAD_DIR: "/d" }),
+    ).toBeNull();
+  });
+
+  it("propagates an invalid tier setting rather than swallowing it", () => {
+    // Reading MAILWARDEN_TOOLS here must not become a second, silent parser: an unusable
+    // value has to fail at startup the way it always did, not turn into "no warning".
+    expect(() => downloadFenceWarning({ MAILWARDEN_TOOLS: "nonsense" })).toThrow();
   });
 });

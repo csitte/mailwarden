@@ -150,6 +150,13 @@ A crafted attachment filename tries to escape the download directory.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, writes are confined to that directory
   (realpath-canonicalized, symlink-aware) and never overwrite an existing file (collisions get a
   numeric suffix).
+- **Unset, the fence is the operator's job, and the server says so.** `destPath` comes from the
+  client; with no directory to resolve it against, an authorized client of an HTTP deployment can
+  write to any path the process can reach. `--http` prints a startup warning naming that exposure
+  whenever the `manage` tier is enabled without the fence. It is a warning rather than a refusal
+  because it takes an already-authorized client to reach it — the missing-token case, which needs
+  no credential at all, does refuse. Over stdio the client is the local user, who could write those
+  files anyway.
 
 ### 8. Acting on the *wrong* mailbox (multi-account setups)
 Someone runs two accounts — say a read-only work mailbox alongside a full-access private one — and a

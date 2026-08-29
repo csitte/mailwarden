@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`--http` now warns when `download_attachment` has no download fence.** `destPath` comes from
+  the client, so without `MAILWARDEN_DOWNLOAD_DIR` an authorized remote client can write to any
+  path the server process can reach — an exposure `src/gmail.ts` already named in a comment while
+  nothing acted on it. The warning names the risk and both ways out (set the directory, or run the
+  `read` tier). Deliberately a warning and not a refusal, unlike the missing-bearer case: that one
+  needs no credential at all, this one needs an authorized client, and refusing would break
+  deployments that rely on today's behaviour. Silent when the fence is set, and silent for a
+  `read`-tier deployment, which never registers the tool — warning about a tool that is not there
+  is how operators learn to ignore warnings.
 - **The consent flow's loopback server is now tested against a real socket.** `runConsentFlow`
   was the one function in `consent.ts` that opens a port and the only one with no test — its pure
   helpers were covered thoroughly, which made the module look well tested while its central

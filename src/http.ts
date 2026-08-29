@@ -1,4 +1,5 @@
 import { CliError } from "./cli.js";
+import { resolveEnabledTiers } from "./tiers.js";
 import { timingSafeEqual } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
@@ -68,6 +69,34 @@ export function assertAuthConfigured(cfg: HttpConfig): void {
   }
 }
 
+/**
+ * Warn when `--http` would serve `download_attachment` with no download fence.
+ *
+ * `destPath` is chosen by the MCP client. Without `MAILWARDEN_DOWNLOAD_DIR` there is nothing to
+ * resolve it against, so an authenticated client can write anywhere the server process can —
+ * which `src/gmail.ts` already names in a comment ("without the fence, an HTTP-hosted deployment
+ * would hand every client an arbitrary file write on the server") without anything acting on it.
+ *
+ * A warning rather than a refusal, unlike `assertAuthConfigured`. The missing token exposes the
+ * whole mailbox to anyone who can reach the port; this exposes the filesystem to a client that
+ * already authenticated, and existing deployments rely on the current behaviour. Refusing to
+ * start would break them for a narrower threat — so this says it out loud and keeps going.
+ *
+ * Silent in two cases, both by design: with the fence configured there is nothing to warn about,
+ * and a `read`-tier deployment never registers `download_attachment` at all, so a warning there
+ * would be about a tool that does not exist. Returns the message, or null.
+ */
+export function downloadFenceWarning(env: NodeJS.ProcessEnv = process.env): string | null {
+  if (env.MAILWARDEN_DOWNLOAD_DIR) return null;
+  if (!resolveEnabledTiers(env).has("manage")) return null;
+  return (
+    "mailwarden: MAILWARDEN_DOWNLOAD_DIR is not set. `download_attachment` takes the destination " +
+    "path from the client, so over HTTP any authorized client can write to any path this process " +
+    "can reach. Set MAILWARDEN_DOWNLOAD_DIR=<dir> to confine downloads to one directory, or run " +
+    "with MAILWARDEN_TOOLS=read if the deployment does not need to save attachments."
+  );
+}
+
 /** Host:port values accepted for a loopback bind, plus any MAILWARDEN_ALLOWED_HOSTS extras. */
 export function buildAllowedHosts(cfg: HttpConfig): Set<string> {
   const hosts = new Set<string>([
@@ -122,6 +151,8 @@ export async function startHttp(makeServer: () => McpServer): Promise<void> {
 
   const cfg = readHttpConfig();
   assertAuthConfigured(cfg);
+  const fenceWarning = downloadFenceWarning();
+  if (fenceWarning) console.error(fenceWarning);
   const allowedHosts = buildAllowedHosts(cfg);
 
   const app = express();

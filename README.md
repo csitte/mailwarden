@@ -348,7 +348,13 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   guards *this server*, not the
   token: a stolen `gmail.modify` token can still send from elsewhere.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
-  directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file.
+  directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file. Without
+  it there is nothing to resolve the client-supplied path against, so `download_attachment` can
+  write anywhere this process can — which matters for `--http`, where the client is remote.
+  Starting `--http` without the fence therefore prints a warning naming the exposure (it stays a
+  warning, not a refusal: unlike a missing bearer token this needs an *authorized* client, and
+  existing deployments depend on the current behaviour). A `read`-tier deployment is silent — it
+  never registers the tool.
 - **Untrusted-content fencing.** Every tool result is wrapped in `<untrusted-tool-output>` markers
   and stripped of invisible/BiDi-override characters, so clients can tell quoted mail content from
   instructions. The strip also covers Unicode tag characters and the variation selectors supplement
@@ -548,7 +554,7 @@ node dist/index.js --auth
 | `MAILWARDEN_ACCOUNT` | select a named account (its token is `token.<name>.json`; names are lower-cased); unset = the default `token.json`. See [Multiple accounts](#multiple-accounts) |
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
-| `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory (strongly recommended for HTTP hosting) |
+| `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |
