@@ -1,0 +1,14 @@
+# Line endings are LF everywhere — in the repository and in the working tree.
+#
+# Without this the repository drifts: `core.autocrlf` is false here, so git stores whatever an
+# editor happened to write, and on Windows that is CRLF for some tools and LF for others. Two
+# files (src/gmail.ts, SECURITY.md) had ended up CRLF while the other 79 were LF, and any diff
+# touching them showed the whole file instead of the lines that changed — 2567 lines for a
+# 9-line edit, with `git blame` useless for the same reason.
+#
+# `eol=lf` rather than `text=auto` alone: the latter normalises the repository but still checks
+# out CRLF on Windows, which puts the drift right back into the next editor that rewrites a file.
+* text=auto eol=lf
+
+# There is no binary content in this repository (checked: every tracked file is text), so no
+# `binary` entries are needed. Add one here before committing an image, font or bundle.
