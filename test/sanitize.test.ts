@@ -1,4 +1,7 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { stripHiddenChars, sanitizeStructured, fenceOutput } from "../src/sanitize.js";
 
 /** Encode ASCII as Unicode tag characters — the classic invisible-instruction payload. */
@@ -7,6 +10,8 @@ const asTagChars = (s: string) =>
 
 // Hidden characters are written as escapes on purpose: a literal one in the
 // source is exactly as invisible to a reviewer as it is in a mail.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+
 describe("stripHiddenChars", () => {
   it("removes zero-width, BiDi override/isolate, and BOM characters", () => {
     expect(stripHiddenChars("in\u200Bvis\u202Eible\u2066x\uFEFF")).toBe("invisiblex");
@@ -82,6 +87,28 @@ describe("sanitizeStructured", () => {
     const out = sanitizeStructured(input);
     expect(input.subject).toBe("a\u200Bb");
     expect(out.subject).toBe("ab");
+  });
+
+  it("no tool output schema lets a key come from mail content", () => {
+    // sanitizeStructured walks values and leaves KEYS alone, and says why: "no output schema
+    // uses attacker-supplied object keys (there is no z.record in the tool layer)". That is a
+    // claim about the schemas, not about this file, and nothing checked it. A z.record or a
+    // .passthrough() in tools.ts would silently make the comment false and let unsanitized —
+    // and with `__proto__`, structurally dangerous — keys through.
+    const tools = readFileSync(path.join(ROOT, "src/tools.ts"), "utf8");
+    const offenders = tools
+      .split("\n")
+      .map((line, i) => ({ line: i + 1, text: line.trim() }))
+      .filter(({ text }) => /z\.record\(|z\.map\(|\.passthrough\(|\.catchall\(/.test(text));
+    expect(
+      offenders,
+      offenders.length === 0
+        ? ""
+        : "Schema construct(s) that admit caller-controlled keys:\n" +
+            offenders.map((o) => `  src/tools.ts:${o.line}  ${o.text.slice(0, 120)}`).join("\n") +
+            "\n\nEither keep keys server-owned, or teach sanitizeStructured to sanitize keys too " +
+            "(and to place them safely — `out[\"__proto__\"] = v` sets a prototype, not a property).",
+    ).toEqual([]);
   });
 
   it("keeps keys untouched (they are server-owned, never mail content)", () => {

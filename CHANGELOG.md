@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The consent flow's loopback server is now tested against a real socket.** `runConsentFlow`
+  was the one function in `consent.ts` that opens a port and the only one with no test — its pure
+  helpers were covered thoroughly, which made the module look well tested while its central
+  security promise had nothing behind it. That promise ("binds to 127.0.0.1, not to every
+  interface") is why `@google-cloud/local-auth` was replaced, and a server coming up on `0.0.0.0`
+  would have answered every existing test identically. Now asserted: the bind address, the
+  ephemeral port, a fresh high-entropy CSRF state per run that reaches Google, refusal of a
+  foreign state *without* exchanging the code, survival of stray traffic mid-flow, the declined
+  and failed-exchange paths, and that the port is free again afterwards.
+- **A test keeps the sanitizer's assumption honest.** `sanitizeStructured` sanitizes values and
+  leaves keys alone, justified by "there is no `z.record` in the tool layer" — a claim about the
+  schemas that nothing checked. A `z.record`, `.passthrough()` or `.catchall()` in `tools.ts` now
+  fails the suite, since it would make that comment false and let unsanitized (and with
+  `__proto__`, structurally dangerous) keys through.
 - **Every published measurement figure now names the measurement it came from.**
   `docs/measurements.json` records each one — mailbox, date, endpoint, query, and the bridge
   thread it is written down in — and a test refuses any figure in the prose that no measurement
