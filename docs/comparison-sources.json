@@ -29,10 +29,10 @@
       "column": "taylorwilsdon",
       "kind": "repo",
       "repo": "taylorwilsdon/google_workspace_mcp",
-      "sha": "b10fb78b5dfae1fa8f100474a753723b10b64548",
+      "sha": "ce1a9ec4b688c5b43f7fce46eed9abfdbc9c2ef8",
       "shaBasis": "recorded",
-      "verified": "2026-08-26",
-      "note": "Read auth/scopes.py (TOOL_SCOPES_MAP and TOOL_READONLY_SCOPES_MAP are keyed by SERVICE, not by tool), main.py (set_enabled_tools receives the service list), core/tool_registry.py (read-only filters the registered tools), and the README for the tier names. Same SHA csitte.at recorded independently on the same day."
+      "verified": "2026-08-29",
+      "note": "Cells established 2026-08-26 by reading auth/scopes.py (TOOL_SCOPES_MAP and TOOL_READONLY_SCOPES_MAP are keyed by SERVICE, not by tool), main.py (set_enabled_tools receives the service list), core/tool_registry.py (read-only filters the registered tools), and the README for the tier names \u2014 the same SHA csitte.at recorded independently that day. Moved to this revision on 2026-08-29 by reading the DELTA, not by re-reading the cells: 57 commits, and the only one touching a source of ours is a shutdown finally-block in main.py, nowhere near the scope derivation. No new Gmail tool, no snooze, no query-driven bulk, no unsubscribe action \u2014 every cell holds. Re-read in full at the next comparison round."
     },
     {
       "column": "a-bonus",

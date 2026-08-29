@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-29
+
 ### Added
 - **`--http` now warns when `download_attachment` has no download fence.** `destPath` comes from
   the client, so without `MAILWARDEN_DOWNLOAD_DIR` an authorized remote client can write to any
@@ -72,6 +74,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `mailto:` opt-outs are impossible because there is "no send scope" — but the `manage` tier holds
   `gmail.modify`, which Google does accept for sending. The reason is that no send tool exists and
   the egress guard refuses the endpoint. Found by the new guard on its first run.
+
+### Changed
+- **Line endings are pinned to LF** (`.gitattributes`, `* text=auto eol=lf`). Without it the
+  repository had drifted: two files were stored CRLF while 79 were LF, and a diff touching them
+  showed the whole file rather than the lines that changed — 2567 lines for a 9-line edit, with
+  `git blame` equally useless. Five further files were renormalised in the same commit; verified
+  with `git diff --ignore-cr-at-eol` that nothing but line endings changed. No effect on the
+  published package.
 
 ## [0.15.1] - 2026-08-26
 
@@ -1146,7 +1156,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/csitte/mailwarden/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/csitte/mailwarden/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/csitte/mailwarden/compare/v0.14.1...v0.15.0
 [0.14.1]: https://github.com/csitte/mailwarden/compare/v0.14.0...v0.14.1
