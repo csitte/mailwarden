@@ -10,3 +10,8 @@ token.json
 token.*.json
 dist-mcpb/
 *.mcpb
+
+# Claude session memory — this repository is public, and the memory is written for us,
+# not for readers: competitor assessments, and a third party who never agreed to appear
+# in a public history. It lives in the profile (and, once migrated, on Drive).
+memory/
