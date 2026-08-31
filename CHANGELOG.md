@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Comparison table: `taylorwilsdon`'s token encryption is not the same mechanism as ours.** The
+  cell said a plain yes, in the same column as our `AES-256-GCM`, which reads as app-level token
+  encryption. His `auth/credential_store.py` does something else: `LocalDirectoryCredentialStore`
+  writes the credential with file mode `0600` and no encryption at all, and `GCSCredentialStore`
+  delegates confidentiality to the bucket's own CMEK, explicitly with "no app-level key". Both are
+  reasonable; neither is a token the application encrypted from a passphrase. The cell now names
+  both mechanisms, and the footnote says what the row is actually asking — who holds the key.
+  Found by re-reading the column in full rather than trusting the earlier entry.
+
+### Changed
+- **Every comparison column re-read in full, and every source revision now recorded rather than
+  inferred.** The 2026-08-29 entry for `taylorwilsdon` was a delta check, and `a-bonus` and `klodr`
+  carried SHAs reconstructed after the fact — three claims resting on something weaker than a
+  reading. All four columns were checked against source at a named revision: 43 of 44 cells held,
+  one did not (above). The notes in `docs/comparison-sources.json` now say what was read in each
+  repository, so the next round starts from evidence instead of from a date.
+
+
 ## [0.16.0] - 2026-08-29
 
 ### Added
