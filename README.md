@@ -18,7 +18,7 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   answer `is:unread` from a **stale thread-level read state**: measured in one real mailbox, **86% of
   the threads it returned held no unread message at all**; in a second mailbox, no drift whatsoever.
   You cannot tell which mailbox you are in without looking, so `search` re-verifies every hit against
-  its live labels. Paginated via `pageToken`/`nextPageToken`.
+  its live labels. Paginated via `pageToken`/`nextPageToken`. ([the measurements](https://github.com/csitte/mailwarden/blob/main/docs/gmail-thread-read-state-drift.md))
 - **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
   1000 messages per API request — with per-chunk partial-success reporting instead of
   all-or-nothing. The snooze sweep uses the same batch path.
@@ -93,19 +93,9 @@ writing tiers.
 
 Ask an assistant to *"archive the unread promotional mail that's already skipped my inbox"* and it will reach for the obvious query, `category:updates is:unread -in:inbox`. A server that trusts Gmail's index now archives threads you had already read — mail you never meant to touch, gone in a bulk action you can't easily reverse.
 
-**Measured, not asserted.** One real mailbox (~70,000 messages), 15.08.2026, read-only:
+**Measured, not asserted.** In one real mailbox (~70,000 messages), `category:updates is:unread` returned 131 threads through `threads.list`, and only 17 of them held an unread message — **87% stale**. The same query, same mailbox, same minute, asked through `messages.list` instead: **19 messages, none stale.** So this is not "Gmail search is unreliable" — the *thread* view of read state lags while the per-message view does not, and `search` goes through `threads.list`. A second mailbox, measured identically on the same day, drifted not at all.
 
-| Query (`threads.list`) | Threads returned | With an unread message | Stale |
-|---|--:|--:|--:|
-| `category:updates is:unread` | 131 | 17 | **87%** |
-| `category:updates is:unread -in:inbox` | 128 | 14 | 89% |
-| `is:unread -in:inbox` | 235 | 99 | 58% |
-
-The index is not *ignoring* the predicate — the same query without `is:unread` returns 800+ threads, so it is being applied. It is applied against a **thread-level read state that has not caught up**: threads whose every message is read still count as unread there. One returned thread carried a single label, `SENT`. And it is not a quirk of exotic operator combinations: the plainest query of the three shows it too — with the *lowest* share (58%) but the *most* wrong threads in absolute terms (136).
-
-**It is the thread index specifically.** The same query, same mailbox, same minute, asked through `messages.list` instead: **19 messages, none stale.** So this is not "Gmail search is unreliable" — it is that the *thread* view of read state lags while the per-message view does not. `search` goes through `threads.list`, which is exactly why it re-verifies.
-
-**A second mailbox, measured the same way on the same day, drifted not at all** — zero raw-index hits for `is:unread`, although it is read-marked through the API many times a day. So this is a property of *a mailbox*, not of Gmail everywhere. What separates them is open: they differ in volume (roughly three orders of magnitude) and age, and the second is missing something more basic — no thread in it was ever archived while still **unread**, which is the only shape a stale read-state can show up on. So it is not a counter-example to any particular cause; it is a mailbox without the candidate.
+Method, all three queries, the controls, and what the finding is *not* (it is not the index dropping the predicate, and not a quirk of exotic operator combinations): **[Gmail's thread index can answer `is:unread` from a stale read state](https://github.com/csitte/mailwarden/blob/main/docs/gmail-thread-read-state-drift.md)** — a standalone report, every figure traced to a recorded measurement.
 
 Which is the whole point: **a server cannot know which kind of mailbox it is in.** Re-verification costs nothing where nothing drifts, and saves you where it does — in the measurement above, every thread `search` dropped was genuinely read, and it discarded **no** genuinely unread mail.
 

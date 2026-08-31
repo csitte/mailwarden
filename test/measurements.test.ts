@@ -33,6 +33,7 @@ const doc = () => JSON.parse(read("docs/measurements.json"));
 /** Files that publish these figures. Prose only — CHANGELOG is append-only history. */
 const PUBLISHING_FILES = [
   "README.md",
+  "docs/gmail-thread-read-state-drift.md",
   "SECURITY.md",
   "CLAUDE.md",
   "docs/RELEASE-CHECKS.md",

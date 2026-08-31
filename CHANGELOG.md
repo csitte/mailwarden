@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The `threads.list` read-state finding is now a document of its own**
+  (`docs/gmail-thread-read-state-drift.md`). It was only ever readable as a section inside the
+  README's sales pitch, which is the wrong shape for the one piece of evidence this project has
+  that nobody else has published: method, all three queries, both controls, the endpoint contrast
+  and the three readings the measurements contradict, none of it requiring the reader to care
+  about an MCP server. The README keeps the case and the headline figure and links to it, and the
+  new file joins the corpus the measurement test scans, so a figure cannot appear there either
+  without a recorded measurement behind it.
+
 ### Fixed
 - **Comparison table: `taylorwilsdon`'s token encryption is not the same mechanism as ours.** The
   cell said a plain yes, in the same column as our `AES-256-GCM`, which reads as app-level token
