@@ -142,6 +142,126 @@ describe("parseAuthentication — one row per real-world header shape", () => {
   }
 });
 
+/**
+ * RFC 8601 systematically rather than by example: every place the grammar allows a second
+ * spelling of the same thing (folded, commented, quoted, versioned, cased, punycoded), the
+ * boundaries just outside each value range, and values that are not in it at all. Run as a
+ * release round on 02.09.2026; all of it already answered correctly, which is why these are
+ * a regression net rather than a fix.
+ */
+describe("parseAuthentication — the input space, per RFC 8601", () => {
+  const corpus: [string, string, Authentication][] = [
+    [
+      "authserv-id followed by a version number, as the grammar allows",
+      "mx.google.com 1; spf=pass smtp.mailfrom=a@x.example",
+      { authservId: "mx.google.com", spf: "pass", mailedBy: "x.example" },
+    ],
+    [
+      "a comment before the authserv-id",
+      "(added by postfix) mx.google.com; spf=pass smtp.mailfrom=a@x.example",
+      { authservId: "mx.google.com", spf: "pass", mailedBy: "x.example" },
+    ],
+    [
+      "a folded header: CRLF + tab wherever whitespace is allowed",
+      "mx.google.com;\r\n\tspf=pass (comment)\r\n\tsmtp.mailfrom=a@x.example;\r\n\tdmarc=pass header.from=x.example",
+      { authservId: "mx.google.com", spf: "pass", mailedBy: "x.example", dmarc: "pass", headerFrom: "x.example" },
+    ],
+    [
+      "folding before the authserv-id itself",
+      "\r\n\tmx.google.com; dkim=pass header.d=x.example",
+      { authservId: "mx.google.com", dkim: "pass", signedBy: "x.example" },
+    ],
+    [
+      "a quoted pvalue",
+      'mx.google.com; dkim=pass header.d="x.example"',
+      { authservId: "mx.google.com", dkim: "pass", signedBy: "x.example" },
+    ],
+    [
+      "header.i written with a local part instead of bare @domain",
+      "mx.google.com; dkim=pass header.i=user@x.example",
+      { authservId: "mx.google.com", dkim: "pass", signedBy: "x.example" },
+    ],
+    [
+      "the null sender of a bounce is no domain",
+      "mx.google.com; spf=none smtp.mailfrom=<>",
+      { authservId: "mx.google.com", spf: "none" },
+    ],
+    [
+      "an IP literal in smtp.helo is not a domain either",
+      "mx.google.com; spf=pass smtp.helo=[1.2.3.4]",
+      { authservId: "mx.google.com", spf: "pass" },
+    ],
+    [
+      "a trailing root dot is normalised away",
+      "mx.google.com; dmarc=pass header.from=x.example.",
+      { authservId: "mx.google.com", dmarc: "pass", headerFrom: "x.example" },
+    ],
+    [
+      "a domain already in punycode stays in it",
+      "mx.google.com; dmarc=pass header.from=xn--mnchen-3ya.example",
+      { authservId: "mx.google.com", dmarc: "pass", headerFrom: "xn--mnchen-3ya.example" },
+    ],
+    [
+      "a trailing semicolon leaves an empty segment, not a phantom result",
+      "mx.google.com; spf=pass smtp.mailfrom=a@x.example;",
+      { authservId: "mx.google.com", spf: "pass", mailedBy: "x.example" },
+    ],
+    [
+      "doubled semicolons likewise",
+      "mx.google.com;; spf=pass smtp.mailfrom=a@x.example",
+      { authservId: "mx.google.com", spf: "pass", mailedBy: "x.example" },
+    ],
+    [
+      "a semicolon inside a quoted reason does not split the record",
+      'mx.google.com; dkim=fail reason="a;b" header.d=x.example; spf=pass smtp.mailfrom=a@y.example',
+      { authservId: "mx.google.com", dkim: "fail", signedBy: "x.example", spf: "pass", mailedBy: "y.example" },
+    ],
+    [
+      "dkim-adsp is its own method and must not be read as dkim",
+      "mx.google.com; dkim-adsp=pass; dkim=fail header.d=x.example",
+      { authservId: "mx.google.com", dkim: "fail", signedBy: "x.example" },
+    ],
+    [
+      "a method we do not model, alone: nothing to report but who said it",
+      "mx.google.com; arc=pass",
+      { authservId: "mx.google.com" },
+    ],
+    [
+      "temperror is a result like any other — not an error to swallow",
+      "mx.google.com; spf=temperror smtp.mailfrom=a@x.example",
+      { authservId: "mx.google.com", spf: "temperror", mailedBy: "x.example" },
+    ],
+    [
+      "a policy.* property is not one of the three we read",
+      "mx.google.com; dmarc=pass policy.dmarc=none header.from=x.example",
+      { authservId: "mx.google.com", dmarc: "pass", headerFrom: "x.example" },
+    ],
+    [
+      // Measured in a real mailbox on 02.09.2026 (bridge thread 233): mail from a public
+      // authority, forwarded through a custom domain on Cloudflare Email Routing. All three
+      // domains differ from each other, DMARC passes, and the mail is genuine — which is the
+      // case the docs must not tell a caller to treat as suspicious.
+      "a forwarded message: SRS envelope, forwarder's DKIM, original From",
+      "mx.google.com; dkim=pass header.i=@cloudflare-email.net; " +
+        "spf=pass smtp.mailfrom=srs0=abcd=zg=authority.example=prvs=123=noreply@forwarder.example; " +
+        "dmarc=pass header.from=authority.example",
+      {
+        authservId: "mx.google.com",
+        dkim: "pass",
+        signedBy: "cloudflare-email.net",
+        spf: "pass",
+        mailedBy: "forwarder.example",
+        dmarc: "pass",
+        headerFrom: "authority.example",
+      },
+    ],
+  ];
+
+  for (const [name, value, expected] of corpus) {
+    it(name, () => expect(auth({ "Authentication-Results": value })).toEqual(expected));
+  }
+});
+
 describe("parseAuthentication — hostile input", () => {
   // The header is attacker-controlled text, and `authentication` is the one field a
   // caller will read as a verdict. Nothing unrecognised may reach it.

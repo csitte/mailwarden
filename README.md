@@ -121,12 +121,57 @@ There is a second script next to it, `node scripts/probe-reverify.mjs`, which me
 
 The demo drives the real `search()` against a fake Gmail API whose index is deliberately stale (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
 
+### Judging a sender — what `authentication` answers, and what it doesn't
+
+Every message from `get_thread` carries an `authentication` object: the SPF, DKIM and DMARC
+results **the receiving server** recorded, plus the domains each check actually validated.
+
+```jsonc
+{
+  "spf": "pass",   "mailedBy":   "forwarder.example",        // envelope sender SPF checked
+  "dkim": "pass",  "signedBy":   "routing.example",           // domain whose key signed it
+  "dmarc": "pass", "headerFrom": "authority.example",        // the From domain DMARC evaluated
+  "authservId": "mx.google.com",                             // who asserts all of the above
+  "returnPath": "srs0=…=authority.example=…@forwarder.example"
+}
+```
+
+**Read `dmarc` first.** It is the only one of the three that ties a passing check to the `From`
+address a human sees. `spf: "pass"` on its own says an envelope sender was authorised to send —
+something a lookalike domain gets in minutes.
+
+**The three domains do not have to match, and a mismatch is not a finding.** The object above is a
+real message from a public authority, forwarded through a custom domain on a mail-routing service
+before it reached the mailbox. Every domain differs from the others, and the mail is genuine:
+forwarding rewrites the envelope sender (`mailedBy` becomes the forwarder), the forwarder signs
+with its own key (`signedBy`), and only `headerFrom` still names the original sender — which is
+exactly why DMARC, not SPF, is the check that carries meaning here. Treat the domains as the
+*explanation* of a result, not as a test of their own.
+
+**What a pass does not mean.** That the mail really came from that domain — not that the domain
+deserves anything. A phisher holds perfect SPF, DKIM and DMARC on the lookalike domain he
+registered this morning; authentication tells you *who sent it*, and the answer can be "exactly who
+it claims to be, and that is the problem".
+
+**What `unchecked: true` means.** The message carried no `Authentication-Results` header at all —
+nobody looked. It is not a failure, and it is not a pass. The header is written by a server that
+*receives* a message, so anything that never arrived from outside — your own sent mail, for
+instance — should be expected to have none.
+
+**Forged reports.** A message can carry `Authentication-Results` headers of its own — an attacker
+writes whatever he likes into the mail he sends. Only the **first** such header is read, because
+each hop prepends its own and the first one is therefore the receiving server's; `authservId` names
+who is asserting the result (for Gmail, `mx.google.com`) and `otherReports` counts the ones that
+were not read. Values are validated as tokens rather than passed through, so a field that reads
+like a verdict cannot carry a sentence. If two results for the same method disagree — a second DKIM
+signature that failed — the disagreement shows up in `alsoReported` instead of being swallowed.
+
 ## Tools
 
 | Tool | What it does |
 |---|---|
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
-| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), and `unchecked: true` when the message carried no report at all. `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
+| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `otherReports` for reports that were not read, and `unchecked: true` when the message carried no report at all — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |

@@ -29,6 +29,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reporting them empty. A test parses one message with all headers and with only the requested
   ones and requires the same result, so a header added to the parse without being added to that
   list fails the suite.
+- **Release round on the input space, and the one documentation error it turned up.** The parser
+  was held against RFC 8601 systematically rather than by example — folded headers, comments before
+  the authserv-id, quoted pvalues, versioned authserv-ids, null senders, IP literals, punycode,
+  trailing and doubled separators, methods we do not model. All of it already answered correctly;
+  the cases are now a regression net (`test/authentication.test.ts`). The documentation did not
+  hold: it told a caller to compare `signedBy`/`mailedBy`/`headerFrom` with the `From` address
+  "rather than assuming they match", which turns every forwarded message into a false alarm. A
+  forwarded mail measured in a real mailbox has all three domains differing — rewritten envelope
+  sender, the forwarder's own DKIM key, the original `From` — and is entirely genuine, which is
+  what makes DMARC the result that carries meaning. Both the tool description and a new README
+  section (*Judging a sender*) now say so, along with what a passing result does not mean.
 
 - **The `threads.list` read-state finding is now a document of its own**
   (`docs/gmail-thread-read-state-drift.md`). It was only ever readable as a section inside the
