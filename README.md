@@ -19,6 +19,11 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   the threads it returned held no unread message at all**; in a second mailbox, no drift whatsoever.
   You cannot tell which mailbox you are in without looking, so `search` re-verifies every hit against
   its live labels. Paginated via `pageToken`/`nextPageToken`. ([the measurements](https://github.com/csitte/mailwarden/blob/main/docs/gmail-thread-read-state-drift.md))
+- **Sender authentication, not sender spelling.** `get_thread` reports the SPF/DKIM/DMARC results
+  the receiving server recorded, so "is this really from my bank?" is answered from the message's
+  own headers instead of from how the domain looks. It reads the receiving server's report only —
+  a message can carry forged ones of its own — and says `unchecked` when nobody checked, because a
+  missing check is not a passing one.
 - **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
   1000 messages per API request — with per-chunk partial-success reporting instead of
   all-or-nothing. The snooze sweep uses the same batch path.
@@ -121,7 +126,7 @@ The demo drives the real `search()` against a fake Gmail API whose index is deli
 | Tool | What it does |
 |---|---|
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
-| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
+| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), and `unchecked: true` when the message carried no report at all. `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |

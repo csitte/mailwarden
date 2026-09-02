@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`get_thread` reports sender authentication.** Every message now carries an `authentication`
+  field: the SPF, DKIM and DMARC results the receiving server recorded, the domains each check
+  actually validated (`signedBy`, `mailedBy`, `headerFrom`), the `Return-Path`, and `authservId` —
+  who is asserting all of it. The headers were already in every `format=full` fetch and were being
+  discarded, so this costs no additional request and no additional scope.
+  Asked in bridge thread `233` after a mail claiming to be from the Austrian federal computing
+  centre could not be judged with mailwarden at all: the question "is this really from them?" had
+  to be answered out of band, from DNS records and old mail, while the proof was sitting unused in
+  the message. Three deliberate limits, because the source is attacker-supplied text: only the
+  *first* `Authentication-Results` header is read (hops prepend theirs, so the first is the
+  receiving server's; a message can carry forged ones below it, and `otherReports` counts what was
+  skipped), every value is validated as a token or dropped rather than passed through, and a
+  message with no report at all is marked `unchecked: true` — "nobody looked" must not read as
+  "nothing wrong".
+
 - **The `threads.list` read-state finding is now a document of its own**
   (`docs/gmail-thread-read-state-drift.md`). It was only ever readable as a section inside the
   README's sales pitch, which is the wrong shape for the one piece of evidence this project has

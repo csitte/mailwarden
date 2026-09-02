@@ -4,6 +4,7 @@ import type { OAuth2Client } from "google-auth-library";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
+import { parseAuthentication, type Authentication } from "./authentication.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -38,6 +39,13 @@ export interface ParsedMessage {
   subject: string;
   date: string;
   snippet: string;
+  /**
+   * What the receiving server said about the sender's authenticity (SPF/DKIM/DMARC),
+   * read off headers this fetch already carries. Always present: `unchecked: true`
+   * when the message had no `Authentication-Results` header, because "nobody looked"
+   * and "looked, found nothing wrong" are not the same answer.
+   */
+  authentication: Authentication;
   plaintextBody: string;
   htmlBody: string;
   attachments: Attachment[];
@@ -495,6 +503,7 @@ export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
     subject: h("Subject"),
     date: h("Date"),
     snippet: m.snippet ?? "",
+    authentication: parseAuthentication(headers),
     plaintextBody: text,
     htmlBody: html,
     attachments: collectAttachments(m),

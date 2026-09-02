@@ -45,8 +45,10 @@ function header(input: SignalInput, name: string): string | undefined {
 /**
  * Remove RFC 5322 comments — parenthesised, nestable, only outside quoted strings —
  * so `bulk (mailer)` reads as `bulk` and `a@x.example (Alice)` as `a@x.example`.
+ * Exported because `Authentication-Results` is commented the same way, and its
+ * comments (`spf=pass (google.com: domain of …)`) sit between the fields that matter.
  */
-function stripComments(v: string): string {
+export function stripComments(v: string): string {
   let out = "";
   let depth = 0;
   let quoted = false;

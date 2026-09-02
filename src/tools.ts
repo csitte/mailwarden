@@ -106,6 +106,25 @@ const threadSummarySchema = z.object({
   signals: z.array(signalSchema),
 });
 
+/**
+ * Sender authentication as the receiving server reported it. Every field is optional
+ * because a header can be absent or malformed, and `unchecked` marks the case where
+ * there was no report at all — a missing check must not read as a passed one.
+ */
+const authenticationSchema = z.object({
+  spf: z.string().optional(),
+  dkim: z.string().optional(),
+  dmarc: z.string().optional(),
+  authservId: z.string().optional(),
+  signedBy: z.string().optional(),
+  mailedBy: z.string().optional(),
+  headerFrom: z.string().optional(),
+  returnPath: z.string().optional(),
+  alsoReported: z.array(z.string()).optional(),
+  otherReports: z.number().optional(),
+  unchecked: z.literal(true).optional(),
+});
+
 const parsedMessageSchema = z.object({
   id: z.string(),
   threadId: z.string(),
@@ -115,6 +134,7 @@ const parsedMessageSchema = z.object({
   subject: z.string(),
   date: z.string(),
   snippet: z.string(),
+  authentication: authenticationSchema,
   plaintextBody: z.string(),
   htmlBody: z.string(),
   attachments: z.array(attachmentSchema),
@@ -225,6 +245,7 @@ function registerReadTools(server: McpServer): void {
         "Fetch a thread by ID: headers, plaintext + HTML bodies, and attachment metadata. " +
         "`full` defaults to true and should stay true whenever content matters. `full: false` is a headers-and-labels fetch for when a thread is too large to read or only its metadata is of interest — it does NOT fetch bodies or attachment metadata, and the result then omits `plaintextBody`, `htmlBody` and `attachments` entirely and sets `metadataOnly: true`. " +
         "The fields are omitted rather than empty on purpose: an empty attachment list from a request that never looked is indistinguishable from a message that truly has none, and treating it as 'no attachment' has already nearly caused an invoice to be archived as attachment-less. If `search` reported `hasAttachments: true`, or the sender matters, use full: true. " +
+        "EVERY MESSAGE CARRIES `authentication` — SPF/DKIM/DMARC as the RECEIVING server reported them, for answering 'is this mail really from who it says?'. Read `dmarc` first: it is the only one of the three that ties a passing check to the visible `From` domain, so `spf: pass` alone proves nothing about the sender the user sees (a lookalike domain gets that trivially). `signedBy`/`mailedBy`/`headerFrom` name the domains each check actually validated — compare them with the `From` address rather than assuming they match. `authservId` says WHO asserts all this: a message can carry forged Authentication-Results headers of its own, and only the receiving server's report (for Gmail, `mx.google.com`) counts; `otherReports` counts further reports that were NOT read, and `alsoReported` lists results that disagree with the ones above. `unchecked: true` means the message carried no report at all — that is 'nobody looked', NOT 'nothing wrong'; unauthenticated does not imply forged, and authenticated does not imply honest (a phisher can hold a passing DMARC on his own lookalike domain). " +
         "USE WHEN: reading a thread's content after finding it via search. " +
         "DO NOT USE: with a message ID — this takes thread IDs. " +
         "SIDE EFFECTS: none (does not mark as read).",

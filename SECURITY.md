@@ -113,6 +113,16 @@ Model can't tell quoted mail from a command.
   display name, and re-quoted if the decoded text contains address syntax. A display name cannot pose
   as another sender's address, encoded or not (0.10.0).
 
+- **Authentication results are quoted, not asserted.** `get_thread`'s `authentication` field is what
+  the *receiving* server wrote into `Authentication-Results` — a header an attacker can also put in
+  the message he sends. Only the first such header is read (each hop prepends its own, so the first
+  is the receiving server's) and `authservId` names who is asserting it, with `otherReports` counting
+  the reports that were not read. Values are validated as tokens rather than passed through, so a
+  field a caller reads as a verdict cannot carry a sentence, and a message with no report at all is
+  marked `unchecked` rather than left blank. What the field does **not** claim: a passing DMARC says
+  the mail really came from that domain, not that the domain is honest — a phisher can hold perfect
+  authentication on his own lookalike domain.
+
 ### 4. Acting on stale state
 An action fires against mail that has since changed — or against the search index's false positives.
 
