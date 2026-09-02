@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **The read-state finding is now filed with Google, and it turns out not to be the first time.**
+  `docs/gmail-thread-read-state-drift.md` records the tracker id, and a new section covers what the
+  search before filing turned up: the same behaviour was reported in April 2018 and closed as
+  "Can't Repro" without a single comment, along with a second report on an inconsistent unread
+  counter closed the same way. The 2018 report named a suspected trigger that has since been
+  retired, which may be why it stopped reproducing while the behaviour did not. Ours claims no
+  cause; it adds counts from a named date, a control, a mailbox that does not exhibit the behaviour,
+  and the endpoint comparison.
 - **`get_thread` reports sender authentication.** Every message now carries an `authentication`
   field: the SPF, DKIM and DMARC results the receiving server recorded, the domains each check
   actually validated (`signedBy`, `mailedBy`, `headerFrom`), the `Return-Path`, and `authservId` —

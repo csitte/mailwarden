@@ -17,6 +17,9 @@ that server does about it, and nothing before that section depends on it.
   against a fake API, with no Google account at all.
 - **Raw figures with their provenance:**
   [`docs/measurements.json`](https://github.com/csitte/mailwarden/blob/main/docs/measurements.json).
+- **Reported to Google:** [issue 555806033](https://issuetracker.google.com/issues/555806033),
+  filed 2026-09-02 against the Gmail API component. See *Reported to Google* below — someone filed
+  the same thing in 2018.
 
 ## The finding
 
@@ -146,6 +149,29 @@ What neither response allows is treating the index's answer as the mailbox's sta
 *"archive the unread promotional mail that already skips my inbox"*, an assistant reaches for
 `category:updates is:unread -in:inbox` — the second row of the table above, where 89% of what came
 back had already been read. Acting on that archives mail nobody meant to touch.
+
+## Reported to Google
+
+Filed on 2026-09-02 in the public issue tracker, Gmail API component, as
+[issue 555806033](https://issuetracker.google.com/issues/555806033).
+
+**It is not the first time.** A search of that component before filing turned up
+[issue 78095953](https://issuetracker.google.com/issues/78095953), opened in April 2018. It
+describes, in summary, a query with `label:unread` for which `threads.list` returns a message whose
+labels do not include it — confirmed by fetching the message, and not reproduced by the web
+interface, which returns nothing for the same query.
+
+That is the behaviour described in this document, eight years earlier. It was closed as
+**Can't Repro**, with no comments on it at all. The 2018 report named a suspected trigger — the
+"Reply to" assist feature of the time — which may be why it could not be reproduced later: the
+suspected cause aged out while the behaviour did not. A second report,
+[36759403](https://issuetracker.google.com/issues/36759403) (`threadsUnread` exceeding
+`threadsTotal` on a label), was also closed Can't Repro and may be another face of the same
+thread-level counter.
+
+What the new report adds is what the old one lacked: counts from a named date, a control query
+showing the operator is applied at all, a second mailbox that does not exhibit it, and the endpoint
+comparison. No claim about the cause.
 
 ## Provenance
 
