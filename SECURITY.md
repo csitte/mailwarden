@@ -121,7 +121,7 @@ Model can't tell quoted mail from a command.
   field a caller reads as a verdict cannot carry a sentence, and a message with no report at all is
   marked `unchecked` rather than left blank. What the field does **not** claim: a passing DMARC says
   the mail really came from that domain, not that the domain is honest — a phisher can hold perfect
-  authentication on his own lookalike domain.
+  authentication on his own lookalike domain (0.17.0).
 
 ### 4. Acting on stale state
 An action fires against mail that has since changed — or against the search index's false positives.
