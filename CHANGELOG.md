@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The comparison table has a row for sender authentication, and none of the four columns has
+  it.** `taylorwilsdon` does not request the `Authentication-Results` header at all — his metadata
+  header list ends at `List-Id`, right after `List-Unsubscribe` and `Precedence`, so the newsletter
+  signals were taken and the authentication ones were not. `a-bonus` and `klodr` have no trace of
+  SPF, DKIM or DMARC, and Google's tool reference documents no such field (it documents no return
+  fields at all). Two of those repositories had moved on since the 2026-08-31 reading, so this row
+  was checked against the HEAD of 2026-09-02 while the other cells still rest on the recorded
+  revision — `docs/comparison-sources.json` now says that per column, rather than letting one fresh
+  row make a whole column look re-read. What the row claims is evaluation, not access: a server
+  that hands back raw headers gives a client the material, without telling it that only the first
+  header counts.
+
 ## [0.17.0] - 2026-09-02
 
 ### Added
