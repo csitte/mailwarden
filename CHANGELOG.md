@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The Google report was assigned, and the document says so.** `555806033` moved from `New` to
+  `Assigned` on the day it was filed. The contrast with the 2018 duplicate — closed Can't Repro
+  without a comment — is now in the document, along with what an assignment does *not* mean: it
+  says the report was accepted as worth looking at, nothing about a cause, a fix or a timeline.
+  Learned from the `gmail` session, whose mailbox receives the tracker mail because the report was
+  filed from there; this project has no mailbox of its own.
 - **The comparison table has a row for sender authentication, and none of the four columns has
   it.** `taylorwilsdon` does not request the `Authentication-Results` header at all — his metadata
   header list ends at `List-Id`, right after `List-Unsubscribe` and `Precedence`, so the newsletter

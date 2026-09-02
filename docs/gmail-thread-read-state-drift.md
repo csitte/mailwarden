@@ -18,8 +18,9 @@ that server does about it, and nothing before that section depends on it.
 - **Raw figures with their provenance:**
   [`docs/measurements.json`](https://github.com/csitte/mailwarden/blob/main/docs/measurements.json).
 - **Reported to Google:** [issue 555806033](https://issuetracker.google.com/issues/555806033),
-  filed 2026-09-02 against the Gmail API component. See *Reported to Google* below — someone filed
-  the same thing in 2018.
+  filed 2026-09-02 against the Gmail API component and moved to **Assigned** the same day. See
+  *Reported to Google* below — someone filed the same thing in 2018, and that one was closed
+  unread.
 
 ## The finding
 
@@ -153,7 +154,10 @@ back had already been read. Acting on that archives mail nobody meant to touch.
 ## Reported to Google
 
 Filed on 2026-09-02 in the public issue tracker, Gmail API component, as
-[issue 555806033](https://issuetracker.google.com/issues/555806033).
+[issue 555806033](https://issuetracker.google.com/issues/555806033). The tracker moved it from
+`New` to `Assigned` later the same day, so it is with a team rather than parked — which is worth
+stating precisely: an assignment says the report was accepted as worth looking at, nothing yet
+about a cause, a fix, or a timeline.
 
 **It is not the first time.** A search of that component before filing turned up
 [issue 78095953](https://issuetracker.google.com/issues/78095953), opened in April 2018. It
@@ -172,6 +176,11 @@ thread-level counter.
 What the new report adds is what the old one lacked: counts from a named date, a control query
 showing the operator is applied at all, a second mailbox that does not exhibit it, and the endpoint
 comparison. No claim about the cause.
+
+Which is also the honest reading of the contrast in status. The 2018 report was closed without a
+comment; this one was assigned within a day. The difference the evidence can account for is that
+this report can be checked — it says what was measured, where, and how to repeat it. Whether that
+is why it was assigned, nobody outside the tracker can say.
 
 ## Provenance
 
