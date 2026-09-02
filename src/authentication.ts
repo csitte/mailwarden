@@ -16,6 +16,13 @@
  *    authserv-id, but that is the receiver's job, not ours to assume: `authservId` is
  *    reported alongside so a caller can see WHO is asserting the result, and
  *    `otherReports` counts the ones not read.
+ *
+ *    This rests on one assumption worth stating rather than burying: that Gmail hands
+ *    `payload.headers` back in the order the message carries them. That is how the API
+ *    behaves and how every trace-header convention is built, but it is not a documented
+ *    guarantee — which is precisely why `otherReports` and `authservId` travel with the
+ *    result instead of a bare verdict. A caller that must be certain can compare the
+ *    asserting id against the server it expects.
  * 2. **Nothing unrecognised is passed through.** A result is a short lowercase token or
  *    it is dropped; a domain must look like a domain. A header is free text, and a field
  *    that reads as a verdict must never be able to carry a sentence.

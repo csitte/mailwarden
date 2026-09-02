@@ -25,6 +25,7 @@ import {
   filterCriteriaFromApi,
   filterCriteriaToQuery,
   Gmail,
+  PARSED_HEADERS,
 } from "../src/gmail.js";
 
 // node Buffer base64url helper for building test fixtures
@@ -1062,6 +1063,58 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
     expect("attachments" in msg).toBe(false);
     expect("plaintextBody" in msg).toBe(false);
     expect("htmlBody" in msg).toBe(false);
+  });
+
+  it("getThread full:false ASKS for the headers it parses, so an absence means the message", async () => {
+    // `authentication: { unchecked: true }` is a claim about the MESSAGE — nobody checked
+    // this mail. On a metadata fetch that did not ask for `Authentication-Results`, it
+    // would instead be a fact about the REQUEST wearing the same words. Naming the
+    // headers is what keeps the two apart; `full` needs no list because it carries all.
+    const getCalls: any[] = [];
+    const api: any = {
+      users: {
+        threads: {
+          get: async (req: any) => {
+            getCalls.push(req);
+            return { data: { messages: [{ id: "m1", threadId: "th-1", payload: { headers: [] } }] } };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+
+    await gmail.getThread("th-1", false);
+    expect(getCalls[0].metadataHeaders).toEqual([...PARSED_HEADERS]);
+    expect(PARSED_HEADERS).toContain("Authentication-Results");
+
+    await gmail.getThread("th-1", true);
+    expect(getCalls[1].metadataHeaders).toBeUndefined();
+  });
+
+  it("PARSED_HEADERS covers every header the parse actually reads", () => {
+    // The coupling this guards: a header read by parseMessage but missing from the list
+    // is silently empty on every metadata fetch — and an empty header is indistinguishable
+    // from an absent one in the result. Parsing the same message twice, once with all
+    // headers and once with only the requested ones, must give the same answer.
+    const headers = [
+      { name: "From", value: "Mein Postkorb <noreply@brz.gv.at>" },
+      { name: "To", value: "chris@example.com" },
+      { name: "Subject", value: "=?UTF-8?B?R3LDvMOfZQ==?=" },
+      { name: "Date", value: "Tue, 1 Sep 2026 09:00:00 +0200" },
+      { name: "Authentication-Results", value: "mx.google.com; dkim=pass header.d=brz.gv.at; spf=pass smtp.mailfrom=noreply@brz.gv.at; dmarc=pass header.from=brz.gv.at" },
+      { name: "Return-Path", value: "<noreply@brz.gv.at>" },
+      // Headers a metadata fetch would NOT return with the list above:
+      { name: "List-Unsubscribe", value: "<https://x.example/u>" },
+      { name: "Reply-To", value: "someone@elsewhere.example" },
+      { name: "Message-Id", value: "<abc@brz.gv.at>" },
+      { name: "Received", value: "from mail.brz.gv.at by mx.google.com" },
+    ];
+    const message = (hs: typeof headers) => ({ id: "m1", threadId: "t1", snippet: "…", payload: { headers: hs } });
+    const requested = headers.filter((h) =>
+      (PARSED_HEADERS as readonly string[]).some((n) => n.toLowerCase() === h.name.toLowerCase()),
+    );
+
+    expect(parseMessage(message(requested))).toEqual(parseMessage(message(headers)));
   });
 
   it("getThread full:true still carries content fields and sets no metadataOnly flag", async () => {

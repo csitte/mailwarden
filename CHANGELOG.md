@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skipped), every value is validated as a token or dropped rather than passed through, and a
   message with no report at all is marked `unchecked: true` — "nobody looked" must not read as
   "nothing wrong".
+  A `full: false` fetch now names the headers it parses (`metadataHeaders`) instead of taking
+  whatever `format=metadata` chooses to return. Otherwise `unchecked: true` — a claim about the
+  *message* — could be produced by a *request* that never asked for the header, which is the same
+  confusion `full: false` already avoids by omitting body and attachment fields rather than
+  reporting them empty. A test parses one message with all headers and with only the requested
+  ones and requires the same result, so a header added to the parse without being added to that
+  list fails the suite.
 
 - **The `threads.list` read-state finding is now a document of its own**
   (`docs/gmail-thread-read-state-drift.md`). It was only ever readable as a section inside the

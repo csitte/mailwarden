@@ -488,6 +488,29 @@ export function messageSignals(m: gmail_v1.Schema$Message | undefined): Signal[]
   return deriveSignals({ headers: m.payload?.headers ?? [], parts });
 }
 
+/**
+ * The headers `parseMessage` reads — the list a `format=metadata` fetch must ASK for.
+ *
+ * Without it, `metadata` is at the API's discretion about which headers come back, and a
+ * missing `Authentication-Results` would surface as `authentication: { unchecked: true }` —
+ * a statement about the MESSAGE ("nobody checked") made from a fact about the REQUEST ("we
+ * did not ask"). That is the same confusion `full: false` already avoids by omitting the
+ * body and attachment fields instead of reporting them empty, and it nearly archived an
+ * invoice as attachment-less once.
+ *
+ * Keep in step with `parseMessage` and `parseAuthentication`: a header read there and
+ * missing here is silently empty on every metadata fetch. A test parses one message both
+ * ways and requires the same result, so adding a header without adding it here fails.
+ */
+export const PARSED_HEADERS = [
+  "From",
+  "To",
+  "Subject",
+  "Date",
+  "Authentication-Results",
+  "Return-Path",
+] as const;
+
 /** Parse a raw Gmail message into the flat ParsedMessage shape. */
 export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
   const headers = m.payload?.headers ?? [];
@@ -910,6 +933,9 @@ export class Gmail {
         userId: "me",
         id: threadId,
         format: full ? "full" : "metadata",
+        // Named explicitly so a metadata fetch cannot come back missing a header the
+        // parse then reports as an absence — see PARSED_HEADERS.
+        ...(full ? {} : { metadataHeaders: [...PARSED_HEADERS] }),
       }),
     );
     const messages = (res.data.messages ?? []).map((m) => parseMessage(m));

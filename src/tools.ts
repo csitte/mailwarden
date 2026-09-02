@@ -121,7 +121,7 @@ const authenticationSchema = z.object({
   headerFrom: z.string().optional(),
   returnPath: z.string().optional(),
   alsoReported: z.array(z.string()).optional(),
-  otherReports: z.number().optional(),
+  otherReports: z.number().int().optional(),
   unchecked: z.literal(true).optional(),
 });
 
