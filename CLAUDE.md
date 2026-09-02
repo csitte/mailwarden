@@ -101,6 +101,12 @@ und in der MCP-Registry als `io.github.csitte/mailwarden`.
   `npx -y @smithery/cli mcp publish dist-mcpb/mailwarden-X.Y.Z-smithery.mcpb -n csitte/mailwarden`
   (die `-smithery`-Variante trägt die echten Tool-Objekte mit `inputSchema`, die Smitherys Registry
   verlangt; Namespace `csitte` und Login stehen seit 15.08.2026).
+- **Der Drift-Bericht hat seit 02.09.2026 einen externen Konsumenten.**
+  `www.csitte.at/gmail-read-state/` ist ein eigenständiger Artikel, der **jede Zahl** aus
+  `docs/gmail-thread-read-state-drift.md` übernimmt — einmalig von Hand gegengeprüft, ohne eine
+  Entsprechung unseres Zahlen-Tests auf ihrer Seite. **Wer hier eine Messzahl korrigiert, meldet es
+  in Bridge-Thread `231`**, sonst steht sie dort falsch weiter. Ausdrücklich von csitte erbeten;
+  unsere `docs/measurements.json`-Mechanik schützt nur unser eigenes Repo.
 - **Ein Release ist erst fertig, wenn csitte.at es weiß.** Die Produktseite
   `www.csitte.at/mailwarden/` liegt im fremden Repo `csitte.at` — **nicht committen**, sondern eine
   Bridge-Nachricht an `csitte` in Thread `061-mailwarden-doku-csitte-update` (Owner → `csitte`,
