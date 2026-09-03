@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`bulk_modify` can cross-check its match set against Gmail's label filter.** With
+  `crossCheck: true`, each predicate derived from the query is re-run as `labelIds` instead of a
+  query operator, and every message the two routes disagree about is left untouched and listed in
+  `crossChecked.dropped`. It costs one list call per predicate — flat in the number of predicates,
+  not per message — which is why the bulk path can afford it where `search`-style re-verification
+  (one fetch per hit) never could. What it is worth is stated where it is implemented: a
+  disagreement is evidence, agreement is not, since both routes read the same index. So
+  `unverifiedPredicates` reports exactly what it reported before, and this does not become a
+  second re-verification claim. A capped match set is refused rather than checked, because a
+  message absent from an unfetched page is not a message absent from the label — that would drop
+  mail on a pagination artefact. Off by default: the mechanism is cheap but its yield is
+  unmeasured, and `scripts/probe-crosscheck.mjs` is the read-only way to find out whether the two
+  routes ever diverge in a given mailbox.
 - **`list_unsubscribe` finds the link a sender put only in the footer.** With no `List-Unsubscribe`
   header anywhere in the thread, the message body is searched and any unsubscribe links come back as
   `bodyCandidates`, each with the anchor text that identified it. They are reported and never fetched:

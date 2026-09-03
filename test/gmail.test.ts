@@ -1489,6 +1489,90 @@ describe("Gmail.trash / untrash / deleteLabel — API pass-through", () => {
   });
 });
 
+describe("Gmail.crossCheckPredicates", () => {
+  /**
+   * A fake Gmail whose two routes can be made to disagree: `q` alone returns `byQuery`,
+   * and a call carrying `labelIds` returns whatever that label is mapped to. That is exactly
+   * the divergence the cross-check exists to catch — and cannot be produced with one route.
+   */
+  function fakeApi(byQuery: string[], byLabel: Record<string, string[]>) {
+    const calls: any[] = [];
+    const api: any = {
+      users: {
+        messages: {
+          list: async (req: any) => {
+            calls.push(req);
+            const ids = req.labelIds?.length ? (byLabel[req.labelIds[0]] ?? []) : byQuery;
+            return { data: { messages: ids.map((id) => ({ id, threadId: `t-${id}` })) } };
+          },
+        },
+      },
+    };
+    return { gmail: new Gmail(api as gmail_v1.Gmail), calls };
+  }
+
+  const refsOf = (ids: string[]) => ids.map((id) => ({ id, threadId: `t-${id}` }));
+
+  it("keeps everything when the query carries no derivable predicate", async () => {
+    const { gmail, calls } = fakeApi(["m1"], {});
+    const res = await gmail.crossCheckPredicates("from:bob", refsOf(["m1"]), 100);
+    expect(res).toEqual({ kept: refsOf(["m1"]), dropped: [], checked: [], capped: false });
+    expect(calls).toHaveLength(0); // nothing to compare, nothing to spend
+  });
+
+  it("drops a message the label route does not have, for a positive predicate", async () => {
+    const { gmail } = fakeApi(["m1", "m2", "m3"], { UNREAD: ["m1", "m3"] });
+    const res = await gmail.crossCheckPredicates("is:unread", refsOf(["m1", "m2", "m3"]), 100);
+    expect(res.kept.map((r) => r.id)).toEqual(["m1", "m3"]);
+    expect(res.dropped).toEqual([{ id: "m2", threadId: "t-m2", predicate: "+UNREAD" }]);
+    expect(res.checked).toEqual(["+UNREAD"]);
+  });
+
+  it("drops a message the label route DOES have, for a negative predicate", async () => {
+    const { gmail } = fakeApi(["m1", "m2"], { INBOX: ["m2"] });
+    const res = await gmail.crossCheckPredicates("-in:inbox", refsOf(["m1", "m2"]), 100);
+    expect(res.kept.map((r) => r.id)).toEqual(["m1"]);
+    expect(res.dropped).toEqual([{ id: "m2", threadId: "t-m2", predicate: "-INBOX" }]);
+  });
+
+  it("costs one list per predicate, not one per message", async () => {
+    const many = Array.from({ length: 400 }, (_, i) => `m${i}`);
+    const { gmail, calls } = fakeApi(many, { UNREAD: many, INBOX: [] });
+    await gmail.crossCheckPredicates("is:unread -in:inbox", refsOf(many), 1000);
+    expect(calls).toHaveLength(2);
+  });
+
+  it("names only the first predicate that failed, and drops the message once", async () => {
+    const { gmail } = fakeApi(["m1"], { UNREAD: [], INBOX: ["m1"] });
+    const res = await gmail.crossCheckPredicates("is:unread -in:inbox", refsOf(["m1"]), 100);
+    expect(res.dropped).toEqual([{ id: "m1", threadId: "t-m1", predicate: "+UNREAD" }]);
+    expect(res.kept).toEqual([]);
+  });
+
+  it("refuses to check a capped match set instead of dropping on a pagination artefact", async () => {
+    // The match set filled `max`, so a message absent from the label list may simply be on a
+    // page nobody fetched. Reporting that as a contradiction would delete mail for a bug.
+    const three = refsOf(["m1", "m2", "m3"]);
+    const { gmail, calls } = fakeApi(["m1", "m2", "m3"], { UNREAD: ["m1"] });
+    const res = await gmail.crossCheckPredicates("is:unread", three, 3);
+    expect(res).toEqual({
+      kept: three,
+      dropped: [],
+      checked: [],
+      capped: true,
+      skipped: ["+UNREAD"],
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("agrees silently when both routes say the same thing", async () => {
+    const { gmail } = fakeApi(["m1", "m2"], { UNREAD: ["m1", "m2"] });
+    const res = await gmail.crossCheckPredicates("is:unread", refsOf(["m1", "m2"]), 100);
+    expect(res.dropped).toEqual([]);
+    expect(res.kept).toHaveLength(2);
+  });
+});
+
 describe("Gmail.listMessageRefs / batchModifyMessages", () => {
   it("paginates messages.list and stops at the cap", async () => {
     const listCalls: any[] = [];

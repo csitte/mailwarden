@@ -86,6 +86,20 @@ export interface MessageRef {
   threadId: string;
 }
 
+/** What asking Gmail the same question through its label filter turned up. */
+export interface CrossCheckResult {
+  /** The messages both routes agree on — what a bulk action should act on. */
+  kept: MessageRef[];
+  /** Messages one route returned and the other contradicted, with the predicate that failed. */
+  dropped: { id: string; threadId: string; predicate: string }[];
+  /** Predicates that were actually compared. Empty when the query carries none to compare. */
+  checked: string[];
+  /** True when the match set was capped, which makes the comparison unsound — nothing was dropped. */
+  capped: boolean;
+  /** Predicates left unchecked because of that cap. */
+  skipped?: string[];
+}
+
 /** What a re-read after the batch found, per submitted message id. */
 export interface VerifiedBatchModify {
   /** Messages whose end state carries the requested change. */
@@ -1069,6 +1083,66 @@ export class Gmail {
       pageToken = res.data.nextPageToken ?? undefined;
     } while (pageToken && refs.length < max);
     return refs;
+  }
+
+  /**
+   * Ask Gmail the same question a second way, through its label filter instead of its query
+   * parser, and report where the two answers disagree.
+   *
+   * **What this is for.** `search` re-verifies its hits by fetching each one's live labels, which
+   * `bulk_modify` cannot afford: one fetch per hit, over a set sized in thousands. This costs one
+   * extra `messages.list` per predicate instead — flat in the number of predicates, independent
+   * of how many messages match. `labelIds` is Gmail's structured filter and `q` is its query
+   * parser, so `q: "… is:unread"` and `labelIds: ["UNREAD"]` are two routes to the same claim.
+   * Where they disagree, one of them is wrong about the mailbox and the message is left alone.
+   *
+   * **What this is NOT.** Agreement proves nothing. Both routes read Gmail's index, and an index
+   * that is stale can be stale consistently; only fetching the message settles it. So this can
+   * find contradictions and can never confirm correctness, and `unverifiedPredicates` keeps
+   * saying what it always said — those conditions still rest on the index, cross-checked or not.
+   * Whether the two routes ever diverge at all is unmeasured: `scripts/probe-crosscheck.mjs`
+   * measures it in a real mailbox, and until someone runs it there, this is a cheap safety net of
+   * unknown yield rather than a demonstrated one.
+   *
+   * **Why a capped match set is refused rather than checked.** Every cross-check list is a subset
+   * of the match set (it is the same query plus a label), so as long as the match set came back
+   * short of `max` it is complete and so is the comparison. Once the match set is capped, a
+   * message can be absent from a page rather than absent from the label — and reporting that as a
+   * contradiction would drop mail on an artefact of pagination. Capped therefore means not
+   * checked, and says so.
+   */
+  async crossCheckPredicates(
+    query: string,
+    refs: MessageRef[],
+    max: number,
+  ): Promise<CrossCheckResult> {
+    const filters = deriveLabelFilters(query);
+    const predicates = filters.map((f) => `${f.present ? "+" : "-"}${f.labelId}`);
+    if (filters.length === 0) return { kept: refs, dropped: [], checked: [], capped: false };
+    if (refs.length >= max) {
+      return { kept: refs, dropped: [], checked: [], capped: true, skipped: predicates };
+    }
+
+    const dropped: CrossCheckResult["dropped"] = [];
+    const out = new Set<string>();
+    for (const [i, f] of filters.entries()) {
+      const withLabel = new Set(
+        (await this.listMessageRefs({ query, labelIds: [f.labelId], max })).map((r) => r.id),
+      );
+      for (const ref of refs) {
+        // Present: the label route must also return it. Absent: it must not.
+        if (withLabel.has(ref.id) === f.present) continue;
+        if (out.has(ref.id)) continue; // already dropped by an earlier predicate
+        out.add(ref.id);
+        dropped.push({ id: ref.id, threadId: ref.threadId, predicate: predicates[i] });
+      }
+    }
+    return {
+      kept: refs.filter((r) => !out.has(r.id)),
+      dropped,
+      checked: predicates,
+      capped: false,
+    };
   }
 
   /** Max ids per messages.batchModify request (Gmail API limit). */

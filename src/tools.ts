@@ -539,6 +539,7 @@ function registerManageTools(server: McpServer): void {
         "Set verify:true to read the labels back afterwards and get `verified` {applied, notApplied[], unverifiable[]} — the only field here that reports an observed outcome. It costs one extra read per affected thread, so it is off by default; use it when a wrong 'done' would be acted on (trashing, or anything the user is told completed). " +
         "If more messages match than maxMessages, only the first maxMessages are processed and 'capped' is true — raise maxMessages or re-run to finish the rest. " +
         "NOTE: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. The staleness that makes search re-verify was measured on `threads.list` (132 threads returned, 114 carrying no unread message at all); the same query through the message index this tool uses returned 19 hits, none stale — same mailbox, same minute. So the known drift does not reach this path, but that is one measurement, not a guarantee: `unverifiedPredicates` in the result names the conditions taken on the index's word, and when the outcome must be read-state-precise, resolve the set with search (which verifies against live labels) and act on those thread ids instead. " +
+        "Set crossCheck:true to ask Gmail the same question a second way before writing: each derived predicate is re-run as a label filter (`labelIds`) instead of a query operator, and any message the two routes disagree about is left untouched and listed in `crossChecked.dropped`. It costs one extra list per predicate — flat, not per message — so unlike `verify` it stays cheap on a large sweep. Read it as a contradiction detector: a disagreement is real, agreement proves nothing, because both routes read the same index. `unverifiedPredicates` therefore stays as it is even when this runs. A capped match set is not cross-checked at all (`crossChecked.capped`), since a message missing from a page is not a message missing the label. " +
         "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. " +
         "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
@@ -554,6 +555,9 @@ function registerManageTools(server: McpServer): void {
         // Off by default: verification costs one threads.get per affected thread,
         // which a routine sweep should not pay silently.
         verify: z.boolean().default(false),
+        // Also off by default, for the opposite reason: it is cheap (one list per predicate)
+        // but its yield is unmeasured — see crossCheckPredicates in gmail.ts.
+        crossCheck: z.boolean().default(false),
       },
       outputSchema: {
         dryRun: z.boolean(),
@@ -579,6 +583,19 @@ function registerManageTools(server: McpServer): void {
         // Conditions in the query that search would have re-verified and this tool did not
         // (`+LABEL` = must be present, `-LABEL` = must be absent). Empty = nothing to distrust.
         unverifiedPredicates: z.array(z.string()),
+        // Present only with crossCheck:true. `dropped` messages were left untouched because
+        // Gmail's label filter contradicted its query parser about them.
+        crossChecked: z
+          .object({
+            predicates: z.array(z.string()),
+            droppedMessages: z.number(),
+            dropped: z.array(
+              z.object({ id: z.string(), threadId: z.string(), predicate: z.string() }),
+            ),
+            capped: z.boolean(),
+            skipped: z.array(z.string()).optional(),
+          })
+          .optional(),
         // Dry run only: names in `add` that don't exist yet and a real run would create.
         labelsToCreate: z.array(z.string()).optional(),
         failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
@@ -586,23 +603,43 @@ function registerManageTools(server: McpServer): void {
       // destructive: add:['TRASH'] over a broad query bulk-trashes existing mail.
       annotations: { title: "Bulk modify by query", ...write, destructiveHint: true },
     },
-    async ({ query, add, remove, maxMessages, dryRun, verify }) => {
+    async ({ query, add, remove, maxMessages, dryRun, verify, crossCheck }) => {
       if (add.length === 0 && remove.length === 0) {
         throw new ToolError("invalid_input", "bulk_modify needs at least one label in add or remove — nothing to do.");
       }
       const gmail = await client();
-      const refs = await gmail.listMessageRefs({ query, max: maxMessages });
-      const matchedThreads = [...new Set(refs.map((r) => r.threadId))];
+      const matched = await gmail.listMessageRefs({ query, max: maxMessages });
+      // The cross-check runs before anything is written, in the dry run too: a rehearsal that
+      // reported the full match set while the real run acted on a smaller one would be a
+      // rehearsal of something else.
+      const cross = crossCheck
+        ? await gmail.crossCheckPredicates(query, matched, maxMessages)
+        : undefined;
+      const refs = cross?.kept ?? matched;
+      const matchedThreads = [...new Set(matched.map((r) => r.threadId))];
       // Both id lists are capped — a 10k-thread sweep must not flood the model context.
       const shared = {
-        matchedMessages: refs.length,
+        matchedMessages: matched.length,
         matchedThreadCount: matchedThreads.length,
         matchedThreads: matchedThreads.slice(0, 500),
         // listMessageRefs stops at maxMessages: a full page means more may match.
-        capped: refs.length >= maxMessages,
+        capped: matched.length >= maxMessages,
         // Say which conditions rest on the index alone — in the dry run too, so a rehearsal
-        // cannot be mistaken for verification (it re-reads the same index).
+        // cannot be mistaken for verification (it re-reads the same index). The cross-check
+        // does NOT empty this list: it compares two routes into the same index, which can
+        // expose a contradiction and can never establish that the index is right.
         unverifiedPredicates: unverifiedPredicates(query),
+        ...(cross
+          ? {
+              crossChecked: {
+                predicates: cross.checked,
+                droppedMessages: cross.dropped.length,
+                dropped: cross.dropped.slice(0, 500),
+                capped: cross.capped,
+                ...(cross.skipped ? { skipped: cross.skipped } : {}),
+              },
+            }
+          : {}),
       };
       if (dryRun) {
         return ok({
