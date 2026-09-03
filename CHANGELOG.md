@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Every comparison column re-checked, and the column choice now says what it selects for.** The
+  three repositories were brought forward by diff against the revision on record — eleven commits
+  at `taylorwilsdon` (an OAuth client-secret-file fallback and label colours on the existing
+  `manage_gmail_label`), five at `a-bonus` (Docs, Drive and Sheets only), and none at all at
+  `klodr`, whose recent `pushed_at` is Dependabot branches rather than its default branch. None of
+  them touches a cell, and `docs/comparison-sources.json` records that this was a diff and not a
+  second reading of the same lines. Google's column was re-read in full: the same ten tools.
+  Separately, the footnote claimed the table shows the two largest community servers, which it does
+  not — `GongRzhe/Gmail-MCP-Server` is larger than one of them and is archived, with 112,163 npm
+  downloads in the month to 29 August 2026 against a last commit from August 2025. The footnote now
+  says *still under maintenance* and names the server it leaves out, because the most installed
+  Gmail MCP server being an unmaintained one is worth a reader knowing.
 - **The Google report was assigned, and the document says so.** `555806033` moved from `New` to
   `Assigned` on the day it was filed. The contrast with the 2018 duplicate — closed Can't Repro
   without a comment — is now in the document, along with what an assignment does *not* mean: it
