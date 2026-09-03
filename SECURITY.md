@@ -243,6 +243,13 @@ only this machine can reach.
   Requests run sequentially, never in parallel.
 - **Tier-gated.** `unsubscribe` and `bulk_unsubscribe` live in the `manage` tier; a `read` deployment
   gets only `list_unsubscribe` and `list_subscriptions`, which report the options and contact nobody.
+- **Body links are reported, never followed.** Where a thread carries no `List-Unsubscribe` header,
+  `list_unsubscribe` returns the unsubscribe links found in the message text. Those URLs are written
+  by the sender, so they get the treatment untrusted content gets: they are surfaced inside the
+  `<untrusted-tool-output>` fence for a person to judge, no request is made to them, and they cannot
+  be passed to `unsubscribe` — that tool still reads the header and nothing else. Following them would
+  be a request to an attacker-chosen URL derived from attacker-written text, which is the SSRF the
+  no-URL-parameter rule exists to prevent, reached by a route that never passes the address guard.
 
 Two residuals, stated plainly:
 

@@ -28,6 +28,119 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { parseSender } from "./digest.js";
 import type { Gmail, ThreadSummary } from "./gmail.js";
 
+/**
+ * An opt-out link found in the message body rather than in a header.
+ *
+ * Reported, never fetched, and never automatable — see {@link findBodyOptOutLinks}.
+ */
+export interface BodyOptOutLink {
+  /** The absolute `https:` URL, exactly as the message wrote it. */
+  url: string;
+  /** What made it look like an opt-out: the link's own text, or the URL itself. */
+  evidence: "link-text" | "url";
+  /** The anchor text, trimmed and shortened — empty for a bare URL in plain text. */
+  text: string;
+}
+
+/**
+ * Opt-out links a message advertises only in its body, for the case where it advertises none in
+ * its headers.
+ *
+ * **Why this exists.** A sender with no `List-Unsubscribe` header still usually puts an
+ * unsubscribe link at the foot of the mail. Without this the tool answers "no opt-out options"
+ * for such a sender, which is true about the headers and misleading about the mail.
+ *
+ * **Why it only reports.** `navbuildz/gmail-mcp-server` (read on 2026-09-03) does the other
+ * thing: on a missing header it scans the body and issues `fetch(link, {redirect: "follow"})` on
+ * what it finds. That is a request to an attacker-chosen URL, taken from attacker-written text,
+ * followed across redirects — the exact shape the SSRF guard above exists to prevent, reached by
+ * a path that never passes it. So these links are surfaced for a human to judge and are not
+ * eligible for {@link oneClickUnsubscribe}, which keeps reading the header and nothing else. The
+ * rule at the top of this file is unchanged: the URL is never a tool parameter, and nothing here
+ * gives a model a URL it can hand back to be fetched.
+ *
+ * **Why the vocabulary is narrow.** A false positive here is a link a person may click, so the
+ * words below are ones that mean opt-out and little else. "Manage preferences", "email settings"
+ * and their kin are deliberately absent: they lead to account pages as often as to opt-out forms,
+ * and a wrong link presented as an unsubscribe link is worse than no link at all.
+ */
+const OPT_OUT_WORDS =
+  /unsubscribe|un-subscribe|opt[-_ ]?out|abmelden|abbestellen|newsletter[-_ ]?abmeldung|d[ée]sabonn|desinscri|cancelar[-_ ]?(?:la[-_ ])?suscripci|darse[-_ ]de[-_ ]baja|disiscriv|uitschrijven|afmelden|avsluta[-_ ]?prenumeration/i;
+
+/** `<a href=…>text</a>`, tolerating single, double and unquoted attribute values. */
+const ANCHOR = /<a\b[^>]*?href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))[^>]*>([\s\S]*?)<\/a\s*>/gi;
+
+/** A bare absolute https URL in plain text, stopping before trailing punctuation. */
+const BARE_URL = /https:\/\/[^\s<>"')\]]+/gi;
+
+/** At most this many candidates: a newsletter footer holds dozens of links. */
+const MAX_BODY_CANDIDATES = 5;
+
+/**
+ * Anchor text as a person would read it: tags dropped, entities and whitespace collapsed.
+ *
+ * `joiner` is what a tag leaves behind, and both answers are needed. A space is right for
+ * display and for `Click<br>here`; the empty string is right for matching, because senders
+ * style mid-word — `<b>Unsub</b>scribe` reads as one word to everyone except a matcher that
+ * put a space where the tag was.
+ */
+function anchorText(html: string, joiner: " " | "" = " "): string {
+  return html
+    .replace(/<[^>]*>/g, joiner)
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&#(\d+);/g, (_m, d: string) => String.fromCharCode(Number(d)))
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Whether a string is an absolute `https:` URL worth reporting.
+ *
+ * `http:` is dropped for the same reason the header parser drops it, and a URL carrying
+ * credentials is dropped because an opt-out link never legitimately does.
+ */
+function usableUrl(raw: string): boolean {
+  let u: URL;
+  try {
+    u = new URL(raw.trim());
+  } catch {
+    return false;
+  }
+  return u.protocol === "https:" && !u.username && !u.password;
+}
+
+/**
+ * Find opt-out links in a message body. Pure: no request is made, here or by the caller.
+ *
+ * HTML anchors are read first, since an anchor pairs a URL with the words a reader would have
+ * clicked, which is the stronger evidence. Plain text contributes only URLs that carry an
+ * opt-out word themselves — a URL merely sitting near the word "unsubscribe" in running text is
+ * as likely to be the newsletter's homepage.
+ */
+export function findBodyOptOutLinks(body: { text?: string; html?: string }): BodyOptOutLink[] {
+  const out: BodyOptOutLink[] = [];
+  const seen = new Set<string>();
+  const add = (url: string, evidence: BodyOptOutLink["evidence"], text: string) => {
+    const trimmed = url.trim();
+    if (!usableUrl(trimmed) || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    out.push({ url: trimmed, evidence, text: text.slice(0, 120) });
+  };
+
+  for (const m of (body.html ?? "").matchAll(ANCHOR)) {
+    const href = m[1] ?? m[2] ?? m[3] ?? "";
+    const label = anchorText(m[4] ?? "");
+    const saysOptOut = OPT_OUT_WORDS.test(label) || OPT_OUT_WORDS.test(anchorText(m[4] ?? "", ""));
+    if (saysOptOut) add(href, "link-text", label);
+    else if (OPT_OUT_WORDS.test(href)) add(href, "url", label);
+  }
+  for (const m of (body.text ?? "").matchAll(BARE_URL)) {
+    if (OPT_OUT_WORDS.test(m[0])) add(m[0], "url", "");
+  }
+  return out.slice(0, MAX_BODY_CANDIDATES);
+}
+
 /** What a message's List-Unsubscribe headers offer. */
 export interface UnsubscribeOptions {
   /** Sender opted into RFC 8058 one-click AND provided an https URL — automatable. */
@@ -381,21 +494,47 @@ export interface UnsubscribeInfo extends UnsubscribeOptions {
   messageId: string;
   from: string;
   subject: string;
-  /** Any opt-out option at all was advertised. */
+  /**
+   * Any opt-out option at all was advertised **in the headers**.
+   *
+   * Deliberately unaffected by `bodyCandidates`: this flag has meant "the sender advertised an
+   * opt-out the standard way" since it existed, and widening it to include body links would
+   * silently change what every existing caller reads it as.
+   */
   hasUnsubscribe: boolean;
+  /**
+   * Opt-out links found in the message body, present only when the headers offered none.
+   *
+   * For a human to open. Never fetched here, and not usable by the `unsubscribe` tool — that one
+   * reads the header and nothing else.
+   */
+  bodyCandidates: BodyOptOutLink[];
 }
 
-/** Read-only: report a thread's opt-out options. Makes no outbound request. */
+/**
+ * Read-only: report a thread's opt-out options. Makes no outbound request to the sender.
+ *
+ * When the headers advertise nothing, the message body is searched for opt-out links before
+ * answering — otherwise a sender who puts its unsubscribe link only in the footer, as many do,
+ * comes back as having no opt-out at all, which is true of the headers and wrong about the mail.
+ * That search costs one `full` thread fetch and happens only in that case; a thread with a
+ * `List-Unsubscribe` header is answered from the metadata fetch alone, as before.
+ */
 export async function inspectUnsubscribe(gmail: Gmail, threadId: string): Promise<UnsubscribeInfo> {
   const h = await gmail.getUnsubscribeHeaders(threadId);
   const options = parseListUnsubscribe(h.listUnsubscribe, h.listUnsubscribePost);
+  const hasUnsubscribe = options.httpsUrls.length > 0 || options.mailtos.length > 0;
+  const bodyCandidates = hasUnsubscribe
+    ? []
+    : findBodyOptOutLinks(await gmail.getMessageBodies(threadId, h.messageId));
   return {
     threadId,
     messageId: h.messageId,
     from: h.from,
     subject: h.subject,
     ...options,
-    hasUnsubscribe: options.httpsUrls.length > 0 || options.mailtos.length > 0,
+    hasUnsubscribe,
+    bodyCandidates,
   };
 }
 

@@ -176,7 +176,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |
-| `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`) — contacts nobody |
+| `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`), plus body links when it advertises none — contacts nobody |
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id; an optional `backgroundColor`/`textColor` pair colours it, including one that already exists |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
@@ -245,6 +245,12 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
 `list_unsubscribe` (read tier) reports what the sender offers, without contacting anyone. It reads the
 newest message that actually carries a `List-Unsubscribe` header — a reply threaded onto a newsletter
 sits at the end and advertises nothing, which would otherwise read as "this list has no opt-out".
+When a thread advertises no opt-out header at all, `list_unsubscribe` looks in the message body and
+reports the unsubscribe links it finds there as `bodyCandidates` — plenty of senders put the link only
+in the footer, and answering "no opt-out options" for them is true about the headers and wrong about
+the mail. Those links are **reported, never fetched**, they cannot be handed to `unsubscribe`, and
+`hasUnsubscribe` stays false for them, because that flag has always described the headers. The search
+costs one full thread fetch and happens only in that case.
 `list_subscriptions` (read tier) does the same across a whole slice, grouped by sender, so you can see
 *who* keeps writing and which of them can actually be left — one header fetch per sender rather than
 per thread. `unsubscribe` and `bulk_unsubscribe` (manage tier) act on it — and that is the **only**
@@ -252,7 +258,11 @@ place mailwarden ever talks to a host that isn't Google, so the rules are tight:
 
 - **There is no URL parameter.** The endpoint comes from the message's own header and nowhere else.
   A URL argument would let a prompt-injected mail turn the tool into an exfiltration channel
-  (mailbox content in a query string); the header cannot carry data the model chose.
+  (mailbox content in a query string); the header cannot carry data the model chose. This is also why
+  a body link is only ever reported: it is a URL the sender wrote into the text, and fetching one would
+  reintroduce exactly the request this rule exists to prevent — by a path that never passes the guard.
+  Another Gmail server, `navbuildz/gmail-mcp-server`, does fetch them, following redirects, when the
+  header is missing.
 - **Only RFC 8058 one-click** is performed — the sender must have opted in via `List-Unsubscribe-Post`.
   A plain `https:` link is meant for a human in a browser and is handed back, not fetched.
 - **`mailto:` opt-outs are never performed.** They would require sending mail, which mailwarden cannot

@@ -943,6 +943,25 @@ export class Gmail {
    * measured — reported 2026-08-26 after an invoice with a 203 KB PDF came back as
    * `attachments: []` and was nearly archived as attachment-less.
    */
+  /**
+   * The decoded bodies of one message in a thread.
+   *
+   * A `full` thread fetch is the only way to reach a body: `messages.get` is not on the egress
+   * allowlist, because everything else here reads threads. That makes this the expensive call in
+   * the unsubscribe path, which is why its one caller reaches for it only when the cheap
+   * metadata fetch found no opt-out header at all.
+   */
+  async getMessageBodies(
+    threadId: string,
+    messageId: string,
+  ): Promise<{ text: string; html: string }> {
+    const res = await this.req(() =>
+      this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }),
+    );
+    const message = (res.data.messages ?? []).find((m) => m.id === messageId);
+    return collectBodies(message?.payload ?? undefined);
+  }
+
   async getThread(threadId: string, full = true): Promise<GetThreadResult> {
     const res = await this.req(() =>
       this.api.users.threads.get({

@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`list_unsubscribe` finds the link a sender put only in the footer.** With no `List-Unsubscribe`
+  header anywhere in the thread, the message body is searched and any unsubscribe links come back as
+  `bodyCandidates`, each with the anchor text that identified it. They are reported and never fetched:
+  a body link is a URL written by the sender, and requesting one would be the SSRF the no-URL-parameter
+  rule exists to prevent, reached by a path that never passes the guard. They are not eligible for
+  `unsubscribe`, which still reads the header alone, and `hasUnsubscribe` keeps describing the headers
+  so no existing caller reads it differently. The vocabulary is narrow on purpose — "manage preferences"
+  and its kin lead to account pages as often as to opt-out forms, and a wrong link offered as an
+  unsubscribe link is worse than none. Costs one full thread fetch, and only in the headerless case.
 - **`create_label` can colour a label, including one that already exists.** Gmail shows a label
   in colour only if it carries a `color` pair, and the label worth spotting at a glance — the
   snooze label, a triage bucket — was created long before anyone wanted it coloured. So passing

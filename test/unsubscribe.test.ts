@@ -5,6 +5,7 @@ import {
   isBlockedAddress,
   oneClickUnsubscribe,
   inspectUnsubscribe,
+  findBodyOptOutLinks,
   unsubscribeThread,
   groupSubscriptions,
   classifyOptOut,
@@ -384,7 +385,7 @@ describe("oneClickUnsubscribe", () => {
 // ---- IO layer against a fake Gmail API ----
 
 /** A gmail_v1-shaped double over an explicit list of messages (oldest first, m1…mN). */
-function gmailThread(messages: Record<string, string>[]) {
+function gmailThread(messages: Record<string, string>[], bodies: Body[] = []) {
   const api: any = {
     users: {
       threads: {
@@ -392,7 +393,10 @@ function gmailThread(messages: Record<string, string>[]) {
           data: {
             messages: messages.map((h, i) => ({
               id: `m${i + 1}`,
-              payload: { headers: Object.entries(h).map(([name, value]) => ({ name, value })) },
+              payload: {
+                headers: Object.entries(h).map(([name, value]) => ({ name, value })),
+                parts: bodyParts(bodies[i]),
+              },
             })),
           },
         })),
@@ -402,11 +406,124 @@ function gmailThread(messages: Record<string, string>[]) {
   return { gmail: new Gmail(api), api };
 }
 
+interface Body {
+  text?: string;
+  html?: string;
+}
+
+/** MIME parts for a message body, base64url-encoded the way Gmail returns them. */
+function bodyParts(body?: Body) {
+  if (!body) return undefined;
+  const part = (mimeType: string, s: string) => ({
+    mimeType,
+    body: { data: Buffer.from(s, "utf8").toString("base64url") },
+  });
+  return [
+    ...(body.text ? [part("text/plain", body.text)] : []),
+    ...(body.html ? [part("text/html", body.html)] : []),
+  ];
+}
+
 /** The common shape: an older message with a stale endpoint, then `headers`, then `extra`. */
 function gmailWith(headers: Record<string, string>, extra: Record<string, string>[] = []) {
   // m1's endpoint must never be the one picked — it belongs to an earlier mailing.
   return gmailThread([{ "List-Unsubscribe": "<https://old.example/u>" }, headers, ...extra]);
 }
+
+describe("findBodyOptOutLinks", () => {
+  const html = (s: string) => findBodyOptOutLinks({ html: s });
+
+  it("finds nothing in an empty or missing body", () => {
+    expect(findBodyOptOutLinks({})).toEqual([]);
+    expect(findBodyOptOutLinks({ text: "", html: "" })).toEqual([]);
+  });
+
+  it("takes the anchor whose TEXT says unsubscribe, whatever the URL looks like", () => {
+    expect(html('<a href="https://e.example/x/9f2">Unsubscribe</a>')).toEqual([
+      { url: "https://e.example/x/9f2", evidence: "link-text", text: "Unsubscribe" },
+    ]);
+  });
+
+  it("takes the anchor whose URL says it, whatever the text says", () => {
+    expect(html('<a href="https://e.example/unsubscribe?id=3">click here</a>')).toEqual([
+      { url: "https://e.example/unsubscribe?id=3", evidence: "url", text: "click here" },
+    ]);
+  });
+
+  it.each([
+    ["single quotes", "<a href='https://e.example/u'>Unsubscribe</a>"],
+    ["no quotes", "<a href=https://e.example/u >Unsubscribe</a>"],
+    ["other attributes first", '<a class="x" href="https://e.example/u" id="y">Unsubscribe</a>'],
+    ["nested markup in the text", '<a href="https://e.example/u"><b>Unsub</b>scribe</a>'],
+    ["text on its own lines", '<a href="https://e.example/u">\n  Unsubscribe\n</a>'],
+  ])("reads an anchor with %s", (_what, markup) => {
+    expect(html(markup).map((c) => c.url)).toEqual(["https://e.example/u"]);
+  });
+
+  it.each([
+    "Unsubscribe",
+    "opt out",
+    "Opt-Out",
+    "Abmelden",
+    "Newsletter abbestellen",
+    "Se désabonner",
+    "Darse de baja",
+    "Uitschrijven",
+  ])("reads %s — the words senders actually use, in the languages they mail in", (label) => {
+    expect(html(`<a href="https://e.example/u">${label}</a>`)).toHaveLength(1);
+  });
+
+  it("leaves account and preference links alone — a wrong link is worse than none", () => {
+    // These lead to profile pages as often as to opt-out forms, and a person will click
+    // whatever is presented as the unsubscribe link.
+    for (const label of ["Manage preferences", "Email settings", "My account", "View in browser"]) {
+      expect(html(`<a href="https://e.example/p">${label}</a>`)).toEqual([]);
+    }
+  });
+
+  it("refuses http, credentials and anything that is not a URL", () => {
+    expect(html('<a href="http://e.example/unsubscribe">Unsubscribe</a>')).toEqual([]);
+    expect(html('<a href="https://user:pw@e.example/u">Unsubscribe</a>')).toEqual([]);
+    expect(html('<a href="/relative/unsubscribe">Unsubscribe</a>')).toEqual([]);
+    expect(html('<a href="javascript:alert(1)">Unsubscribe</a>')).toEqual([]);
+    expect(html('<a href="mailto:off@e.example">Unsubscribe</a>')).toEqual([]);
+  });
+
+  it("takes a plain-text URL only when the URL itself says it", () => {
+    // A URL merely sitting near the word is as likely to be the newsletter's homepage.
+    expect(findBodyOptOutLinks({ text: "To unsubscribe visit https://e.example/home" })).toEqual([]);
+    expect(findBodyOptOutLinks({ text: "Stop: https://e.example/unsubscribe/7" })).toEqual([
+      { url: "https://e.example/unsubscribe/7", evidence: "url", text: "" },
+    ]);
+  });
+
+  it("does not swallow the punctuation that ends the sentence", () => {
+    expect(findBodyOptOutLinks({ text: "see https://e.example/unsubscribe)" })[0].url).toBe(
+      "https://e.example/unsubscribe",
+    );
+  });
+
+  it("reports each URL once, in the order the message wrote them", () => {
+    const body =
+      '<a href="https://e.example/u/1">Unsubscribe</a>' +
+      '<a href="https://e.example/u/1">Unsubscribe here</a>' +
+      '<a href="https://e.example/u/2">Abmelden</a>';
+    expect(html(body).map((c) => c.url)).toEqual(["https://e.example/u/1", "https://e.example/u/2"]);
+  });
+
+  it("caps the list — a footer can hold dozens", () => {
+    const body = Array.from(
+      { length: 12 },
+      (_, i) => `<a href="https://e.example/u/${i}">Unsubscribe</a>`,
+    ).join("");
+    expect(html(body)).toHaveLength(5);
+  });
+
+  it("shortens a long anchor text rather than passing a paragraph through", () => {
+    const long = "Unsubscribe " + "x".repeat(400);
+    expect(html(`<a href="https://e.example/u">${long}</a>`)[0].text).toHaveLength(120);
+  });
+});
 
 describe("inspectUnsubscribe", () => {
   it("reads the NEWEST message's headers and makes no request", async () => {
@@ -426,6 +543,7 @@ describe("inspectUnsubscribe", () => {
       httpsUrls: ["https://new.example/u/xyz"],
       mailtos: [],
       hasUnsubscribe: true,
+      bodyCandidates: [],
     });
   });
 
@@ -473,6 +591,45 @@ describe("inspectUnsubscribe", () => {
   it("throws on an empty thread", async () => {
     const api: any = { users: { threads: { get: async () => ({ data: { messages: [] } }) } } };
     await expect(inspectUnsubscribe(new Gmail(api), "t1")).rejects.toThrow(/no messages/);
+  });
+
+  it("reports body links when the headers advertise nothing", async () => {
+    const { gmail, api } = gmailThread(
+      [{ From: "Shop <news@shop.example>", Subject: "Sale" }],
+      [{ html: '<p>Bye</p><a href="https://shop.example/u/abc">Unsubscribe</a>' }],
+    );
+    const info = await inspectUnsubscribe(gmail, "t1");
+    expect(info.hasUnsubscribe).toBe(false); // the flag still describes the headers
+    expect(info.bodyCandidates).toEqual([
+      { url: "https://shop.example/u/abc", evidence: "link-text", text: "Unsubscribe" },
+    ]);
+    expect(api.users.threads.get).toHaveBeenCalledTimes(2); // metadata, then the body fetch
+  });
+
+  it("does not spend a body fetch when the header already answered", async () => {
+    const { gmail, api } = gmailWith(
+      { From: "News <n@e.com>", "List-Unsubscribe": "<https://e.com/u>" },
+      [],
+    );
+    const info = await inspectUnsubscribe(gmail, "t1");
+    expect(info.bodyCandidates).toEqual([]);
+    expect(api.users.threads.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads the body of the message it reported on, not the whole thread", async () => {
+    const { gmail } = gmailThread(
+      [
+        { From: "a@b.c", Subject: "old" },
+        { From: "a@b.c", Subject: "new" },
+      ],
+      [
+        { html: '<a href="https://old.example/unsubscribe">Unsubscribe</a>' },
+        { html: '<a href="https://new.example/unsubscribe">Unsubscribe</a>' },
+      ],
+    );
+    const info = await inspectUnsubscribe(gmail, "t1");
+    expect(info.messageId).toBe("m2");
+    expect(info.bodyCandidates.map((c) => c.url)).toEqual(["https://new.example/unsubscribe"]);
   });
 });
 

@@ -306,6 +306,8 @@ describe("tool results — structured content + fenced text", () => {
       httpsUrls: ["https://a.example/u"],
       mailtos: ["mailto:u@example.com"],
       hasUnsubscribe: true,
+      // Empty because the header answered: the body is only searched when it did not.
+      bodyCandidates: [],
     });
     expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
   });
