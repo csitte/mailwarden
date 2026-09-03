@@ -309,10 +309,57 @@ function registerReadTools(server: McpServer): void {
         emailAddress: z.string(),
         messagesTotal: z.number(),
         threadsTotal: z.number(),
+        // The mailbox's current position in its own event log. Keep it if you intend to ask
+        // what_changed later — mailwarden stores nothing between calls.
+        historyId: z.string(),
       },
       annotations: { title: "Get profile", ...readOnly },
     },
     async () => ok(await (await client()).getProfile()),
+  );
+
+  registerTool(
+    "what_changed",
+    {
+      description:
+        "What happened in the mailbox since a point you already hold: messages that arrived or were removed, and labels applied or taken off — from Gmail's own event log, in one call. " +
+        "Pass the `historyId` a previous what_changed or get_profile returned; the reply carries the next one to keep. mailwarden stores NOTHING between calls, so the id lives with you. " +
+        "Reports EVENTS, not current state: a message that was marked unread and then read appears under both, and both are true. For how the mailbox looks NOW, use search or get_thread. " +
+        "Gmail keeps roughly a week of history. An id older than that is an ERROR, never an empty result — it means the question can no longer be answered incrementally, so take a fresh historyId from get_profile and re-establish state with search. " +
+        "`labelId` narrows the feed to events touching one label (e.g. 'INBOX', or a snooze label). Counts are complete even when the id lists are cut at 200 (`truncated`). " +
+        "USE WHEN: a recurring check — 'what came in since I last looked', watching a label, or confirming a bulk action landed. Far cheaper than re-running a search over the whole slice. " +
+        "DO NOT USE: for a first look at a mailbox (there is no id yet — start with triage_digest or search), or to read content: this returns ids only, no sender, subject or body. " +
+        "SIDE EFFECTS: none.",
+      inputSchema: {
+        sinceHistoryId: z.string().min(1),
+        labelId: z.string().optional(),
+        max: z.number().int().min(1).max(2000).default(500),
+      },
+      outputSchema: {
+        historyId: z.string(),
+        added: z.array(z.object({ id: z.string(), threadId: z.string() })),
+        deleted: z.array(z.object({ id: z.string(), threadId: z.string() })),
+        labelsAdded: z.array(
+          z.object({
+            labelId: z.string(),
+            messages: z.number(),
+            threadIds: z.array(z.string()),
+          }),
+        ),
+        labelsRemoved: z.array(
+          z.object({
+            labelId: z.string(),
+            messages: z.number(),
+            threadIds: z.array(z.string()),
+          }),
+        ),
+        records: z.number(),
+        truncated: z.boolean(),
+      },
+      annotations: { title: "What changed", ...readOnly },
+    },
+    async ({ sinceHistoryId, labelId, max }) =>
+      ok(await (await client()).listHistory(sinceHistoryId, { labelId, max })),
   );
 
   registerTool(

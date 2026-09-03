@@ -107,6 +107,7 @@ const USED = new Set([
   "GET /gmail/v1/users/me/messages",
   "POST /gmail/v1/users/me/messages/batchModify",
   "GET /gmail/v1/users/me/messages/M/attachments/A",
+  "GET /gmail/v1/users/me/history",
   "GET /gmail/v1/users/me/labels",
   "POST /gmail/v1/users/me/labels",
   "PATCH /gmail/v1/users/me/labels/L",

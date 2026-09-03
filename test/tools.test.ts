@@ -26,10 +26,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 25 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 26 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(25);
+    expect(tools).toHaveLength(26);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -49,6 +49,7 @@ describe("registerTools — tool surface", () => {
       "list_unsubscribe",
       "search",
       "triage_digest",
+      "what_changed",
     ]);
     for (const t of tools) expect(t.annotations?.readOnlyHint).toBe(true);
   });
@@ -61,7 +62,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("create_filter"); // filters tier
     expect(names).not.toContain("archive"); // manage tier excluded
     expect(names).not.toContain("snooze");
-    expect(names).toHaveLength(11); // 8 read + 3 filters
+    expect(names).toHaveLength(12); // 9 read + 3 filters
   });
 
   it("MAILWARDEN_TOOLS can register a single tier on its own", async () => {
@@ -81,7 +82,7 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("list_filters");
     expect(names).not.toContain("create_filter");
     expect(names).not.toContain("delete_filter");
-    expect(names).toHaveLength(22); // 25 - 3 filter tools
+    expect(names).toHaveLength(23); // 26 - 3 filter tools
   });
 });
 
@@ -320,7 +321,7 @@ describe("tool results — structured content + fenced text", () => {
             emailAddress: "me@example.com",
             messagesTotal: 1200,
             threadsTotal: 640,
-            historyId: "99001", // present on the API response but not surfaced by the tool
+            historyId: "99001", // the resume point a caller keeps for what_changed
           },
         }),
       },
@@ -330,10 +331,67 @@ describe("tool results — structured content + fenced text", () => {
 
     expect(res.structuredContent).toEqual({
       emailAddress: "me@example.com",
+      historyId: "99001",
       messagesTotal: 1200,
       threadsTotal: 640,
     });
     expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
+  });
+
+  it("what_changed folds the history feed and hands back the next resume point", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        history: {
+          list: async (req: any) => ({
+            data: {
+              history: [
+                {
+                  id: "1",
+                  messagesAdded: [{ message: { id: "m1", threadId: "t1" } }],
+                  labelsRemoved: [{ message: { id: "m2", threadId: "t2" }, labelIds: ["UNREAD"] }],
+                },
+              ],
+              historyId: req.startHistoryId === "100" ? "140" : "0",
+            },
+          }),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "what_changed",
+      arguments: { sinceHistoryId: "100" },
+    });
+
+    expect(res.structuredContent).toEqual({
+      historyId: "140",
+      added: [{ id: "m1", threadId: "t1" }],
+      deleted: [],
+      labelsAdded: [],
+      labelsRemoved: [{ labelId: "UNREAD", messages: 1, threadIds: ["t2"] }],
+      records: 1,
+      truncated: false,
+    });
+    expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
+  });
+
+  it("what_changed reports an expired start id as an error, not as silence", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        history: {
+          list: async () => {
+            throw Object.assign(new Error("Not Found"), { code: 404 });
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "what_changed",
+      arguments: { sinceHistoryId: "1" },
+    });
+    expect(res.isError).toBe(true);
+    expect(res.content[0].text).toMatch(/does NOT mean nothing changed/);
   });
 
   it("triage_digest aggregates a search slice into sender/label/age buckets", async () => {

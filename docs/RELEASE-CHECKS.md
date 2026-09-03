@@ -453,8 +453,8 @@ Zwei Beobachtungen aus derselben Runde, beide über die Bridge:
 - **Zahlen in einer Belegliste sind gefährlicher als im Fließtext.** csittes Verifikation gegen das
   publizierte Paket — die richtige Methode — nannte „genau vierzehn Endpunkte" für die
   Egress-Allowlist. Damals waren es **13 Einträge** in `ALLOWED` und **15 Endpunkte** (einer fasst
-  `modify|trash|untrash` zusammen); vierzehn war keine von beiden. Seit `labels.patch` (03.09.)
-  sind es 14 und 16 — was den Punkt eher schärft: eine Zahl in einer Belegliste altert mit jedem
+  `modify|trash|untrash` zusammen); vierzehn war keine von beiden. Seit `labels.patch` und `history.list` (beide 03.09.)
+  sind es 15 und 17 — was den Punkt eher schärft: eine Zahl in einer Belegliste altert mit jedem
   Endpunkt, den jemand hinzufügt, und niemand meldet das der Gegenseite. Auf der Seite fing es deren Regel
   „keine Zählungen im Fließtext" ab. In einer Belegliste greift die Regel nicht — dort ist die Zahl
   ja der Beleg. **Eine Prüfung gegen das publizierte Paket ist so viel wert wie ihre Zählung.**

@@ -16,6 +16,7 @@ describe("checkEgress — what may leave", () => {
     ["GET", `${GMAIL}/messages?q=label%3Ainbox`],
     ["POST", `${GMAIL}/messages/batchModify`],
     ["GET", `${GMAIL}/messages/m1/attachments/a1`],
+    ["GET", `${GMAIL}/history?startHistoryId=1`],
     ["GET", `${GMAIL}/labels`],
     ["POST", `${GMAIL}/labels`],
     ["PATCH", `${GMAIL}/labels/Label_7`],
@@ -48,7 +49,6 @@ describe("checkEgress — what may leave", () => {
   });
 
   it("refuses an endpoint that is simply not on the allowlist", () => {
-    expect(checkEgress("GET", `${GMAIL}/history`)).toMatch(/allowlist/);
     expect(checkEgress("GET", `${GMAIL}/messages/m1`)).toMatch(/allowlist/); // we read threads
     expect(checkEgress("POST", `${GMAIL}/watch`)).toMatch(/allowlist/);
   });
@@ -151,6 +151,7 @@ describe("guardEgress — in front of the real googleapis client", () => {
     await gmail.users.messages.list({ userId: "me", q: "is:unread" });
     await gmail.users.messages.batchModify({ userId: "me", requestBody: { ids: ["m1"] } });
     await gmail.users.messages.attachments.get({ userId: "me", messageId: "m1", id: "a1" });
+    await gmail.users.history.list({ userId: "me", startHistoryId: "1" });
     await gmail.users.labels.list({ userId: "me" });
     await gmail.users.labels.create({ userId: "me", requestBody: { name: "x" } });
     await gmail.users.labels.patch({
@@ -162,7 +163,7 @@ describe("guardEgress — in front of the real googleapis client", () => {
     await gmail.users.settings.filters.list({ userId: "me" });
     await gmail.users.settings.filters.create({ userId: "me", requestBody: {} });
     await gmail.users.settings.filters.delete({ userId: "me", id: "f1" });
-    expect(calls).toHaveLength(16);
+    expect(calls).toHaveLength(17);
   });
 
   it("wraps only once, so a cached client cannot stack guards", () => {

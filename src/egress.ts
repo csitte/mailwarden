@@ -86,6 +86,7 @@ const ALLOWED: Rule[] = [
     path: new RegExp(`^${U}/messages/[^/]+/attachments/[^/]+$`),
     what: "get an attachment",
   },
+  { method: "GET", path: new RegExp(`^${U}/history$`), what: "list mailbox history" },
   { method: "GET", path: new RegExp(`^${U}/labels$`), what: "list labels" },
   { method: "POST", path: new RegExp(`^${U}/labels$`), what: "create a label" },
   // PATCH, not PUT: `labels.patch` merges, so a colour can be set without resending the label's

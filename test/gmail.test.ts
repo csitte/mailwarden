@@ -1295,7 +1295,7 @@ describe("Gmail.getProfile", () => {
             emailAddress: "me@example.com",
             messagesTotal: 4321,
             threadsTotal: 987,
-            historyId: "556677", // present on the API but deliberately not surfaced
+            historyId: "556677", // the resume point for what_changed
           },
         }),
       },
@@ -1304,6 +1304,7 @@ describe("Gmail.getProfile", () => {
       emailAddress: "me@example.com",
       messagesTotal: 4321,
       threadsTotal: 987,
+      historyId: "556677",
     });
   });
 
@@ -1319,6 +1320,7 @@ describe("Gmail.getProfile", () => {
       emailAddress: "",
       messagesTotal: 0,
       threadsTotal: 0,
+      historyId: "",
     });
   });
 });
@@ -1486,6 +1488,82 @@ describe("Gmail.trash / untrash / deleteLabel — API pass-through", () => {
     expect(calls.trash).toMatchObject({ userId: "me", id: "th-1" });
     expect(calls.untrash).toMatchObject({ userId: "me", id: "th-2" });
     expect(calls.delete).toMatchObject({ userId: "me", id: "Label_3" });
+  });
+});
+
+describe("Gmail.listHistory", () => {
+  function fakeApi(pages: any[]) {
+    const calls: any[] = [];
+    let i = 0;
+    const api: any = {
+      users: {
+        history: {
+          list: async (req: any) => {
+            calls.push(req);
+            const page = pages[i++];
+            if (page instanceof Error) throw page;
+            return { data: page };
+          },
+        },
+      },
+    };
+    return { gmail: new Gmail(api as gmail_v1.Gmail), calls };
+  }
+
+  it("folds one page and reports the mailbox's current id", async () => {
+    const { gmail, calls } = fakeApi([
+      {
+        history: [{ id: "1", messagesAdded: [{ message: { id: "m1", threadId: "t1" } }] }],
+        historyId: "555",
+      },
+    ]);
+    const s = await gmail.listHistory("500");
+    expect(s.added).toEqual([{ id: "m1", threadId: "t1" }]);
+    expect(s.historyId).toBe("555");
+    expect(calls[0].startHistoryId).toBe("500");
+  });
+
+  it("follows pages up to max and asks only for what is still missing", async () => {
+    const page = (n: number, token?: string) => ({
+      history: Array.from({ length: n }, (_, i) => ({
+        id: String(i),
+        messagesAdded: [{ message: { id: `m${i}`, threadId: `t${i}` } }],
+      })),
+      historyId: "900",
+      ...(token ? { nextPageToken: token } : {}),
+    });
+    const { gmail, calls } = fakeApi([page(500, "p2"), page(100)]);
+    const s = await gmail.listHistory("1", { max: 600 });
+    expect(s.records).toBe(600);
+    expect(calls[0].maxResults).toBe(500);
+    expect(calls[1].maxResults).toBe(100);
+    expect(calls[1].pageToken).toBe("p2");
+  });
+
+  it("passes a label filter through", async () => {
+    const { gmail, calls } = fakeApi([{ history: [], historyId: "2" }]);
+    await gmail.listHistory("1", { labelId: "INBOX" });
+    expect(calls[0].labelId).toBe("INBOX");
+  });
+
+  it("still returns a resume point when nothing happened", async () => {
+    const { gmail } = fakeApi([{ historyId: "610" }]);
+    const s = await gmail.listHistory("600");
+    expect(s).toMatchObject({ historyId: "610", records: 0, added: [], truncated: false });
+  });
+
+  it("turns an expired start id into an error, never into an empty result", async () => {
+    // "Nothing changed" and "I can no longer tell you what changed" call for opposite
+    // reactions. A catch that returned an empty summary here would be the dangerous one.
+    const expired = () => Object.assign(new Error("Not Found"), { code: 404 });
+    const { gmail } = fakeApi([expired(), expired()]);
+    await expect(gmail.listHistory("1")).rejects.toThrow(/does NOT mean nothing changed/);
+    await expect(gmail.listHistory("1")).rejects.toThrow(/get_profile/);
+  });
+
+  it("leaves other failures to their own classification", async () => {
+    const { gmail } = fakeApi([Object.assign(new Error("Insufficient Permission"), { code: 403 })]);
+    await expect(gmail.listHistory("1")).rejects.toThrow(/missing a Gmail scope/);
   });
 });
 

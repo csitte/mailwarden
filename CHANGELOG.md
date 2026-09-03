@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`what_changed`: mailbox events since a point you already hold.** A recurring "what came in since
+  I last looked" used to mean searching the whole slice again. This answers it from Gmail's own
+  history feed in one call — arrivals, removals, and labels applied or taken off, grouped by label —
+  and hands back the next id to keep. `get_profile` now returns the mailbox's current `historyId` so
+  there is a first one to start from. It is **not** a cache: the only state involved is that single
+  number, and it lives with the caller, so nothing about the mailbox is stored here and every call
+  stays live. It reports events rather than state — a message marked unread and then read appears
+  under both, and both happened — and an id older than the week Gmail keeps comes back as an error
+  naming the fallback, never as an empty result, since "nothing changed" and "I can no longer tell
+  you" call for opposite reactions. Read tier, `users.history.list` added to the egress allowlist.
 - **`bulk_modify` can cross-check its match set against Gmail's label filter.** With
   `crossCheck: true`, each predicate derived from the query is re-run as `labelIds` instead of a
   query operator, and every message the two routes disagree about is left untouched and listed in

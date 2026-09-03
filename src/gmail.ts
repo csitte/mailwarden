@@ -6,6 +6,7 @@ import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { parseAuthentication, type Authentication } from "./authentication.js";
 import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
+import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./history.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -1256,13 +1257,70 @@ export class Gmail {
     emailAddress: string;
     messagesTotal: number;
     threadsTotal: number;
+    historyId: string;
   }> {
     const res = await this.req(() => this.api.users.getProfile({ userId: "me" }));
     return {
       emailAddress: res.data.emailAddress ?? "",
       messagesTotal: res.data.messagesTotal ?? 0,
       threadsTotal: res.data.threadsTotal ?? 0,
+      // The mailbox's current position in its own event log — the starting point for
+      // `what_changed`. Returned here because a caller needs a first one from somewhere,
+      // and this is the cheapest call that has it.
+      historyId: res.data.historyId ?? "",
     };
+  }
+
+  /**
+   * Mailbox events since a history id, folded into a summary.
+   *
+   * Nothing is stored: the caller supplies the id it was given last time, which is the whole of
+   * the state involved. See `history.ts` for why that keeps the no-cache rule intact.
+   *
+   * A `startHistoryId` Gmail no longer holds — roughly a week — comes back as a 404, and that
+   * needs to reach the caller as its own answer rather than as an empty result. "Nothing changed"
+   * and "I can no longer tell you what changed" call for opposite reactions, and only one of them
+   * is safe to act on.
+   */
+  async listHistory(
+    startHistoryId: string,
+    opts: { labelId?: string; max?: number } = {},
+  ): Promise<HistorySummary> {
+    const max = opts.max ?? 500;
+    const records: RawHistoryRecord[] = [];
+    let historyId = startHistoryId;
+    let pageToken: string | undefined;
+    try {
+      do {
+        const token = pageToken;
+        const res = await this.req(() =>
+          this.api.users.history.list({
+            userId: "me",
+            startHistoryId,
+            ...(opts.labelId ? { labelId: opts.labelId } : {}),
+            maxResults: Math.min(500, max - records.length),
+            ...(token ? { pageToken: token } : {}),
+          }),
+        );
+        records.push(...(res.data.history ?? []));
+        // Gmail reports the mailbox's current id on every page; the last one seen is the
+        // one to resume from, and it is correct even when no record came back at all.
+        if (res.data.historyId) historyId = res.data.historyId;
+        pageToken = res.data.nextPageToken ?? undefined;
+      } while (pageToken && records.length < max);
+    } catch (err) {
+      if (statusOf(err) === 404) {
+        throw new ToolError(
+          "invalid_input",
+          `Gmail no longer holds history from ${startHistoryId} — it keeps roughly a week, and ` +
+            "anything older is gone. This does NOT mean nothing changed: it means the question " +
+            "cannot be answered incrementally any more. Take a fresh historyId from get_profile " +
+            "and establish the current state with search instead.",
+        );
+      }
+      throw err;
+    }
+    return summarizeHistory(records, historyId);
   }
 
   async listLabels(): Promise<LabelInfo[]> {

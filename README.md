@@ -124,6 +124,25 @@ There is a second script next to it, `node scripts/probe-reverify.mjs`, which me
 
 The demo drives the real `search()` against a fake Gmail API whose index is deliberately stale (returns a read thread for an `is:unread` query, exactly as Gmail does) and shows mailwarden dropping the false positive. It asserts the outcome, so it exits non-zero if the behavior ever regresses. The same case is locked by unit tests in [`test/gmail.test.ts`](https://github.com/csitte/mailwarden/blob/main/test/gmail.test.ts) (*"drops index false positives via live-label re-verify"*).
 
+### Asking again without asking for everything
+
+A recurring check — *what came in since I last looked* — is the expensive shape for a live server: the
+obvious way to answer it is to search the whole slice again and compare. `what_changed` (read tier)
+answers it from Gmail's own event log instead. Hand it the `historyId` a previous call or `get_profile`
+returned, and it comes back with what arrived, what left, and which labels went on or came off, plus the
+next id to keep.
+
+**This is not a cache, and the distinction is the whole design.** The only thing that persists between
+calls is one number, and it persists in the *caller*. mailwarden still stores nothing about the mailbox,
+keeps no mirror and no index, and every call remains live against the Gmail API — the same rule as
+everywhere else here.
+
+Two properties worth knowing before relying on it. It reports **events, not state**: a message marked
+unread and then read appears under both, and both are true — for how the mailbox looks *now*, ask
+`search`. And Gmail keeps roughly a week of history, after which an id is refused; mailwarden turns that
+refusal into an error rather than an empty result, because *nothing changed* and *I can no longer tell
+you what changed* call for opposite reactions and only one of them is safe to act on.
+
 ### Judging a sender — what `authentication` answers, and what it doesn't
 
 Every message from `get_thread` carries an `authentication` object: the SPF, DKIM and DMARC
@@ -176,7 +195,8 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `otherReports` for reports that were not read, and `unchecked: true` when the message carried no report at all — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
 | `list_labels` | All labels (system + user) |
-| `get_profile` | Connected account's address + total message/thread counts — confirm *which* mailbox is wired up before acting |
+| `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting |
+| `what_changed` | Mailbox events since a `historyId` you hold — arrivals, removals, labels on and off, in one call |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |
 | `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`), plus body links when it advertises none — contacts nobody |
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
@@ -379,7 +399,7 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   without a recorded scope are advertised as before, with the runtime insufficient-scope message as the
   fallback.
 - **Read-only mode.** Set `MAILWARDEN_READONLY=1` (shorthand for `MAILWARDEN_TOOLS=read`) and only the
-  read tools (`search`, `get_thread`, `list_labels`, `list_snoozed`, `get_profile`, `triage_digest`,
+  read tools (`search`, `get_thread`, `list_labels`, `list_snoozed`, `get_profile`, `what_changed`, `triage_digest`,
   `list_unsubscribe`, `list_subscriptions`)
   are registered — nothing that can change the mailbox or write
   files is even advertised to clients (the filter tools, which need the broader `gmail.settings.basic`
