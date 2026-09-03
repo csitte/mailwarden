@@ -88,6 +88,9 @@ const ALLOWED: Rule[] = [
   },
   { method: "GET", path: new RegExp(`^${U}/labels$`), what: "list labels" },
   { method: "POST", path: new RegExp(`^${U}/labels$`), what: "create a label" },
+  // PATCH, not PUT: `labels.patch` merges, so a colour can be set without resending the label's
+  // name and visibility. `labels.update` would replace the resource and is not enabled.
+  { method: "PATCH", path: new RegExp(`^${U}/labels/[^/]+$`), what: "recolour a label" },
   { method: "DELETE", path: new RegExp(`^${U}/labels/[^/]+$`), what: "delete a label" },
   { method: "GET", path: new RegExp(`^${U}/settings/filters$`), what: "list filters" },
   { method: "POST", path: new RegExp(`^${U}/settings/filters$`), what: "create a filter" },

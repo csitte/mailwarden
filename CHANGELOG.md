@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`create_label` can colour a label, including one that already exists.** Gmail shows a label
+  in colour only if it carries a `color` pair, and the label worth spotting at a glance — the
+  snooze label, a triage bucket — was created long before anyone wanted it coloured. So passing
+  `backgroundColor` and `textColor` to an existing name recolours it via `labels.patch` rather
+  than doing nothing, which is the only way to reach a label already in the mailbox. The new
+  endpoint is on the egress allowlist as its own entry, so the allowlist now holds fourteen rules
+  over sixteen endpoints. What is validated here is the shape (`#rrggbb`) and the pairing, both
+  documented and stable; membership in Gmail's palette is deliberately left to Gmail, because the
+  two published versions of that palette disagree — Google's reference lists 102 values and
+  `taylorwilsdon/google_workspace_mcp` carries 113 of which the documented set is a strict subset.
+  A filter built on either would refuse colours Gmail takes or promise ones it refuses, so Gmail
+  decides and its bare 400 is translated into a sentence that names the palette as the likely cause.
+
 ### Changed
 - **Every comparison column re-checked, and the column choice now says what it selects for.** The
   three repositories were brought forward by diff against the revision on record — eleven commits

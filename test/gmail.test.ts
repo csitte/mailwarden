@@ -1189,21 +1189,36 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
 });
 
 describe("Gmail.ensureLabel", () => {
-  function fakeApi() {
+  function fakeApi(opts: { patchFails?: unknown } = {}) {
     const created: any[] = [];
+    const patched: any[] = [];
     const api: any = {
       users: {
         labels: {
-          list: async () => ({ data: { labels: [{ id: "Label_9", name: "ToDo", type: "user" }] } }),
+          list: async () => ({
+            data: {
+              labels: [
+                { id: "Label_9", name: "ToDo", type: "user" },
+                { id: "INBOX", name: "INBOX", type: "system" },
+              ],
+            },
+          }),
           create: async (req: any) => {
             created.push(req);
             return { data: { id: "Label_NEW" } };
           },
+          patch: async (req: any) => {
+            patched.push(req);
+            if (opts.patchFails) throw opts.patchFails;
+            return { data: { id: req.id } };
+          },
         },
       },
     };
-    return { api, created };
+    return { api, created, patched };
   }
+
+  const RED = { backgroundColor: "#fb4c2f", textColor: "#ffffff" };
 
   it("returns the existing id on a case-insensitive name match (no create)", async () => {
     const { api, created } = fakeApi();
@@ -1217,6 +1232,57 @@ describe("Gmail.ensureLabel", () => {
     const gmail = new Gmail(api as gmail_v1.Gmail);
     expect(await gmail.ensureLabel("Brand/New")).toBe("Label_NEW");
     expect(created[0].requestBody.name).toBe("Brand/New");
+  });
+
+  it("creates a new label carrying the colour in the same request", async () => {
+    const { api, created, patched } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    expect(await gmail.ensureLabel("Brand/New", RED)).toBe("Label_NEW");
+    expect(created[0].requestBody.color).toEqual(RED);
+    expect(patched).toHaveLength(0); // one request, not create-then-recolour
+  });
+
+  it("recolours a label that already exists — the case that matters for an old snooze label", async () => {
+    const { api, created, patched } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    expect(await gmail.ensureLabel("todo", RED)).toBe("Label_9");
+    expect(created).toHaveLength(0);
+    expect(patched[0]).toMatchObject({ id: "Label_9", requestBody: { color: RED } });
+  });
+
+  it("leaves an existing label alone when no colour is given", async () => {
+    const { api, patched } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await gmail.ensureLabel("todo");
+    expect(patched).toHaveLength(0);
+  });
+
+  it("refuses to colour a system label before spending a request on it", async () => {
+    const { api, patched } = fakeApi();
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await expect(gmail.ensureLabel("INBOX", RED)).rejects.toThrow(/system label/);
+    expect(patched).toHaveLength(0);
+  });
+
+  it("turns Gmail's bare 400 into a sentence naming the palette", async () => {
+    const { api } = fakeApi({ patchFails: Object.assign(new Error("Invalid color"), { code: 400 }) });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await expect(gmail.ensureLabel("todo", { ...RED, backgroundColor: "#123456" })).rejects.toThrow(
+      /palette/,
+    );
+  });
+
+  it("leaves a non-400 failure to its own classification", async () => {
+    // A 403 here is Google's missing-scope answer, and `req` already turns it into the
+    // re-authorize message. The colour translation must not push itself in front of that:
+    // telling someone to pick another colour when the token cannot write at all sends them
+    // looking in the wrong place.
+    const { api } = fakeApi({
+      patchFails: Object.assign(new Error("Insufficient Permission"), { code: 403 }),
+    });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await expect(gmail.ensureLabel("todo", RED)).rejects.toThrow(/missing a Gmail scope/);
+    await expect(gmail.ensureLabel("todo", RED)).rejects.not.toThrow(/palette/);
   });
 });
 

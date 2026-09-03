@@ -12,6 +12,7 @@ import {
 } from "./unsubscribe.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { ALL_SIGNALS } from "./signals.js";
+import { resolveLabelColor } from "./labels.js";
 import { fenceOutput, sanitizeStructured } from "./sanitize.js";
 import { classifyError } from "./errors.js";
 import { ToolError } from "./cli.js";
@@ -470,14 +471,29 @@ function registerManageTools(server: McpServer): void {
       description:
         "Create a user label and return its id. Idempotent: if the name already exists (case-insensitive), its existing id is returned and nothing is created. " +
         "Nested labels: separate levels with '/' (e.g. 'Clients/Acme') — each missing parent level is created too. " +
-        "USE WHEN: you want a label's id up front, or to pre-create a label without applying it to anything. " +
+        "Colour: pass backgroundColor AND textColor together as '#rrggbb' (Gmail rejects one without the other, and accepts only colours from its own palette). " +
+        "Giving a colour for a label that already exists RECOLOURS it — that is how an existing label, such as the snooze label, gets a colour. " +
+        "Gmail colours only labels you created yourself; system labels like INBOX or CATEGORY_UPDATES refuse one. " +
+        "USE WHEN: you want a label's id up front, to pre-create a label without applying it to anything, or to make an existing label visible at a glance in Gmail. " +
         "DO NOT USE: just to file mail under a new label — modify_labels/bulk_modify already auto-create an unknown name passed in `add`. " +
-        "SIDE EFFECTS: creates the label if missing; no mail is changed.",
-      inputSchema: { name: z.string().min(1) },
-      outputSchema: { id: z.string(), name: z.string() },
+        "SIDE EFFECTS: creates the label if missing, and sets its colour when one is given; no mail is changed.",
+      inputSchema: {
+        name: z.string().min(1),
+        backgroundColor: z.string().optional(),
+        textColor: z.string().optional(),
+      },
+      outputSchema: {
+        id: z.string(),
+        name: z.string(),
+        color: z.object({ backgroundColor: z.string(), textColor: z.string() }).optional(),
+      },
       annotations: { title: "Create label", ...write },
     },
-    async ({ name }) => ok({ id: await (await client()).ensureLabel(name), name }),
+    async ({ name, backgroundColor, textColor }) => {
+      const color = resolveLabelColor(backgroundColor, textColor);
+      const id = await (await client()).ensureLabel(name, color);
+      return ok({ id, name, ...(color ? { color } : {}) });
+    },
   );
 
   registerTool(

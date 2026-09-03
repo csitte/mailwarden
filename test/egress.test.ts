@@ -18,6 +18,7 @@ describe("checkEgress — what may leave", () => {
     ["GET", `${GMAIL}/messages/m1/attachments/a1`],
     ["GET", `${GMAIL}/labels`],
     ["POST", `${GMAIL}/labels`],
+    ["PATCH", `${GMAIL}/labels/Label_7`],
     ["DELETE", `${GMAIL}/labels/Label_7`],
     ["GET", `${GMAIL}/settings/filters`],
     ["POST", `${GMAIL}/settings/filters`],
@@ -152,11 +153,16 @@ describe("guardEgress — in front of the real googleapis client", () => {
     await gmail.users.messages.attachments.get({ userId: "me", messageId: "m1", id: "a1" });
     await gmail.users.labels.list({ userId: "me" });
     await gmail.users.labels.create({ userId: "me", requestBody: { name: "x" } });
+    await gmail.users.labels.patch({
+      userId: "me",
+      id: "Label_7",
+      requestBody: { color: { backgroundColor: "#fb4c2f", textColor: "#ffffff" } },
+    });
     await gmail.users.labels.delete({ userId: "me", id: "Label_7" });
     await gmail.users.settings.filters.list({ userId: "me" });
     await gmail.users.settings.filters.create({ userId: "me", requestBody: {} });
     await gmail.users.settings.filters.delete({ userId: "me", id: "f1" });
-    expect(calls).toHaveLength(15);
+    expect(calls).toHaveLength(16);
   });
 
   it("wraps only once, so a cached client cannot stack guards", () => {

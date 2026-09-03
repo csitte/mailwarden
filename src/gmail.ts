@@ -5,6 +5,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { parseAuthentication, type Authentication } from "./authentication.js";
+import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -249,6 +250,21 @@ export function statusOf(err: unknown): number | undefined {
     if (typeof s === "string" && /^\d{3}$/.test(s)) return Number(s);
   }
   return undefined;
+}
+
+/**
+ * Turn Gmail's refusal of a label colour into a sentence that names the likely cause.
+ *
+ * Gmail answers an off-palette colour with a plain invalid-argument 400 — the same answer a
+ * malformed request gets. Since the shape was already checked before sending, a 400 arriving here
+ * is almost certainly the palette, and saying so is the difference between a caller trying another
+ * colour and a caller assuming the tool is broken. Anything that is not a 400 is passed through
+ * untouched: a 403 or a 404 means something else entirely and must keep its own classification.
+ */
+function colorRejection(err: unknown): unknown {
+  if (statusOf(err) !== 400) return err;
+  const detail = err instanceof Error ? err.message : String(err);
+  return new ToolError("invalid_input", `${detail} — ${labelColorHint()}`);
 }
 
 /**
@@ -1161,19 +1177,62 @@ export class Gmail {
     return (res.data.labels ?? []).map((l) => ({ id: l.id!, name: l.name!, type: l.type }));
   }
 
-  /** Returns the id of an existing label by name, creating it (and any parent path) if missing. */
-  async ensureLabel(name: string): Promise<string> {
+  /**
+   * Returns the id of an existing label by name, creating it (and any parent path) if missing.
+   *
+   * With a `color`, the label ends up carrying that colour whether it existed or not: a new label
+   * is created with it, an existing one is patched to it. That is the only way to colour the label
+   * a mailbox already has — and the one that matters, since the label worth seeing at a glance
+   * (the snooze label, a triage bucket) was created long before anyone wanted it coloured.
+   */
+  async ensureLabel(name: string, color?: LabelColor): Promise<string> {
     const existing = (await this.listLabels()).find(
       (l) => l.name.toLowerCase() === name.toLowerCase(),
     );
-    if (existing) return existing.id;
+    if (existing) {
+      if (color) await this.setLabelColor(existing.id, color, existing.type);
+      return existing.id;
+    }
     const res = await this.req(() =>
-      this.api.users.labels.create({
-        userId: "me",
-        requestBody: { name, labelListVisibility: "labelShow", messageListVisibility: "show" },
-      }),
+      this.api.users.labels
+        .create({
+          userId: "me",
+          requestBody: {
+            name,
+            labelListVisibility: "labelShow",
+            messageListVisibility: "show",
+            ...(color ? { color } : {}),
+          },
+        })
+        .catch((err: unknown) => {
+          throw color ? colorRejection(err) : err;
+        }),
     );
     return res.data.id!;
+  }
+
+  /**
+   * Set an existing label's colour.
+   *
+   * `type` is the label's own type when the caller already knows it, which saves a lookup and
+   * lets the system-label case be answered before the request: Gmail colours only `user` labels,
+   * and refuses the rest without saying that is why.
+   */
+  async setLabelColor(id: string, color: LabelColor, type?: string | null): Promise<void> {
+    if (!canCarryColor(type)) {
+      throw new ToolError(
+        "invalid_input",
+        `Label '${id}' is a system label, and Gmail allows colours only on labels you created ` +
+          "yourself. Apply a colour to one of your own labels instead.",
+      );
+    }
+    await this.req(() =>
+      this.api.users.labels
+        .patch({ userId: "me", id, requestBody: { color } })
+        .catch((err: unknown) => {
+          throw colorRejection(err);
+        }),
+    );
   }
 
   async deleteLabel(id: string): Promise<void> {
