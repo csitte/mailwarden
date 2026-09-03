@@ -40,6 +40,8 @@ const PUBLISHING_FILES = [
   "src/gmail.ts",
   "src/tools.ts",
   "scripts/probe-reverify.mjs",
+  "scripts/probe-crosscheck.mjs",
+  "skills/triage/SKILL.md",
   "scripts/demo-reverify.mjs",
 ];
 

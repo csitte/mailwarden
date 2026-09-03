@@ -482,8 +482,12 @@ First time setting up a Google OAuth app? Follow the **[step-by-step setup guide
 claude mcp add mailwarden -- npx -y mailwarden
 ```
 
-**Claude Code plugin** — the same server plus a `/mailwarden:setup` skill that walks you through the
-OAuth setup and diagnoses a broken one. The repo root is the plugin (`.claude-plugin/plugin.json`), so
+**Claude Code plugin** — the same server plus two skills: `/mailwarden:setup` walks you through the
+OAuth setup and diagnoses a broken one, and `/mailwarden:triage` carries the operating rules an
+assistant needs while working a mailbox — above all that `search` re-verifies and `bulk_modify` does
+not, so a non-empty `unverifiedPredicates` means resolving the set with `search` before acting on it.
+That rule protects the user only if the assistant follows it, and a tool description is read once per
+call while a skill is read before the plan. The repo root is the plugin (`.claude-plugin/plugin.json`), so
 from a clone:
 ```bash
 claude --plugin-dir /path/to/mailwarden

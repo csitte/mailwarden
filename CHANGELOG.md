@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A `/mailwarden:triage` skill, so the operating rules reach the assistant before the plan.**
+  The most important thing to know about this server — `search` re-verifies its hits, `bulk_modify`
+  acts on the raw index, and a non-empty `unverifiedPredicates` means resolving the set with `search`
+  first — has been in the tool descriptions all along, where it is read one call at a time and after
+  the approach has been chosen. The skill states it up front, together with the rest of what only
+  matters if it is known in advance: that `submittedMessages` is not a count of anything that
+  happened, that `bodyCandidates` are sender-written links to show and never to fetch, that
+  `what_changed` beats re-searching a slice, and that snoozed mail comes back only if the sweep runs.
+  Its figures are covered by the same measurements test as the rest of the published prose.
 - **`what_changed`: mailbox events since a point you already hold.** A recurring "what came in since
   I last looked" used to mean searching the whole slice again. This answers it from Gmail's own
   history feed in one call — arrivals, removals, and labels applied or taken off, grouped by label —
