@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 // @ts-expect-error — repo-only guard, plain .mjs with no type declarations
 import {
   ALLOWED,
+  LOCAL_ONLY,
   NO_SEND,
   SCOPE_ANCHOR,
   TIER_QUALIFIED,
@@ -112,6 +113,20 @@ describe("send-claims: the allow list", () => {
       expect(a.excerpt, JSON.stringify(a)).toBeTruthy();
       expect(a.why?.length, `missing reason for ${a.file}: ${a.excerpt}`).toBeGreaterThan(30);
     }
+  });
+
+  it("keeps a local-only file's entries when a clone has no copy of it", () => {
+    // CLAUDE.md is untracked (2026-09-04), so CI scans a corpus without it. If that counted as
+    // "matches nothing any more", the first CI run would call two checked sentences dead and the
+    // next reader would drop them — losing the check for the file where the rule actually lives.
+    const local = ALLOWED.find((a: { file: string }) => LOCAL_ONLY.has(a.file));
+    expect(local, "expected at least one allow-list entry for a local-only file").toBeTruthy();
+    expect(staleAllowances({ "README.md": "" })).not.toContainEqual(local);
+  });
+
+  it("still reports a tracked file's entry as dead when its text no longer matches", () => {
+    const tracked = ALLOWED.find((a: { file: string }) => !LOCAL_ONLY.has(a.file));
+    expect(staleAllowances({ "README.md": "" })).toContainEqual(tracked);
   });
 
   it("reports an unknown claim rather than passing it", () => {

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 // @ts-expect-error — repo-only helper, plain .mjs with no type declarations
@@ -35,7 +35,6 @@ const PUBLISHING_FILES = [
   "README.md",
   "docs/gmail-thread-read-state-drift.md",
   "SECURITY.md",
-  "CLAUDE.md",
   "docs/RELEASE-CHECKS.md",
   "src/gmail.ts",
   "src/tools.ts",
@@ -57,7 +56,17 @@ const NOT_RESULTS = new Set([
   204, // the HTTP status batchModify answers with — the reason its count proves nothing
 ]);
 
-const corpus = () => Object.fromEntries(PUBLISHING_FILES.map((f) => [f, read(f)]));
+/**
+ * Untracked working files that carry the same figures (see `.gitignore`). CLAUDE.md is one:
+ * an internal working document, untracked on 2026-09-04. A fresh clone has no copy, so it is
+ * read where it exists — the machine it is edited on, which is the only place a figure can be
+ * written into it — and skipped where it does not, rather than failing the run.
+ */
+const LOCAL_ONLY_FILES = ["CLAUDE.md"];
+
+const present = (rel: string) => existsSync(path.join(ROOT, rel));
+const corpus = () =>
+  Object.fromEntries([...PUBLISHING_FILES, ...LOCAL_ONLY_FILES.filter(present)].map((f) => [f, read(f)]));
 
 describe("measurements: the net", () => {
   it("reads a figure off a line about the drift", () => {
@@ -134,6 +143,14 @@ describe("measurements: the record", () => {
 });
 
 describe("measurements: this repository", () => {
+  it("covers every tracked publisher, and the untracked one only where it exists", () => {
+    // Untracking CLAUDE.md must not quietly shrink the net on the machine that has it, nor
+    // break the run on the machines that do not.
+    const files = Object.keys(corpus());
+    for (const f of PUBLISHING_FILES) expect(files).toContain(f);
+    for (const f of LOCAL_ONLY_FILES) expect(files.includes(f)).toBe(present(f));
+  });
+
   it("publishes no figure that no measurement accounts for", () => {
     const untraced = untracedFigures(corpus(), doc(), NOT_RESULTS);
     const report = untraced

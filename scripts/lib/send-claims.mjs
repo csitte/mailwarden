@@ -159,6 +159,17 @@ export const ALLOWED = [
   },
 ];
 
+/**
+ * Files that live in the working tree but are not in git (see `.gitignore`). CLAUDE.md is one:
+ * it is an internal working document and was untracked on 2026-09-04, so a fresh clone — CI, or
+ * anyone else's checkout — has no copy. Its entries above stay: the guard still reads the file
+ * wherever it exists, which is the machine the file is edited on, and that is where a new
+ * wording would be written. What must not happen is `staleAllowances` calling those entries dead
+ * just because the file is absent — that would delete the record of two checked sentences on the
+ * first CI run and lose the check for good.
+ */
+export const LOCAL_ONLY = new Set(["CLAUDE.md"]);
+
 /** A site is known when one allow-list entry for that file appears verbatim in the sentence. */
 export function isAllowed(file, sentence) {
   return ALLOWED.some((a) => a.file === file && sentence.includes(a.excerpt));
@@ -188,5 +199,7 @@ export function staleAllowances(files) {
       }
     }
   }
-  return ALLOWED.filter((a) => !seen.has(`${a.file}::${a.excerpt}`));
+  return ALLOWED.filter(
+    (a) => !seen.has(`${a.file}::${a.excerpt}`) && !(LOCAL_ONLY.has(a.file) && !(a.file in files)),
+  );
 }

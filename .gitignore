@@ -15,3 +15,10 @@ dist-mcpb/
 # not for readers: competitor assessments, and a third party who never agreed to appear
 # in a public history. It lives in the profile (and, once migrated, on Drive).
 memory/
+
+# Project instructions — internal working document, same reason as memory/ above: drive paths,
+# session-bridge ids and workflow notes, written for us and not for readers of a public repo.
+# Untracked 2026-09-04; the second copy lives on Drive under _repo-instructions/mailwarden/.
+# The number and no-send guards still read it wherever it exists (LOCAL_ONLY in
+# scripts/lib/send-claims.mjs, LOCAL_ONLY_FILES in test/measurements.test.ts).
+CLAUDE.md
