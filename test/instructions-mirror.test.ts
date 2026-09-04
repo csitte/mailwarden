@@ -19,6 +19,13 @@ import { fileURLToPath } from "node:url";
  * comment (`instructions-mirror: <path>`, one per line), the same self-declaring shape the
  * comparison table and the site-notice check use, and this test reads them from there.
  *
+ * What it does NOT do is pick a winner. The working tree and the mirror are written from both
+ * ends — the pre-`/wrap` copy goes tree to mirror, and a machine without the file takes mirror
+ * to tree — which makes this a synchronisation, not a backup. A synchronisation with no conflict
+ * rule loses the edit nobody has saved yet, so on a mismatch this reports both timestamps and
+ * both commands and decides nothing. (session-broker's point, bridge thread 241: a step that
+ * fills a gap must not settle a disagreement.)
+ *
  * It stays quiet in every situation where it has nothing to say, because a test that fails on
  * someone else's clone is worse than no test:
  *   - no `CLAUDE.md` at all (CI, a contributor's checkout) — nothing to mirror;
@@ -58,11 +65,17 @@ describe("instructions mirror", () => {
       `CLAUDE.md declares a mirror at\n  ${target}\nand its directory exists, but the file does ` +
         `not. Copy it:\n  cp "${LOCAL}" "${target}"`,
     ).toBe(true);
+    const when = (f: string) => statSync(f).mtime.toISOString();
     expect(
       readFileSync(target, "utf8"),
-      `CLAUDE.md and its mirror have drifted apart. Whichever is newer, the other machine is ` +
-        `reading the stale one and no diff will tell it so. Copy the current file over:\n` +
-        `  cp "${LOCAL}" "${target}"`,
+      `CLAUDE.md and its mirror have drifted apart, and whichever machine reads the stale one` +
+        ` gets no diff to warn it. Which way to resolve is not this test's call: the newer file` +
+        ` is not always the one to keep, and overwriting the other loses an edit that was never` +
+        ` saved anywhere else. Both sides, then pick one:\n` +
+        `  ${when(LOCAL)}  ${LOCAL}\n` +
+        `  ${when(target)}  ${target}\n` +
+        `  cp "${LOCAL}" "${target}"   # keep the working tree\n` +
+        `  cp "${target}" "${LOCAL}"   # keep the mirror`,
     ).toBe(local);
   });
 });
