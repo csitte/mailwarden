@@ -345,7 +345,12 @@ Der Nachtrag vom 16.08. hält fest, dass ein Spiegel die Lebensdauer eines Fehle
 hinaus verlängert, der ihn repariert. Dieser Fall zeigt die Bauform, gegen die das keine Warnung
 mehr ist: **die Metadaten liefen mit, der Text nicht.**
 
-`codeguilds.dev` zeigte „Version 0.12.0", „Latest: 0.12.0" und das npm-Badge `v0.12.0` — über einem
+Zwei fremde Verzeichnisse kommen darin vor, hier **Spiegel A** und **Spiegel B**. Ihre Namen stehen
+in den Distributions-Notizen, nicht in diesem Dokument: es liegt im öffentlichen Repo, und ein
+namentlicher Befund über eine fremde Seite gehört nicht dorthin, wo die Betreiber ihn nie zu sehen
+bekommen und nie Gelegenheit zur Stellungnahme hatten. Für die Lehre unten trägt der Name nichts bei.
+
+**Spiegel A** zeigte „Version 0.12.0", „Latest: 0.12.0" und das npm-Badge `v0.12.0` — über einem
 README-Körper vom Stand `0.1.7` (23.07.). Also: 116 Tests statt 789, ein `--http`-Bearer-Token als
 „optional" statt Pflicht seit 0.2.0, ein Read-Only-Modus mit vier statt acht Tools — und die
 Index-Erklärung, die wir in 0.11.0 gemessen und **zurückgezogen** haben, wörtlich weiterlebend
@@ -374,7 +379,7 @@ Die Reparatur war deshalb nicht, dort eine Aktualisierung zu erbitten (die Seite
 Login gebraucht und wäre beim nächsten Release wieder zurückgefallen), sondern das Badge zu
 entfernen. Die Listung selbst bleibt unangetastet; zurückgezogen ist nur unsere Empfehlung.
 
-**Und die Kontrollabfrage, ohne die der Befund eine Verallgemeinerung wäre:** `freemcp.space`,
+**Und die Kontrollabfrage, ohne die der Befund eine Verallgemeinerung wäre:** **Spiegel B**,
 im selben Durchgang geprüft, spiegelt das **aktuelle** README wörtlich — 789 Tests, die
 Vergleichstabelle vom 16.08., die auf `search` beschränkte Re-Verifikation. Zwei Spiegel, gleicher
 Tag, gegensätzlicher Befund. „Spiegel sind veraltet" ist damit unbelegt; belegt ist: **plattform-
@@ -383,7 +388,7 @@ beim Postfach in der `threads.list`-Messung, und derselbe Schluss: nachsehen sta
 
 **Mechanisierbar ist davon nichts.** Der Alterscheck in `npm run smoke` prüft die Tabelle in
 *unserem* Baum; ein fremder Spiegel liegt außerhalb jedes Laufs, den wir fahren. Was in unserer Hand
-liegt, ist die Liste der Bezugswege — und die ist selbst ein Artefakt, das altert: `codeguilds.dev`
+liegt, ist die Liste der Bezugswege — und die ist selbst ein Artefakt, das altert: Spiegel A
 stand in keiner Distributions-Notiz, obwohl sein Badge seit drei Wochen in unserem README hing.
 Gefunden wurde es über den Link einer *anderen* Plattform, nicht über eine eigene Liste.
 
