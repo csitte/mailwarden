@@ -622,6 +622,13 @@ npm install && npm run build
 node dist/index.js --auth
 ```
 
+A clone deliberately arrives without a `CLAUDE.md`: the working instructions for this repository
+are an internal document and are not tracked here. Nothing in the build, the tests or
+`npm run smoke` needs them. The rules a contributor — or a coding agent — actually has to know are
+in [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) (design rules
+that are not up for grabs, the build/test loop) and [SECURITY.md](SECURITY.md) (the threat model
+those rules come from).
+
 ## Config (env)
 
 | Var | Meaning |
@@ -643,7 +650,7 @@ node dist/index.js --auth
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (1186 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (1192 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 
