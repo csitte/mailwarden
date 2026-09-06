@@ -159,6 +159,11 @@ Filed on 2026-09-02 in the public issue tracker, Gmail API component, as
 stating precisely: an assignment says the report was accepted as worth looking at, nothing yet
 about a cause, a fix, or a timeline.
 
+On 2026-09-05 its severity was lowered from `S2` to `S3`, with no comment. Status (`Assigned`)
+and priority (`P2`) are unchanged; severity and priority are separate fields in that tracker, so
+this is not the deprioritisation it can read like. As with the assignment, it says nothing about a
+cause, a fix, or a timeline.
+
 **It is not the first time.** A search of that component before filing turned up
 [issue 78095953](https://issuetracker.google.com/issues/78095953), opened in April 2018. It
 describes, in summary, a query with `label:unread` for which `threads.list` returns a message whose

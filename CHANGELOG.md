@@ -5,6 +5,17 @@ All notable changes to **mailwarden** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **The Google report's severity was lowered, and the document says so.** `555806033` went from
+  `S2` to `S3` on 2026-09-05 with no comment. Severity and priority are separate fields in that
+  tracker: the priority is still `P2` and the status still `Assigned`, so this is not the
+  deprioritisation "downgraded" can read like — a distinction the `gmail` session made when it
+  forwarded the tracker mail, and worth keeping, because the drift document is the one place a
+  reader learns what became of the report. Like the assignment before it, the change says nothing
+  about a cause, a fix or a timeline.
+
 ## [0.18.0] - 2026-09-04
 
 ### Added
