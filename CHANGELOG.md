@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **`fast-uri` lifted out of four advisories, and the `qs` one deliberately left alone.** `ajv`,
+  reached through the MCP SDK, resolved to `fast-uri` 3.1.5, which carries two SSRF and two
+  host-confusion advisories; the lockfile now takes 3.1.7, which `ajv`'s own `^3.0.1` range allowed
+  all along. Nothing in `package.json` moved, and no code path here parses a URI through `ajv` — it
+  validates our own schemas — but an advisory of that class sitting next to a server that ships an
+  SSRF guard of its own is worth closing while it is free. `nanoid` came along for the same reason,
+  dev-only through vitest. What stays is `qs`, reachable only via `express`: the sole fixed release
+  is 6.16.0 and `body-parser`'s `~6.15.1` forbids it, so the fix has to come from upstream. `npm
+  audit fix` offers one, and it is worse than the finding — it downgrades `express` to 4.22.1 and
+  `body-parser` to 1.20.4 and pins a nested `qs` 6.14.2, a version inside both advisory ranges. A
+  fix that moves a vulnerable package rather than replacing it is not a fix.
 - **The Google report's severity was lowered, and the document says so.** `555806033` went from
   `S2` to `S3` on 2026-09-05 with no comment. Severity and priority are separate fields in that
   tracker: the priority is still `P2` and the status still `Assigned`, so this is not the
