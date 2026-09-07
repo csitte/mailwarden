@@ -81,6 +81,38 @@ export function reconcile(readmeColumns, sources) {
 }
 
 /**
+ * The date the README's `comparison-table-verified` marker must carry: the OLDEST column check,
+ * never the newest.
+ *
+ * A table is only as current as its stalest column. Tying the marker to the newest check lets one
+ * freshly re-read column stand in front of every other — and because `table-age` measures the
+ * 60-day budget from that same marker, the budget resets too. Pulling a single column forward
+ * would then keep the whole table indefinitely "fresh" while the other three age untouched, which
+ * is the failure this marker exists to catch, not to hide. It is not hypothetical: on 2026-09-07
+ * the `taylorwilsdon` column alone moved the marker from 09-03 to 09-07 and bought the other three
+ * four days they had not earned.
+ *
+ * Taking the oldest is also the stricter rule, not a different one: it still forbids a marker
+ * ahead of every source (the case the previous rule was written for, a marker bumped without
+ * anyone re-reading a competitor), because the oldest date can never exceed the newest.
+ *
+ * Returns null when no column carries a usable date — the caller decides what to say about that,
+ * rather than getting a plausible-looking date out of an empty file.
+ */
+export function markerBasis(sources) {
+  const dated = (sources?.columns ?? []).filter((c) => DATE_RE.test(c?.verified ?? ""));
+  if (dated.length === 0) return null;
+  const sorted = [...dated].sort((a, b) => a.verified.localeCompare(b.verified));
+  const marker = sorted[0].verified;
+  return {
+    marker,
+    newest: sorted.at(-1).verified,
+    // The columns sitting on that oldest date: the ones a re-read has to start with.
+    holdingBack: sorted.filter((c) => c.verified === marker).map((c) => c.column),
+  };
+}
+
+/**
  * Compare recorded revisions against the heads just fetched.
  *
  * `heads` maps "owner/name" to the current HEAD sha, or to null when it could not be read.

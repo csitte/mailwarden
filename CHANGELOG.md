@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The comparison table now dates itself by its stalest column, not its freshest.** The
+  `comparison-table-verified` marker had to equal the newest check in
+  `docs/comparison-sources.json`, so re-reading a single column re-dated the whole table — and
+  because the 60-day age budget in `npm run smoke` is measured from that marker, it reset the
+  budget for the columns nobody had looked at. Pulling one column forward could have kept the
+  table permanently "fresh" while the other three aged untouched, which is the case the marker
+  exists to catch. It is not hypothetical: the taylorwilsdon re-read above moved the marker from
+  3 to 7 September and bought the other three columns four days they had not earned, so the
+  marker goes back to 3 September and the sentence under the table says which column is newer
+  and why. The new rule is strictly stronger — the oldest date can never exceed the newest, so a
+  marker bumped without anyone re-reading a competitor still fails — and a failure now names the
+  columns holding the marker back rather than just the mismatch.
 - **The comparison table understated `taylorwilsdon`'s least-privilege story, and now says what his
   code does.** The cell read "`--read-only` narrows scopes; tiers narrow tools only", which was true
   about the switch we had read and silent about a second one that had been in his repository since

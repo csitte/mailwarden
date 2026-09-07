@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import {
   compareRevisions,
   formatReport,
+  markerBasis,
   reconcile,
   tableColumns,
   validateSources,
@@ -129,6 +130,43 @@ describe("comparison-sources: comparing revisions", () => {
   });
 });
 
+describe("comparison-sources: which date the table may claim", () => {
+  const dated = (...verified: string[]) => ({
+    columns: verified.map((v, i) => ({ column: `c${i}`, kind: "docs", url: "https://x", verified: v, note: "x".repeat(50) })),
+  });
+
+  it("takes the oldest check, so one re-read column cannot front for the rest", () => {
+    // The case that prompted the rule: three columns read on the 3rd, one pulled forward to the
+    // 7th. Under the old rule the table would have claimed the 7th — and reset its own age budget.
+    const basis = markerBasis(dated("2026-09-03", "2026-09-03", "2026-09-03", "2026-09-07"));
+    expect(basis.marker).toBe("2026-09-03");
+    expect(basis.newest).toBe("2026-09-07");
+  });
+
+  it("names every column sitting on that oldest date — those are the ones to re-read", () => {
+    const src = dated("2026-09-03", "2026-09-07", "2026-09-03");
+    expect(markerBasis(src).holdingBack).toEqual(["c0", "c2"]);
+  });
+
+  it("is the newest date too when every column was checked on the same day", () => {
+    const basis = markerBasis(dated("2026-09-03", "2026-09-03"));
+    expect(basis.marker).toBe("2026-09-03");
+    expect(basis.newest).toBe("2026-09-03");
+  });
+
+  it("ignores a column whose date is unusable rather than sorting it as a string", () => {
+    // validateSources already rejects such an entry; this one only guarantees that a malformed
+    // date cannot become the marker on the way there.
+    const src = dated("2026-09-03", "last Tuesday");
+    expect(markerBasis(src).marker).toBe("2026-09-03");
+  });
+
+  it("returns null on an empty file instead of inventing a date", () => {
+    expect(markerBasis({ columns: [] })).toBeNull();
+    expect(markerBasis(undefined)).toBeNull();
+  });
+});
+
 describe("comparison-sources: this repository", () => {
   it("has a well-formed sources file", () => {
     const problems = validateSources(sources());
@@ -147,15 +185,15 @@ describe("comparison-sources: this repository", () => {
     expect(orphaned, `sources for columns no longer in the table: ${orphaned.join(", ")}`).toEqual([]);
   });
 
-  it("agrees with the date the table itself carries", () => {
-    // The newest source check must not be older than the table's own verified marker — that
-    // would mean the marker was refreshed without anyone re-reading a competitor.
+  it("carries the date of its stalest column, not its freshest", () => {
     const marker = /<!-- comparison-table-verified: (\d{4}-\d{2}-\d{2}) -->/.exec(readme())?.[1];
     expect(marker).toBeTruthy();
-    const newest = sources()
-      .columns.map((c: { verified: string }) => c.verified)
-      .sort()
-      .at(-1);
-    expect(newest, `table marked ${marker}, newest source check ${newest}`).toBe(marker);
+    const basis = markerBasis(sources());
+    expect(
+      marker,
+      `table marked ${marker}; oldest column check ${basis.marker} (${basis.holdingBack.join(", ")}), ` +
+        `newest ${basis.newest}. The marker dates the table, and the table is as old as its ` +
+        "stalest column — re-read the columns named above rather than moving the marker.",
+    ).toBe(basis.marker);
   });
 });
