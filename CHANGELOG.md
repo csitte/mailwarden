@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The comparison table understated `taylorwilsdon`'s least-privilege story, and now says what his
+  code does.** The cell read "`--read-only` narrows scopes; tiers narrow tools only", which was true
+  about the switch we had read and silent about a second one that had been in his repository since
+  February: `--permissions gmail:organize` builds the requested scope set from cumulative per-service
+  levels, and his tool registry disables any tool whose declared scopes fall outside them — without
+  scope-hierarchy expansion, so `organize` genuinely excludes `gmail.send`. The August round read
+  only `auth/scopes.py` and `main.py` and never opened `auth/permissions.py`, so the error was ours
+  and it ran in our favour, which is the direction an unchecked comparison cell always drifts. What
+  survives as a caveat is the direction rather than the strength: his level is picked per service
+  instead of derived from the enabled tools, and neither mode has a guard at the request itself.
+  `docs/comparison-sources.json` moves to `54b1c56` with a note naming the files read, and the other
+  ten cells in that column were brought forward across 43 commits by diff — no tool added or removed,
+  still no `output_schema` anywhere, nothing touching snooze, unsubscribe, re-verification or
+  `Authentication-Results`.
 - **`fast-uri` lifted out of four advisories, and the `qs` one deliberately left alone.** `ajv`,
   reached through the MCP SDK, resolved to `fast-uri` 3.1.5, which carries two SSRF and two
   host-confusion advisories; the lockfile now takes 3.1.7, which `ajv`'s own `^3.0.1` range allowed
