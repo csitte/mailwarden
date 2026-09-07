@@ -373,19 +373,42 @@ describe("mailboxOf — first mailbox with its display name", () => {
   ])("%s → %s / %s", (v, address, name) => {
     expect(mailboxOf(v)).toEqual({ address, name });
   });
-  it("is linear: a 100 KB header of separators and quotes parses in milliseconds", () => {
-    const inputs = [
-      '"' + ",".repeat(100_000) + '" <a@x.example>',
-      ",".repeat(100_000) + " <a@x.example>",
-      "(".repeat(50_000) + ")".repeat(50_000) + " <a@x.example>",
-      '"(<a@b>,;'.repeat(12_000) + " <a@x.example>",
-    ];
+  // The property under test is that a hostile header cannot make these parsers backtrack
+  // catastrophically — growth with the input, not an absolute speed. An absolute budget measured
+  // that plus the machine: the same 100 KB pass takes ~100 ms on CI and ~1.3 s on a laptop, so a
+  // fixed 500 ms failed there while the growth was linear all along (10 KB 113 ms, 100 KB 1288 ms
+  // = 11.4x for 10x input, measured 2026-09-07). So the budget is derived from a tenth-scale run
+  // on the SAME machine, with room to spare: catastrophic backtracking is not 2x, it is orders of
+  // magnitude, and the second assertion still catches an outright hang.
+  const hostileHeaders = (n: number) => [
+    '"' + ",".repeat(n) + '" <a@x.example>',
+    ",".repeat(n) + " <a@x.example>",
+    "(".repeat(n / 2) + ")".repeat(n / 2) + " <a@x.example>",
+    '"(<a@b>,;'.repeat(Math.round(n * 0.12)) + " <a@x.example>",
+  ];
+  const parseAll = (inputs: string[]): number => {
     const t0 = performance.now();
     for (const v of inputs) {
       mailboxOf(v);
       addressesOf(v);
     }
-    expect(performance.now() - t0).toBeLessThan(500);
+    return performance.now() - t0;
+  };
+  it("is linear: ten times the header costs about ten times the time, not more", () => {
+    parseAll(hostileHeaders(1_000)); // warm-up: an unwarmed first pass would inflate the baseline
+    // Median of three, not one run and not the fastest: a single sample carries whatever GC pause
+    // it happened to land in, and the minimum would flatter the machine and tighten the budget
+    // against the full run for no reason.
+    const runs = [1, 2, 3].map(() => parseAll(hostileHeaders(10_000))).sort((a, b) => a - b);
+    const tenth = runs[1];
+    const full = parseAll(hostileHeaders(100_000));
+    // 30x for 10x the input: three times the headroom over the 11.4x measured above, and still far
+    // under what any superlinear parser costs — a quadratic one runs ~70x here, which the first
+    // draft of this budget let through until a counter-check with a deliberately quadratic
+    // function caught it. The floor keeps timer noise from setting the budget on a fast machine;
+    // it is 5 ms rather than 20, because at 20 the budget stopped depending on the baseline at all.
+    expect(full).toBeLessThan(Math.max(tenth, 5) * 30);
+    expect(full).toBeLessThan(5_000);
   });
 });
 
