@@ -33,7 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `docs/comparison-sources.json` moves to `54b1c56` with a note naming the files read, and the other
   ten cells in that column were brought forward across 43 commits by diff — no tool added or removed,
   still no `output_schema` anywhere, nothing touching snooze, unsubscribe, re-verification or
-  `Authentication-Results`.
+  `Authentication-Results`. A follow-up from csitte.at, checked here against `core/tool_registry.py` at
+  the same revision rather than taken on trust, is recorded in that note: at the tool gate his
+  tier filter and `--permissions` add up, and only `--read-only` is displaced by a permission
+  level. No cell moves — ours names the two effects separately — and the column keeps its
+  2026-09-07 date, because one file on one point is not a round over eleven cells.
 - **`fast-uri` lifted out of four advisories, and the `qs` one deliberately left alone.** `ajv`,
   reached through the MCP SDK, resolved to `fast-uri` 3.1.5, which carries two SSRF and two
   host-confusion advisories; the lockfile now takes 3.1.7, which `ajv`'s own `^3.0.1` range allowed
