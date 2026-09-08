@@ -24,6 +24,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   returns 400 without taking the process down.
 
 ### Added
+- **The comparison table has a fifth column: `aaronsb/google-workspace-mcp`.** It was found by a
+  landscape scan, not by a cell moving, and what it exposed was our own selection rule: the columns
+  had been picked by capability overlap, so a server an order of magnitude larger than the smallest
+  column we carried sat outside the table while that column stayed in. It earns the place on the
+  send row rather than on size — it is the only other server here that will refuse to send at all,
+  through a `draft-only-email` safety policy that blocks send, reply, replyAll and forward, with a
+  `no-delete` policy beside it. The row stays honest by naming where the promise lives: there,
+  sending is the default and the refusal is an operator's environment variable; here, no tool to
+  send was ever written. All twelve cells were read at `ccdf507` on 8 September 2026 and the
+  evidence is in `docs/comparison-sources.json` — including the cells that are dashes for a reason
+  worth stating, such as a search path that goes through `messages.list` rather than `threads.list`,
+  where our own drift measurement was taken.
+- **`SECURITY.md` now says why the egress checkpoint sits where it does.** Wrapping the auth
+  client's `request` was described as an implementation detail; it is a property. A check in the
+  tool or handler layer reads better and fails differently: a new code path simply gets no check,
+  and nothing reports it. Both examples in the new paragraph are real — the other server's own
+  comment records a hand-registered tool that shipped without a policy check, and this repository
+  had the mirror image until the `--auth` probe was fixed in this same release.
+
 - **The egress allowlist is now checked in both directions.** A test already proved that every call
   mailwarden makes has a rule admitting it. Nothing checked the opposite: a rule no call reaches any
   more. That is the one kind of allowlist drift that widens the guard instead of breaking it — an

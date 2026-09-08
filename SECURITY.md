@@ -75,6 +75,22 @@ mailbox content).
   table is regenerated, not on its own. It does not harden the
   *token*: a stolen `gmail.modify` refresh token still sends mail from
   somewhere else — only the `read` tier's scope prevents that.
+- **Where the checkpoint sits is part of the guarantee.** The guard wraps the auth client's
+  `request`, which is the last point every call passes no matter which code path built it. The
+  alternative — checking in the tool or handler layer, where the intent is legible and the error
+  messages are nicer — has a failure mode that this one does not: a new code path gets no check
+  unless whoever wrote it remembers to add one, and nothing reports the omission. That is not a
+  hypothetical trade-off. `aaronsb/google-workspace-mcp`, the only other server in the comparison
+  table that can refuse to send, runs its safety policies in the handler pipeline, and the file says
+  what followed: a hand-registered tool shipped without a policy check and had to call one
+  explicitly afterwards, which its own comment names as how that path went uncovered. The same
+  mistake reached this repository from the other direction and is worth recording rather than
+  quietly fixing: until 8 September 2026 the `--auth` mailbox probe built its own client and never
+  wrapped it, because wrapping was the caller's job. Nothing escaped — that path calls one endpoint,
+  it is on the allowlist, and it runs only during interactive setup — but the client was outside the
+  checkpoint the comment beside it claimed to be inside of. Clients are now guarded where they are
+  created rather than where they are used, and a test fails if any call site in `src/auth.ts` builds
+  one outside the guard. A checkpoint every caller has to remember is one a later caller forgets.
 - **No forwarding filters.** `create_filter` can label/archive/trash/star/mark, but **never** creates
   a `forward` action — which would be a standing exfiltration channel. `list_filters` *surfaces* any
   pre-existing forwarding filter so a human can spot one.
