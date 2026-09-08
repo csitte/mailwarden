@@ -5,7 +5,7 @@ All notable changes to **mailwarden** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.19.0] - 2026-09-08
 
 ### Security
 - **Express 4 was holding the whole dependency tree on a vulnerable `qs`.** Three moderate
@@ -15,13 +15,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   own Express 5 asks for `^6.14.0` and `googleapis-common` for a caret too — so the pin did not just
   affect the optional HTTP transport it came from. It pulled `googleapis-common`'s `qs` down with
   it, and that one runs on every call in every mode, stdio included. Moving to `express@^5` drops
-  the tilde; `qs` now resolves to 6.16.0 throughout and `npm audit` reports zero vulnerabilities,
-  dev dependencies included. No source change was needed: `src/http.ts` uses `express()`, `.use`,
+  the tilde and `qs` resolves to 6.16.0 throughout, which closes all three. No source change was needed: `src/http.ts` uses `express()`, `.use`,
   `.post`, `.listen` and `express.json`, all unchanged in Express 5, and the security policy lives
   in pure helpers beside them. Since that transport has no vitest coverage, it was checked by
   running it: an unauthenticated request is still refused with 401, a foreign `Host` header with 403
   (the DNS-rebinding defence), a valid `initialize` returns the server info, and malformed JSON
   returns 400 without taking the process down.
+
+- **`hono` lifted out of three advisories on the morning of the release.** It arrives through the
+  MCP SDK, which is a runtime dependency, and the SDK's own `^4.11.4` range already allowed the
+  fixed 4.13.7 — the same shape as the `qs` pin above, and the same one-line remedy. Caught because
+  the pre-push check was run again rather than trusted: the tree audited clean the previous evening
+  and did not the next morning, since these advisories were published overnight. **An audit result
+  is a date, not a property** — the number belongs to the moment it was taken, and this entry says
+  which moment. At the time of tagging the runtime dependency tree carries no known advisory. One
+  finding remains on the development side (`@vitest/mocker`, reachable only by whoever already
+  controls the test run): the fixed 4.1.11 is inside the declared range, but npm cannot resolve it
+  here — the circular peer link between `vitest` and `@vitest/coverage-v8` aborts the install with
+  `Cannot read properties of null (reading 'edgesOut')`. Left open deliberately rather than forced,
+  because it ships to nobody and the workaround would touch the whole toolchain on release morning.
 
 ### Added
 - **The comparison table has a fifth column: `aaronsb/google-workspace-mcp`.** It was found by a
@@ -97,17 +109,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tier filter and `--permissions` add up, and only `--read-only` is displaced by a permission
   level. No cell moves — ours names the two effects separately — and the column keeps its
   2026-09-07 date, because one file on one point is not a round over eleven cells.
-- **`fast-uri` lifted out of four advisories, and the `qs` one deliberately left alone.** `ajv`,
+- **`fast-uri` lifted out of four advisories, and `npm audit fix` refused as a remedy.** `ajv`,
   reached through the MCP SDK, resolved to `fast-uri` 3.1.5, which carries two SSRF and two
   host-confusion advisories; the lockfile now takes 3.1.7, which `ajv`'s own `^3.0.1` range allowed
   all along. Nothing in `package.json` moved, and no code path here parses a URI through `ajv` — it
   validates our own schemas — but an advisory of that class sitting next to a server that ships an
   SSRF guard of its own is worth closing while it is free. `nanoid` came along for the same reason,
-  dev-only through vitest. What stays is `qs`, reachable only via `express`: the sole fixed release
-  is 6.16.0 and `body-parser`'s `~6.15.1` forbids it, so the fix has to come from upstream. `npm
-  audit fix` offers one, and it is worse than the finding — it downgrades `express` to 4.22.1 and
+  dev-only through vitest. The `qs` advisories were left standing in this round, and the automated
+  remedy stays refused for the reason found here: `npm audit fix` downgrades `express` to 4.22.1 and
   `body-parser` to 1.20.4 and pins a nested `qs` 6.14.2, a version inside both advisory ranges. A
-  fix that moves a vulnerable package rather than replacing it is not a fix.
+  fix that moves a vulnerable package rather than replacing it is not a fix. What this round got
+  wrong was the conclusion drawn next to that: it read `body-parser`'s `~6.15.1` as a wall only
+  upstream could take down. The pin was ours to remove — see the `qs` entry under Security above,
+  which closed all three later in the same release cycle. Recorded rather than quietly rewritten,
+  because the reasoning that held (an automated fix can be worse than the finding) and the
+  reasoning that did not (therefore nothing here can fix it) came out of the same afternoon.
 - **The Google report's severity was lowered, and the document says so.** `555806033` went from
   `S2` to `S3` on 2026-09-05 with no comment. Severity and priority are separate fields in that
   tracker: the priority is still `P2` and the status still `Assigned`, so this is not the
@@ -1425,7 +1441,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/csitte/mailwarden/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/csitte/mailwarden/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/csitte/mailwarden/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/csitte/mailwarden/compare/v0.15.1...v0.16.0
