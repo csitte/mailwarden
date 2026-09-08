@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
-import { checkEgress, guardEgress } from "../src/egress.js";
+import { checkEgress, guardEgress, allowRuleFor, ALLOW_RULES } from "../src/egress.js";
 
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -143,8 +143,12 @@ describe("guardEgress — in front of the real googleapis client", () => {
     expect(calls).toEqual([]);
   });
 
-  it("lets every call mailwarden actually makes through, unchanged", async () => {
-    const { gmail, calls } = guardedClient();
+  /**
+   * Every Gmail call mailwarden makes, in one place, because two tests ask opposite
+   * questions of the same list: that each one gets through, and that no allowlist entry
+   * exists which none of them reaches.
+   */
+  async function everyCallMailwardenMakes(gmail: ReturnType<typeof google.gmail>) {
     await gmail.users.getProfile({ userId: "me" });
     await gmail.users.threads.list({ userId: "me", q: "is:unread" });
     await gmail.users.threads.get({ userId: "me", id: "t1" });
@@ -166,7 +170,39 @@ describe("guardEgress — in front of the real googleapis client", () => {
     await gmail.users.settings.filters.list({ userId: "me" });
     await gmail.users.settings.filters.create({ userId: "me", requestBody: {} });
     await gmail.users.settings.filters.delete({ userId: "me", id: "f1" });
+  }
+
+  it("lets every call mailwarden actually makes through, unchanged", async () => {
+    const { gmail, calls } = guardedClient();
+    await everyCallMailwardenMakes(gmail);
     expect(calls).toHaveLength(17);
+  });
+
+  /**
+   * The other direction, which nothing checked until now: an allowlist entry no call
+   * reaches any more. The existing test proves every call has a rule; it says nothing
+   * about a rule that has outlived its call — and a rule like that is an endpoint left
+   * open for a feature that no longer exists, which is the one kind of allowlist drift
+   * that widens the guard rather than breaking it. Nothing fails when it happens, so
+   * only a test looking for it will find it.
+   *
+   * It counts rules reached rather than calls made, because the two totals differ on
+   * purpose: one rule spells `modify|trash|untrash` as a single expression, so there are
+   * fewer rules than endpoints. Comparing counts here would need that difference written
+   * down a third time, and a number kept in three places is a number that drifts.
+   */
+  it("keeps no allowlist entry that no call reaches", async () => {
+    const { gmail, calls } = guardedClient();
+    await everyCallMailwardenMakes(gmail);
+
+    const reached = new Set(
+      calls.map((call) => {
+        const [method, url] = call.split(" ");
+        return allowRuleFor(method, new URL(url).pathname);
+      }),
+    );
+    const dead = ALLOW_RULES.filter((rule) => !reached.has(rule));
+    expect(dead).toEqual([]);
   });
 
   it("wraps only once, so a cached client cannot stack guards", () => {

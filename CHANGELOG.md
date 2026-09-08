@@ -23,6 +23,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (the DNS-rebinding defence), a valid `initialize` returns the server info, and malformed JSON
   returns 400 without taking the process down.
 
+### Added
+- **The egress allowlist is now checked in both directions.** A test already proved that every call
+  mailwarden makes has a rule admitting it. Nothing checked the opposite: a rule no call reaches any
+  more. That is the one kind of allowlist drift that widens the guard instead of breaking it — an
+  endpoint left standing open for a feature that has since been removed — and because nothing fails
+  when it happens, only a test looking for it would ever find it. `checkEgress` and the new test now
+  share one matching function, so the coverage check cannot rebuild the raw/normalised asymmetry
+  differently and then confirm its own version of it. Verified by adding a rule nothing calls: the
+  test fails and names it.
+
 ### Fixed
 - **One code path built a Gmail client without the egress guard.** `getAuth` wrapped the client it
   returns, but `identifyStoredToken` — the `--auth` step that asks Gmail which mailbox the stored

@@ -155,12 +155,28 @@ export function checkEgress(method: string, url: string): string | undefined {
     if (rule.path.test(deny)) return rule.what;
   }
 
-  for (const rule of ALLOWED) {
-    if (rule.method === verb && rule.path.test(pathname)) return undefined;
-  }
+  if (allowRuleFor(verb, pathname)) return undefined;
 
   return `endpoint outside mailwarden's allowlist (${verb} ${pathname})`;
 }
+
+/**
+ * Which allowlist entry admits a call, named by its `what`, or `undefined` for none.
+ *
+ * Shared with `checkEgress` rather than reimplemented, so a test asking "is this rule
+ * still reached?" matches paths exactly the way the guard does — raw, never normalised.
+ * A test that rebuilt the matching would be free to rebuild the deny/allow asymmetry
+ * wrongly and then confirm its own mistake.
+ */
+export function allowRuleFor(method: string, pathname: string): string | undefined {
+  for (const rule of ALLOWED) {
+    if (rule.method === method && rule.path.test(pathname)) return rule.what;
+  }
+  return undefined;
+}
+
+/** Every allowlist entry, by `what`. The list a coverage test holds the guard against. */
+export const ALLOW_RULES: readonly string[] = ALLOWED.map((r) => r.what);
 
 /** The error a refused call raises — names the endpoint and why it is shut. */
 export function egressRefusal(method: string, url: string, reason: string): Error {
