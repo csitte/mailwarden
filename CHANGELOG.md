@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **Express 4 was holding the whole dependency tree on a vulnerable `qs`.** Three moderate
+  advisories stood open against `qs` 6.15.2, fixed upstream in 6.16.0 since 29 August. The reason
+  npm would not take the fix was a tilde: `express` 4 and its `body-parser` pin `qs: ~6.15.1`, which
+  admits 6.15.x and nothing further. Everything else in the tree already allowed it — the MCP SDK's
+  own Express 5 asks for `^6.14.0` and `googleapis-common` for a caret too — so the pin did not just
+  affect the optional HTTP transport it came from. It pulled `googleapis-common`'s `qs` down with
+  it, and that one runs on every call in every mode, stdio included. Moving to `express@^5` drops
+  the tilde; `qs` now resolves to 6.16.0 throughout and `npm audit` reports zero vulnerabilities,
+  dev dependencies included. No source change was needed: `src/http.ts` uses `express()`, `.use`,
+  `.post`, `.listen` and `express.json`, all unchanged in Express 5, and the security policy lives
+  in pure helpers beside them. Since that transport has no vitest coverage, it was checked by
+  running it: an unauthenticated request is still refused with 401, a foreign `Host` header with 403
+  (the DNS-rebinding defence), a valid `initialize` returns the server info, and malformed JSON
+  returns 400 without taking the process down.
+
 ### Fixed
 - **One code path built a Gmail client without the egress guard.** `getAuth` wrapped the client it
   returns, but `identifyStoredToken` — the `--auth` step that asks Gmail which mailbox the stored
