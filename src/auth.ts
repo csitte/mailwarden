@@ -302,7 +302,16 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
   }
 
   try {
-    return google.auth.fromJSON(parsed as Parameters<typeof google.auth.fromJSON>[0]) as OAuth2Client;
+    // Guarded here, at the source, rather than by each caller. `getAuth` remembered to wrap
+    // its client; `identifyStoredToken` did not, and so the `--auth` mailbox probe ran outside
+    // the checkpoint the comment on that client claims covers it. The call it made is on the
+    // allowlist, so nothing escaped — but a checkpoint every caller has to remember is one a
+    // future caller will forget. Wrapping the only place a stored token becomes a client means
+    // there is nothing left to remember. `guardEgress` is idempotent, so the caller that does
+    // wrap stays correct.
+    return guardEgress(
+      google.auth.fromJSON(parsed as Parameters<typeof google.auth.fromJSON>[0]) as OAuth2Client,
+    );
   } catch {
     return null; // valid JSON but not an authorized_user shape → not authorized
   }
@@ -576,7 +585,10 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
     if (cachedClient) return cachedClient;
     // Server runtime: reuse the stored refresh token, or tell the user to run --auth.
     const saved = await loadSavedToken();
-    if (saved) return (cachedClient = guardEgress(saved));
+    // Already guarded — `loadSavedToken` wraps every client it hands out. Re-wrapping here would
+    // be free (the guard is idempotent) but would teach the wrong rule: that a caller is the one
+    // responsible for the checkpoint. That rule is exactly what left the `--auth` probe uncovered.
+    if (saved) return (cachedClient = saved);
     // Name the account and the file we looked for, and the exact command that fills THAT file.
     // A bare `mailwarden --auth` writes the DEFAULT token.json — telling a named-account user to
     // run it would overwrite their default account's token and leave this error unchanged.

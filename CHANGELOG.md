@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **One code path built a Gmail client without the egress guard.** `getAuth` wrapped the client it
+  returns, but `identifyStoredToken` — the `--auth` step that asks Gmail which mailbox the stored
+  token belongs to — built its own from `loadSavedToken` and never wrapped it, even though the
+  comment on the guarded client claims the probe steps of `--auth` run behind the checkpoint.
+  Nothing escaped: that path only ever calls `users.getProfile`, which is on the allowlist, and it
+  runs during interactive `--auth` with no attacker-controlled input. What was wrong was the shape,
+  not the effect — a checkpoint each caller has to remember to attach is one a later caller will
+  forget. `loadSavedToken` now guards every client it hands out, so there is nothing left to
+  remember, and the redundant wrap in `getAuth` is gone rather than left to teach the old rule. Two
+  tests hold it: the client `getAuth` returns refuses a send, and no call in `auth.ts` builds a
+  client outside `guardEgress()`. The second exists because the first could not have caught this —
+  the missed client behaved correctly, so only where it came from gave it away.
+
 ### Changed
 - **The comparison table now dates itself by its stalest column, not its freshest.** The
   `comparison-table-verified` marker had to equal the newest check in

@@ -1,4 +1,7 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { google } from "googleapis";
 import { OAuth2Client } from "google-auth-library";
 import { checkEgress, guardEgress } from "../src/egress.js";
@@ -224,5 +227,71 @@ describe("guardEgress — in front of the real googleapis client", () => {
       if (previous === undefined) delete process.env.GOOGLE_CLOUD_UNIVERSE_DOMAIN;
       else process.env.GOOGLE_CLOUD_UNIVERSE_DOMAIN = previous;
     }
+  });
+});
+
+/**
+ * The guard only helps where it is actually attached. Two invariants keep it attached:
+ * a behavioural one (the client `getAuth` hands out refuses a forbidden call) and a
+ * structural one (no code path builds a mailbox client without it).
+ *
+ * The structural half exists because the behavioural half cannot see the path that was
+ * missed: `identifyStoredToken` built its own client for the `--auth` mailbox probe and
+ * never wrapped it. That client only ever called `users.getProfile`, which is allowed, so
+ * no test could have caught it by watching what it did. What was wrong was where the
+ * client came from — so that is what this checks.
+ */
+describe("every mailbox client is guarded, whoever builds it", () => {
+  it("hands out a guarded client from getAuth", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mw-egress-"));
+    try {
+      await fs.writeFile(
+        path.join(dir, "token.json"),
+        JSON.stringify({
+          type: "authorized_user",
+          client_id: "cid",
+          client_secret: "cs",
+          refresh_token: "rt",
+        }),
+      );
+      vi.resetModules();
+      vi.stubEnv("MAILWARDEN_DIR", dir);
+      const { getAuth } = await import("../src/auth.js");
+      const client = (await getAuth(false)) as unknown as {
+        request: (o: { url: string; method: string }) => Promise<unknown>;
+      };
+      // A send is refused before any token refresh could happen, so this needs no network.
+      await expect(
+        client.request({ url: `${GMAIL}/messages/send`, method: "POST" }),
+      ).rejects.toThrow(/sending mail/);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+      await fs.rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("builds no client in auth.ts outside guardEgress()", async () => {
+    const source = await fs.readFile(new URL("../src/auth.ts", import.meta.url), "utf8");
+    // Strip comments first: this file discusses `fromJSON` in prose, and prose is not a call.
+    const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^[ \t]*\/\/.*$/gm, "");
+
+    // Every span that is an argument to guardEgress(...), by brace matching.
+    const guarded: Array<[number, number]> = [];
+    for (const m of code.matchAll(/guardEgress\(/g)) {
+      let depth = 1;
+      let i = m.index + m[0].length;
+      for (; i < code.length && depth > 0; i++) {
+        if (code[i] === "(") depth++;
+        else if (code[i] === ")") depth--;
+      }
+      guarded.push([m.index, i]);
+    }
+    const isGuarded = (at: number) => guarded.some(([from, to]) => at > from && at < to);
+
+    const builders = [...code.matchAll(/google\.auth\.fromJSON\(|new OAuth2Client\(/g)];
+    expect(builders.length).toBeGreaterThan(0); // the check is worthless if it matches nothing
+    const unguarded = builders.filter((m) => !isGuarded(m.index)).map((m) => m[0]);
+    expect(unguarded).toEqual([]);
   });
 });
