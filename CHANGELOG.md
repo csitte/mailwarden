@@ -5,6 +5,24 @@ All notable changes to **mailwarden** are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Security
+- **The `@vitest/mocker` advisory that 0.19.0 left open is closed.** The fixed 4.1.11 was inside
+  the declared range all along; what blocked it was npm's own resolver, and the entry above named
+  the wrong remedy. Deleting `node_modules` and reinstalling did nothing — `npm install` honours the
+  lockfile, so it reinstalled 4.1.10 — and `npm update` reported "up to date" while sitting on the
+  vulnerable version, which is the more dangerous of the two answers: it looks like a result. Asking
+  for the version by name still aborted with `Cannot read properties of null (reading 'edgesOut')`.
+  What resolved it was `--legacy-peer-deps` used **once**, to let npm recompute the tree past the
+  circular peer link between `vitest` and `@vitest/coverage-v8` — not adopted as a project setting.
+  The point of doing it that way is that the flag leaves no trace to depend on: the lockfile it
+  produces differs from the old one only in version numbers, with no package dropped and no peer
+  omitted, and a plain `npm ci` followed by a plain `npm install` both accept it without a flag.
+  That last check is the one that mattered, because CI installs with `npm ci` and no flag. **A
+  workaround belongs in the step that computes an artifact, not in the artifact.** The development
+  tree now audits clean, as the runtime tree already did.
+
 ## [0.19.0] - 2026-09-08
 
 ### Security
