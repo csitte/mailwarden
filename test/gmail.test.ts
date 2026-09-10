@@ -2057,3 +2057,87 @@ describe("unverifiedPredicates — what the bulk tools took on the index's word"
     expect(unverifiedPredicates(q)).toHaveLength(deriveLabelFilters(q).length);
   });
 });
+
+/**
+ * The quota path through withBackoff. Gmail's per-user limit refills on a minute
+ * boundary, so the ordinary millisecond staffel cannot ride it out — it spends
+ * three attempts inside three seconds and reports failure anyway.
+ */
+describe("withBackoff — Gmail's per-minute quota", () => {
+  const quotaErr = () =>
+    Object.assign(
+      new Error(
+        "Quota exceeded for quota metric 'Total Query Cost' and limit " +
+          "'Units per minute per user' of service 'gmail.googleapis.com'.",
+      ),
+      { code: 403, errors: [{ reason: "rateLimitExceeded" }] },
+    );
+
+  it("waits out a quota 403 on a timescale that can actually clear it", async () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    const result = await withBackoff(
+      async () => {
+        calls++;
+        if (calls === 1) throw quotaErr();
+        return "ok";
+      },
+      { sleep: async (ms) => void sleeps.push(ms) },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(2);
+    // Not the 400ms staffel: a minute-based quota needs a wait measured in
+    // seconds, or the retry is guaranteed to fail too.
+    expect(sleeps[0]).toBeGreaterThanOrEqual(20_000);
+  });
+
+  it("gives up after one quota wait rather than holding a tool call open", async () => {
+    let calls = 0;
+    await expect(
+      withBackoff(
+        async () => {
+          calls++;
+          throw quotaErr();
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow(/Quota exceeded/);
+    // Past one wait the honest answer is `rate_limited` with a retryAfter, so
+    // the caller decides — not a tool invocation that hangs for minutes.
+    expect(calls).toBe(2);
+  });
+
+  it("keeps the network and quota budgets apart", async () => {
+    // A dropped socket first, then the quota. Spending the network retries must
+    // not consume the single quota wait — they are different conditions.
+    const errors = [
+      Object.assign(new Error("socket hang up"), { code: "ECONNRESET" }),
+      quotaErr(),
+    ];
+    let calls = 0;
+    const result = await withBackoff(
+      async () => {
+        const err = errors[calls++];
+        if (err) throw err;
+        return "ok";
+      },
+      { sleep: async () => {} },
+    );
+    expect(result).toBe("ok");
+    expect(calls).toBe(3);
+  });
+
+  it("does not wait out a 403 that is not a rate limit", async () => {
+    let calls = 0;
+    await expect(
+      withBackoff(
+        async () => {
+          calls++;
+          throw Object.assign(new Error("Permission denied by policy"), { code: 403 });
+        },
+        { sleep: async () => {} },
+      ),
+    ).rejects.toThrow("Permission denied");
+    expect(calls).toBe(1);
+  });
+});

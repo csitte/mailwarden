@@ -309,6 +309,44 @@ export function isInsufficientScope(err: unknown): boolean {
   );
 }
 
+/**
+ * True when a 403 is Google reporting a rate or quota limit rather than a
+ * permission problem.
+ *
+ * Gmail does not confine these to 429. The per-user quota — 6,000 units per
+ * minute, where `threads.get` costs 40 and `threads.modify` 10 — comes back as a
+ * **403** carrying `rateLimitExceeded`, so a check that reads only the status
+ * calls a wait-a-minute condition a permission denial. Reported from a live
+ * mailbox twice in one week: a routine sweep hit it, and the failure told the
+ * caller not to retry something that succeeded a minute later untouched.
+ *
+ * Keyed on the reason, never on the status alone — a genuine permission denial
+ * is also a 403 and must keep failing fast. The quota metric is minute-based, so
+ * the condition clears on its own; that is why this is the one 403 worth waiting
+ * out. Order matters at both call sites: {@link isInsufficientScope} is checked
+ * first, since a scope shortfall never clears by waiting.
+ */
+export function isRateLimitError(err: unknown): boolean {
+  if (statusOf(err) !== 403) return false;
+  if (isInsufficientScope(err)) return false;
+  const e = err as {
+    errors?: { reason?: unknown }[];
+    response?: { data?: { error?: { errors?: { reason?: unknown }[] } } };
+    message?: unknown;
+  };
+  const reasons = [...(e?.errors ?? []), ...(e?.response?.data?.error?.errors ?? [])];
+  return (
+    reasons.some(
+      (x) =>
+        x?.reason === "rateLimitExceeded" ||
+        x?.reason === "userRateLimitExceeded" ||
+        x?.reason === "quotaExceeded",
+    ) ||
+    (typeof e?.message === "string" &&
+      /quota exceeded|rate limit exceeded|user-rate limit/i.test(e.message))
+  );
+}
+
 /** Map mailwarden's FilterCriteria to the API's criteria shape, omitting empty fields. */
 export function filterCriteriaToApi(c: FilterCriteria): gmail_v1.Schema$FilterCriteria {
   const out: gmail_v1.Schema$FilterCriteria = {};
@@ -374,23 +412,63 @@ export function filterCriteriaToQuery(c: FilterCriteria): string {
  * Run `fn`, retrying 429/5xx responses with exponential backoff + jitter.
  * Anything else (4xx, network errors, non-HTTP failures) is thrown immediately.
  * `sleep` is injectable so tests don't have to wait real time.
+ *
+ * Gmail's per-user quota gets its own budget, because it is a different kind of
+ * wait. The ordinary staffel — 400ms, 800ms, 1.6s — is built for a blip and is
+ * spent inside three seconds; the quota it would be riding out refills on a
+ * **minute** boundary, so every one of those attempts fails and the caller ends
+ * up waiting three seconds to be told no. One attempt after ~20s is worth more
+ * than three inside three seconds, and it is capped at one because the caller is
+ * a tool invocation someone is waiting on: past that the honest move is to
+ * return `rate_limited` with `retryAfterSeconds` and let the client decide.
+ *
+ * The two budgets are counted separately on purpose. A dropped socket followed
+ * by a quota 403 is two different conditions, and spending the network retries
+ * should not silently consume the one quota wait.
+ *
+ * Jitter scales with the wait rather than staying at 100ms: the reported trigger
+ * was parallel subagents against one server process and one user quota, and a
+ * fixed jitter would send them all back at nearly the same instant.
  */
 export async function withBackoff<T>(
   fn: () => Promise<T>,
-  opts: { retries?: number; baseMs?: number; sleep?: (ms: number) => Promise<void> } = {},
+  opts: {
+    retries?: number;
+    baseMs?: number;
+    quotaRetries?: number;
+    quotaBaseMs?: number;
+    sleep?: (ms: number) => Promise<void>;
+  } = {},
 ): Promise<T> {
   const retries = opts.retries ?? 3;
   const baseMs = opts.baseMs ?? 400;
+  const quotaRetries = opts.quotaRetries ?? 1;
+  const quotaBaseMs = opts.quotaBaseMs ?? 20_000;
   const sleep = opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
-  for (let attempt = 0; ; attempt++) {
+  let attempt = 0;
+  let quotaAttempt = 0;
+  for (;;) {
     try {
       return await fn();
     } catch (err) {
+      const quota = isRateLimitError(err);
       const status = statusOf(err);
       const retryable =
-        (status !== undefined && RETRYABLE_STATUS.has(status)) || isRetryableNetworkError(err);
-      if (attempt >= retries || !retryable) throw err;
-      await sleep(baseMs * 2 ** attempt + Math.random() * 100);
+        quota ||
+        (status !== undefined && RETRYABLE_STATUS.has(status)) ||
+        isRetryableNetworkError(err);
+      if (!retryable) throw err;
+      if (quota) {
+        if (quotaAttempt >= quotaRetries) throw err;
+        const wait = quotaBaseMs * 2 ** quotaAttempt;
+        quotaAttempt++;
+        await sleep(wait + Math.random() * wait * 0.25);
+      } else {
+        if (attempt >= retries) throw err;
+        const wait = baseMs * 2 ** attempt;
+        attempt++;
+        await sleep(wait + Math.random() * 100);
+      }
     }
   }
 }

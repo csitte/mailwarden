@@ -92,3 +92,65 @@ describe("classifyError", () => {
     });
   });
 });
+
+/**
+ * Gmail reports a per-user quota overrun as a 403, not only as a 429. The
+ * corpus below is the shape a live mailbox actually produced (reported twice in
+ * one week from routine sweeps), plus the two 403s that must NOT be swept up
+ * with it: a scope shortfall, which re-auth fixes and waiting does not, and an
+ * administrative denial, which nothing fixes from here.
+ */
+describe("classifyError — a 403 that is really a rate limit", () => {
+  const quotaMessage =
+    "Quota exceeded for quota metric 'Total Query Cost' and limit 'Units per minute per user' " +
+    "of service 'gmail.googleapis.com' for consumer 'project_number:968304984367'.";
+
+  it("calls the reported failure retryable, and says how long to wait", () => {
+    // Verbatim from the field report: a mark_read that failed mid-run and
+    // succeeded untouched a few minutes later.
+    const err = Object.assign(new Error(quotaMessage), {
+      code: 403,
+      errors: [{ reason: "rateLimitExceeded", message: quotaMessage }],
+    });
+    expect(classifyError(err)).toEqual({
+      code: "rate_limited",
+      message: quotaMessage,
+      retryable: true,
+      retryAfterSeconds: 60,
+    });
+  });
+
+  it("reads the reason in either shape googleapis produces, and from the message alone", () => {
+    for (const err of [
+      { code: 403, message: "denied", errors: [{ reason: "userRateLimitExceeded" }] },
+      {
+        code: 403,
+        message: "denied",
+        response: { data: { error: { errors: [{ reason: "rateLimitExceeded" }] } } },
+      },
+      { code: 403, message: "denied", errors: [{ reason: "quotaExceeded" }] },
+      // No reason array at all — only Google's sentence.
+      { code: 403, message: quotaMessage },
+    ]) {
+      expect(classifyError(err)).toMatchObject({ code: "rate_limited", retryable: true });
+    }
+  });
+
+  it("still fails fast on the two 403s that waiting cannot fix", () => {
+    expect(
+      classifyError({ code: 403, errors: [{ reason: "insufficientPermissions" }], message: "no" }),
+    ).toMatchObject({ code: "insufficient_scope", retryable: false });
+    expect(classifyError({ code: 403, message: "Permission denied by policy" })).toMatchObject({
+      code: "forbidden_operation",
+      retryable: false,
+    });
+  });
+
+  it("carries the wait on a 429 too — same condition, different status", () => {
+    expect(classifyError({ code: 429, message: "slow down" })).toMatchObject({
+      code: "rate_limited",
+      retryable: true,
+      retryAfterSeconds: 60,
+    });
+  });
+});

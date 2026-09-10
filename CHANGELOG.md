@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **A Gmail quota overrun was reported as a permission denial, telling callers to give up on a
+  failure that clears within the minute.** Gmail bills each call against a per-user budget of 6,000
+  units per minute, and it reports an overrun as a **403** as readily as a 429 — but the
+  classifier read only the status, so the field saw `forbidden_operation` with `retryable: false`
+  on a call that succeeded untouched a few minutes later. Reported from a live mailbox after it
+  happened twice in one week, in ordinary sweeps: once on a follow-up call after a ~130-message
+  `bulk_modify`, once on a single `mark_read` that simply came last in a busy minute. The
+  distinction now keys on Google's `reason` (`rateLimitExceeded`, `userRateLimitExceeded`,
+  `quotaExceeded`) or its sentence, never on the status alone, so a genuine permission denial —
+  also a 403 — still fails fast, and a scope shortfall is still checked first because waiting
+  never fixes that one. Failures of this kind now carry `retryAfterSeconds`.
+
+- **The retry budget had the wrong unit for this failure.** The existing staffel (400ms doubling,
+  three attempts) is built for a blip and is spent inside three seconds; a minute-based quota
+  outlasts it, so all three attempts were guaranteed to fail and the caller waited three seconds to
+  be told no. Quota retries now get their own budget — one attempt after ~20s, counted separately
+  from the network retries, so a dropped socket earlier in the call cannot silently consume it. It
+  stays at one attempt on purpose: someone is waiting on the tool call, and past that the honest
+  answer is `rate_limited` with the wait attached rather than a call that hangs for minutes. The
+  jitter now scales with the wait, because the reported trigger was parallel subagents sharing one
+  server process and one user quota — a fixed 100ms jitter would send them all back at once.
+
+### Added
+- **README says what the quotas are and which failures fix themselves.** The unit costs per tool,
+  the two consequences that are easy to miss — parallel agents share one budget, and `bulk_modify`
+  beats a loop past six threads at a cost that does not grow with the list — and the sentence the
+  field report said was missing: this failure is temporary, waiting genuinely fixes it, and a
+  client keying on the HTTP status rather than the `code` will mistake it for a permission problem.
+
 ### Security
 - **The `@vitest/mocker` advisory that 0.19.0 left open is closed.** The fixed 4.1.11 was inside
   the declared range all along; what blocked it was npm's own resolver, and the entry above named

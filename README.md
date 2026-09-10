@@ -225,7 +225,32 @@ A **failure** is structured too: `isError` plus a fenced JSON body with a `code`
 `retryable` flag, alongside the sentence a human reads. So "wait and try again" versus "re-run
 `mailwarden --auth`" is something a client can decide, not something it has to infer from wording
 that may be reworded next release. (No `structuredContent` on errors: that is validated against the
-tool's outputSchema, which describes a success.)
+tool's outputSchema, which describes a success.) A `rate_limited` failure also carries
+`retryAfterSeconds`, because there the wait *is* the remedy.
+
+### Quotas: the one failure that fixes itself
+
+Gmail bills each call against a per-user budget of **6,000 units per minute**, and the units are
+not uniform — reading a thread in full is the expensive one:
+
+| Tool | Units per call |
+|---|---:|
+| `get_thread` (full) | 40 |
+| `get_message`, `trash`, attachment fetches | 20 |
+| `search`, `archive`, `modify_labels`, `snooze` | 10 |
+| `bulk_modify` | 50 for the whole batch, up to 1,000 ids |
+| `list_labels`, profile reads | 1 |
+
+Two consequences worth knowing before you build on this. **Parallel agents share one budget** —
+they reach Gmail through a single server process as a single user, so four of them reading threads
+at once spend four times as fast. And **`bulk_modify` is dramatically cheaper than looping**: past
+six threads, one batch beats N separate calls, and the batch cost does not grow with the list.
+
+If you do exceed it, Gmail answers with `rate_limited` and `retryAfterSeconds: 60`. **That failure
+is temporary and waiting genuinely fixes it** — the budget refills on a minute boundary. mailwarden
+absorbs one such wait itself before reporting; past that it hands the decision back rather than
+holding your tool call open. Note that Gmail reports this as a `403` as readily as a `429`, so a
+client keying on the status alone will mistake it for a permission problem — key on the `code`.
 
 ### How snooze works (no Gmail API snooze exists — we build it)
 

@@ -11,13 +11,19 @@
  * testable against real error shapes without a mailbox.
  */
 import { ToolError, type ToolErrorCode } from "./cli.js";
-import { isInsufficientScope, isInvalidGrant, statusOf } from "./gmail.js";
+import { isInsufficientScope, isInvalidGrant, isRateLimitError, statusOf } from "./gmail.js";
 
 export interface ToolFailure {
   code: ToolErrorCode;
   message: string;
   /** Whether calling again, unchanged, could plausibly succeed. */
   retryable: boolean;
+  /**
+   * How long to wait before that retry, when the error says so. Only set for a
+   * rate limit, where the wait is the whole remedy and guessing it wrong is the
+   * difference between succeeding and giving up.
+   */
+  retryAfterSeconds?: number;
 }
 
 const RETRYABLE_NET = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|ENOTFOUND|socket hang up|aborted|timed? ?out/i;
@@ -56,8 +62,17 @@ export function classifyError(err: unknown): ToolFailure {
     return { code: "network_error", message, retryable: true };
   }
 
+  // Before the status table: Gmail reports a quota overrun as a 403 as readily
+  // as a 429, and the row below would file that as `forbidden_operation` with
+  // `retryable: false` — telling a caller to give up on a condition that clears
+  // within the minute. Keyed on the reason, so a real permission denial (also a
+  // 403) still falls through to that row.
+  if (isRateLimitError(err)) {
+    return { code: "rate_limited", message, retryable: true, retryAfterSeconds: 60 };
+  }
+
   const status = statusOf(err);
-  if (status === 429) return { code: "rate_limited", message, retryable: true };
+  if (status === 429) return { code: "rate_limited", message, retryable: true, retryAfterSeconds: 60 };
   if (status !== undefined && status >= 500) {
     return { code: "upstream_unavailable", message, retryable: true };
   }
