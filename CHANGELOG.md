@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   happened twice in one week, in ordinary sweeps: once on a follow-up call after a ~130-message
   `bulk_modify`, once on a single `mark_read` that simply came last in a busy minute. The
   distinction now keys on Google's `reason` (`rateLimitExceeded`, `userRateLimitExceeded`,
-  `quotaExceeded`) or its sentence, never on the status alone, so a genuine permission denial —
+  `quotaExceeded`, and in Google's newer error body `RATE_LIMIT_EXCEEDED` or the status
+  `RESOURCE_EXHAUSTED`) or its sentence, never on the status alone, so a genuine permission denial —
   also a 403 — still fails fast, and a scope shortfall is still checked first because waiting
   never fixes that one. Failures of this kind now carry `retryAfterSeconds`.
 
@@ -29,11 +30,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   answer is `rate_limited` with the wait attached rather than a call that hangs for minutes. The
   jitter now scales with the wait, because the reported trigger was parallel subagents sharing one
   server process and one user quota — a fixed 100ms jitter would send them all back at once.
+  A 429 that carries a quota reason gets the same budget; a bare 429 keeps the short staffel.
+
+- **A quota overrun while `search` fetched its hits returned a shorter list, not an error.**
+  `search` fetches every candidate thread, eight at a time, and skips one that fails — right for a
+  thread deleted between the list and the fetch, wrong for the quota, which fails every fetch
+  alike. The result was a list cut short by the quota and indistinguishable from "nothing else
+  matches". It now fails with `rate_limited` after the one wait. `bulk_modify` with `verify` and
+  `list_subscriptions` had the same loop; they stop fetching instead and report what they did not
+  reach as `unverifiable` and `unknown`, because failing there would hide a change already made or
+  discard rows already read. The retry fix above first made this worse — every chunk of eight
+  waited out the quota before being skipped, minutes for a filtered search — and the release
+  checks caught it before it shipped.
 
 ### Added
 - **README says what the quotas are and which failures fix themselves.** The unit costs per tool,
   the two consequences that are easy to miss — parallel agents share one budget, and `bulk_modify`
-  beats a loop past six threads at a cost that does not grow with the list — and the sentence the
+  beats a loop from six threads on unless it is asked to verify — and the sentence the
   field report said was missing: this failure is temporary, waiting genuinely fixes it, and a
   client keying on the HTTP status rather than the `code` will mistake it for a permission problem.
 - **README says which install routes carry the skills.** `/mailwarden:setup` and

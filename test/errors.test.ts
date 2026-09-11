@@ -154,3 +154,41 @@ describe("classifyError — a 403 that is really a rate limit", () => {
     });
   });
 });
+
+describe("classifyError — the other shapes of the same quota", () => {
+  it("reads Google's newer error body: an ErrorInfo reason, or RESOURCE_EXHAUSTED", () => {
+    const message = "Resource has been exhausted (e.g. check quota).";
+    for (const err of [
+      {
+        code: 403,
+        message,
+        response: {
+          data: {
+            error: {
+              details: [
+                { "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "RATE_LIMIT_EXCEEDED" },
+              ],
+            },
+          },
+        },
+      },
+      { code: 403, message, response: { data: { error: { status: "RESOURCE_EXHAUSTED" } } } },
+    ]) {
+      expect(classifyError(err)).toMatchObject({
+        code: "rate_limited",
+        retryable: true,
+        retryAfterSeconds: 60,
+      });
+    }
+  });
+
+  it("does not take a daily limit for a minute's wait", () => {
+    expect(
+      classifyError({
+        code: 403,
+        message: "Daily Limit Exceeded",
+        errors: [{ reason: "dailyLimitExceeded" }],
+      }),
+    ).toMatchObject({ code: "forbidden_operation", retryable: false });
+  });
+});

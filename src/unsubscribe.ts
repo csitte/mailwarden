@@ -26,7 +26,7 @@
  */
 import { lookup as dnsLookup } from "node:dns/promises";
 import { parseSender } from "./digest.js";
-import type { Gmail, ThreadSummary } from "./gmail.js";
+import { isThrottled, type Gmail, type ThreadSummary } from "./gmail.js";
 
 /**
  * An opt-out link found in the message body rather than in a header.
@@ -866,7 +866,9 @@ const HEADER_CONCURRENCY = 8;
  *
  * A per-sender fetch that fails yields `optOut: "unknown"` rather than sinking the
  * listing: the point of this tool is the overview, and one unreadable thread should
- * not cost the caller the other nineteen rows.
+ * not cost the caller the other nineteen rows. The one exception is the quota: once a
+ * fetch fails on it, the remaining senders are reported `"unknown"` without asking —
+ * each would otherwise wait out the quota once per chunk and come back unknown anyway.
  *
  * `sendersFound` is the count BEFORE `topN` truncates, so a caller can tell a
  * complete answer from a top-ten slice of forty. A cap that is not reported reads
@@ -881,11 +883,17 @@ export async function listSubscriptions(
   const sendersFound = all.length;
   const groups = all.slice(0, opts.topN ?? DEFAULT_TOP_N);
   const out: Subscription[] = [];
+  let throttled = false;
   for (let i = 0; i < groups.length; i += HEADER_CONCURRENCY) {
     const chunk = groups.slice(i, i + HEADER_CONCURRENCY);
-    const infos = await Promise.all(
-      chunk.map((g) => inspectUnsubscribe(gmail, g.newestThreadId).catch(() => null)),
-    );
+    const settled = throttled
+      ? []
+      : await Promise.allSettled(chunk.map((g) => inspectUnsubscribe(gmail, g.newestThreadId)));
+    if (settled.some((s) => s.status === "rejected" && isThrottled(s.reason))) throttled = true;
+    const infos = chunk.map((_, j) => {
+      const s = settled[j];
+      return s?.status === "fulfilled" ? s.value : null;
+    });
     for (let j = 0; j < chunk.length; j++) {
       const info = infos[j];
       const options: UnsubscribeOptions = info

@@ -310,7 +310,7 @@ export function isInsufficientScope(err: unknown): boolean {
 }
 
 /**
- * True when a 403 is Google reporting a rate or quota limit rather than a
+ * True when a 403 or 429 is Google reporting a rate or quota limit rather than a
  * permission problem.
  *
  * Gmail does not confine these to 429. The per-user quota — 6,000 units per
@@ -320,6 +320,11 @@ export function isInsufficientScope(err: unknown): boolean {
  * mailbox twice in one week: a routine sweep hit it, and the failure told the
  * caller not to retry something that succeeded a minute later untouched.
  *
+ * A 429 carrying the same reason is the same condition and gets the same
+ * minute-scale wait in {@link withBackoff}; a bare 429 keeps the short staffel.
+ * Google's newer error body is read as well as the legacy `errors[]` array:
+ * `google.rpc.ErrorInfo` entries in `details`, and the status `RESOURCE_EXHAUSTED`.
+ *
  * Keyed on the reason, never on the status alone — a genuine permission denial
  * is also a 403 and must keep failing fast. The quota metric is minute-based, so
  * the condition clears on its own; that is why this is the one 403 worth waiting
@@ -327,24 +332,43 @@ export function isInsufficientScope(err: unknown): boolean {
  * first, since a scope shortfall never clears by waiting.
  */
 export function isRateLimitError(err: unknown): boolean {
-  if (statusOf(err) !== 403) return false;
+  const status = statusOf(err);
+  if (status !== 403 && status !== 429) return false;
   if (isInsufficientScope(err)) return false;
   const e = err as {
     errors?: { reason?: unknown }[];
-    response?: { data?: { error?: { errors?: { reason?: unknown }[] } } };
+    response?: {
+      data?: {
+        error?: { status?: unknown; errors?: { reason?: unknown }[]; details?: { reason?: unknown }[] };
+      };
+    };
     message?: unknown;
   };
-  const reasons = [...(e?.errors ?? []), ...(e?.response?.data?.error?.errors ?? [])];
+  const body = e?.response?.data?.error;
+  const reasons = [...(e?.errors ?? []), ...(body?.errors ?? []), ...(body?.details ?? [])];
   return (
-    reasons.some(
-      (x) =>
-        x?.reason === "rateLimitExceeded" ||
-        x?.reason === "userRateLimitExceeded" ||
-        x?.reason === "quotaExceeded",
-    ) ||
+    reasons.some((x) => typeof x?.reason === "string" && QUOTA_REASONS.has(x.reason)) ||
+    body?.status === "RESOURCE_EXHAUSTED" ||
     (typeof e?.message === "string" &&
       /quota exceeded|rate limit exceeded|user-rate limit/i.test(e.message))
   );
+}
+
+/** Google's reasons for a rate or quota limit — legacy `errors[]` names and the ErrorInfo one. */
+const QUOTA_REASONS = new Set([
+  "rateLimitExceeded",
+  "userRateLimitExceeded",
+  "quotaExceeded",
+  "RATE_LIMIT_EXCEEDED",
+]);
+
+/**
+ * Any rate limit, whatever the reason field says: {@link isRateLimitError}, or a bare 429.
+ * What the loops that fetch many threads in one call ask before they swallow a per-thread
+ * failure — a throttle is never local to one thread.
+ */
+export function isThrottled(err: unknown): boolean {
+  return isRateLimitError(err) || statusOf(err) === 429;
 }
 
 /** Map mailwarden's FilterCriteria to the API's criteria shape, omitting empty fields. */
@@ -415,8 +439,8 @@ export function filterCriteriaToQuery(c: FilterCriteria): string {
  *
  * Gmail's per-user quota gets its own budget, because it is a different kind of
  * wait. The ordinary staffel — 400ms, 800ms, 1.6s — is built for a blip and is
- * spent inside three seconds; the quota it would be riding out refills on a
- * **minute** boundary, so every one of those attempts fails and the caller ends
+ * spent inside three seconds; the quota it would be riding out is counted per
+ * **minute**, so every one of those attempts fails and the caller ends
  * up waiting three seconds to be told no. One attempt after ~20s is worth more
  * than three inside three seconds, and it is capped at one because the caller is
  * a tool invocation someone is waiting on: past that the honest move is to
@@ -912,12 +936,20 @@ export class Gmail {
       // search: the list call already proved auth works, so a per-thread failure is
       // local. Swallow it and drop that one candidate. (`threads.list` above is NOT
       // wrapped this way, so a systemic auth/network failure still surfaces.)
-      const metas = await Promise.all(
+      const settled = await Promise.allSettled(
         chunk.map((t) =>
-          this.req(() => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" }))
-            .catch(() => null),
+          this.req(() => this.api.users.threads.get({ userId: "me", id: t.id!, format: "full" })),
         ),
       );
+      // A quota failure is the exception to "local": it hits every candidate alike, and each
+      // one has already waited out the quota once inside req(). Swallowing it would repeat that
+      // wait once per chunk and then return a list shortened by the quota rather than by the
+      // query — which reads exactly like "nothing else matches". Fail the search instead, after
+      // one wait, as `rate_limited`. allSettled rather than all, so no fetch of this chunk is
+      // still retrying in the background when the error leaves.
+      const throttled = settled.find((s) => s.status === "rejected" && isThrottled(s.reason));
+      if (throttled) throw (throttled as PromiseRejectedResult).reason;
+      const metas = settled.map((s) => (s.status === "fulfilled" ? s.value : null));
       for (let j = 0; j < chunk.length && out.length < maxResults; j++) {
         const meta = metas[j];
         if (!meta) continue; // thread vanished or errored after retries — skip it
@@ -1301,18 +1333,21 @@ export class Gmail {
     const out = new Map<string, string[]>();
     for (let i = 0; i < threadIds.length; i += GET_CONCURRENCY) {
       const chunk = threadIds.slice(i, i + GET_CONCURRENCY);
-      const metas = await Promise.all(
+      const settled = await Promise.allSettled(
         chunk.map((id) =>
-          this.req(() => this.api.users.threads.get({ userId: "me", id, format: "minimal" })).catch(
-            () => null,
-          ),
+          this.req(() => this.api.users.threads.get({ userId: "me", id, format: "minimal" })),
         ),
       );
-      for (const meta of metas) {
-        for (const m of meta?.data.messages ?? []) {
+      for (const s of settled) {
+        if (s.status !== "fulfilled") continue;
+        for (const m of s.value.data.messages ?? []) {
           if (m.id) out.set(m.id, m.labelIds ?? []);
         }
       }
+      // Out of quota: stop reading rather than wait once more per chunk. The write has already
+      // happened, so failing the call would hide it; the threads not read back land in
+      // `unverifiable` — not known, worth a second look — which is the honest answer.
+      if (settled.some((s) => s.status === "rejected" && isThrottled(s.reason))) break;
     }
     return out;
   }

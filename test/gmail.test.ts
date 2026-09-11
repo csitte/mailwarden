@@ -2059,8 +2059,8 @@ describe("unverifiedPredicates — what the bulk tools took on the index's word"
 });
 
 /**
- * The quota path through withBackoff. Gmail's per-user limit refills on a minute
- * boundary, so the ordinary millisecond staffel cannot ride it out — it spends
+ * The quota path through withBackoff. Gmail's per-user limit is counted per
+ * minute, so the ordinary millisecond staffel cannot ride it out — it spends
  * three attempts inside three seconds and reports failure anyway.
  */
 describe("withBackoff — Gmail's per-minute quota", () => {
@@ -2139,5 +2139,144 @@ describe("withBackoff — Gmail's per-minute quota", () => {
       ),
     ).rejects.toThrow("Permission denied");
     expect(calls).toBe(1);
+  });
+});
+
+/**
+ * The same condition arriving as a 429. Gmail uses both statuses for the per-user quota; the
+ * reason decides the wait, not the status. A bare 429 (no reason) keeps the short staffel.
+ */
+describe("withBackoff — a 429 that carries a quota reason", () => {
+  const reasoned429 = () =>
+    Object.assign(new Error("Quota exceeded for quota metric 'Total Query Cost'."), {
+      code: 429,
+      errors: [{ reason: "rateLimitExceeded" }],
+    });
+
+  it("waits on the minute scale, like the 403", async () => {
+    const sleeps: number[] = [];
+    let calls = 0;
+    await expect(
+      withBackoff(
+        async () => {
+          calls++;
+          throw reasoned429();
+        },
+        { sleep: async (ms) => void sleeps.push(ms) },
+      ),
+    ).rejects.toThrow(/Quota exceeded/);
+    expect(calls).toBe(2);
+    expect(sleeps).toHaveLength(1);
+    expect(sleeps[0]).toBeGreaterThanOrEqual(20_000);
+  });
+
+  it("keeps the short staffel for a bare 429", async () => {
+    const sleeps: number[] = [];
+    await expect(
+      withBackoff(
+        async () => {
+          throw Object.assign(new Error("Too many concurrent requests for user"), { code: 429 });
+        },
+        { sleep: async (ms) => void sleeps.push(ms) },
+      ),
+    ).rejects.toThrow(/concurrent/);
+    expect(sleeps).toHaveLength(3);
+    expect(Math.max(...sleeps)).toBeLessThan(2_000);
+  });
+});
+
+/**
+ * The loops that fetch many threads in one call. Each fetch goes through withBackoff, so a
+ * quota failure used to cost one ~20s wait PER CHUNK of eight — minutes for a filtered search —
+ * and then vanish into the per-thread "skip what failed" path. Real timers would make these
+ * tests take that long too; fake ones let the waits elapse instantly.
+ */
+describe("quota failures inside the multi-fetch loops", () => {
+  const quotaErr = () =>
+    Object.assign(
+      new Error(
+        "Quota exceeded for quota metric 'Total Query Cost' and limit " +
+          "'Units per minute per user' of service 'gmail.googleapis.com'.",
+      ),
+      { code: 403, errors: [{ reason: "rateLimitExceeded" }] },
+    );
+
+  it("search fails as a rate limit after one wait, instead of returning a list the quota shortened", async () => {
+    vi.useFakeTimers();
+    try {
+      let gets = 0;
+      const api: any = {
+        users: {
+          threads: {
+            list: async () => ({
+              data: { threads: Array.from({ length: 25 }, (_, i) => ({ id: `t${i}` })) },
+            }),
+            get: async () => {
+              gets++;
+              throw quotaErr();
+            },
+          },
+        },
+      };
+      const gmail = new Gmail(api as gmail_v1.Gmail);
+      const pending = gmail.search("from:foo@bar.com", 25);
+      pending.catch(() => {});
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(pending).rejects.toThrow(/Quota exceeded/);
+      // One chunk of eight, each tried twice (the call and its one quota wait). Before the fix:
+      // all four chunks, each waiting, and then `threads: []` with no error at all.
+      expect(gets).toBe(16);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("search still skips a single vanished thread", async () => {
+    const api: any = {
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: [{ id: "a" }, { id: "b" }] } }),
+          get: async (req: any) => {
+            if (req.id === "b") throw Object.assign(new Error("not found"), { status: 404 });
+            return {
+              data: { messages: [{ id: "m-a", labelIds: ["INBOX"], payload: { headers: [] } }] },
+            };
+          },
+        },
+      },
+    };
+    const res = await new Gmail(api as gmail_v1.Gmail).search("from:foo@bar.com", 25);
+    expect(res.threads.map((t) => t.threadId)).toEqual(["a"]);
+  });
+
+  it("bulk verify stops reading back on the quota and reports the rest unverifiable, keeping the write", async () => {
+    vi.useFakeTimers();
+    try {
+      let gets = 0;
+      const api: any = {
+        users: {
+          messages: { batchModify: async () => ({}) },
+          threads: {
+            get: async () => {
+              gets++;
+              throw quotaErr();
+            },
+          },
+        },
+      };
+      const gmail = new Gmail(api as gmail_v1.Gmail);
+      const refs = Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, threadId: `t${i}` }));
+      const pending = gmail.batchModifyMessages(refs, ["Label_todo"], [], { verify: true });
+      pending.catch(() => {});
+      await vi.advanceTimersByTimeAsync(30_000);
+      const res = await pending;
+      // The write happened; failing the call would hide that.
+      expect(res.submittedMessages).toBe(20);
+      expect(res.failed).toHaveLength(0);
+      expect(res.verified?.unverifiable).toHaveLength(20);
+      expect(gets).toBe(16); // the first chunk only — not three chunks of waiting
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

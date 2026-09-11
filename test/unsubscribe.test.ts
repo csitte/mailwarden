@@ -1378,3 +1378,38 @@ describe("bulkUnsubscribe — dryRun rehearses the real run without contacting a
     expect(rep.results[2].reason).toMatch(/time budget/);
   });
 });
+
+describe("listSubscriptions — out of quota", () => {
+  it("stops asking once the quota is gone and reports the remaining senders unknown", async () => {
+    vi.useFakeTimers();
+    try {
+      let gets = 0;
+      const api: any = {
+        users: {
+          threads: {
+            get: async () => {
+              gets++;
+              throw Object.assign(new Error("Quota exceeded for quota metric 'Total Query Cost'."), {
+                code: 403,
+                errors: [{ reason: "rateLimitExceeded" }],
+              });
+            },
+          },
+        },
+      };
+      const rows = Array.from({ length: 10 }, (_, i) =>
+        row({ threadId: `t${i}`, from: `sender${i}@example.com` }),
+      );
+      const pending = listSubscriptions(new Gmail(api), rows, { topN: 10 });
+      pending.catch(() => {});
+      await vi.advanceTimersByTimeAsync(30_000);
+      const { subscriptions } = await pending;
+      expect(subscriptions).toHaveLength(10);
+      expect(subscriptions.every((s) => s.optOut === "unknown")).toBe(true);
+      // First chunk of eight, each with its one quota wait; the last two senders never asked.
+      expect(gets).toBe(16);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
