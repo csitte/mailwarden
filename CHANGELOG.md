@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-11
+
 ### Fixed
 - **A Gmail quota overrun was reported as a permission denial, telling callers to give up on a
   failure that clears within the minute.** Gmail bills each call against a per-user budget of 6,000
@@ -1507,7 +1509,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/csitte/mailwarden/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/csitte/mailwarden/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/csitte/mailwarden/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/csitte/mailwarden/compare/v0.16.0...v0.17.0
