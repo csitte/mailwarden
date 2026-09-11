@@ -521,6 +521,9 @@ It is submitted to Anthropic's community marketplace; once listed, `/plugin mark
 then `/plugin install mailwarden@claude-community` does the same without a clone. The plugin runs the full
 tool surface — for a narrower tier (`MAILWARDEN_TOOLS=read`) or a second account, use `claude mcp add` with
 the env you want instead (see [Config](#config-env) and [Multiple accounts](#multiple-accounts)).
+That route gets the server without the skills: the npm package ships the server alone, and the skills
+live in this repo's `skills/` folder — to keep `triage` with a `claude mcp add` setup, copy
+`skills/triage` from a clone into `~/.claude/skills/`.
 
 **Claude Desktop** — add to `claude_desktop_config.json`:
 ```json

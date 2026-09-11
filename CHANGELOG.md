@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   beats a loop past six threads at a cost that does not grow with the list — and the sentence the
   field report said was missing: this failure is temporary, waiting genuinely fixes it, and a
   client keying on the HTTP status rather than the `code` will mistake it for a permission problem.
+- **README says which install routes carry the skills.** `/mailwarden:setup` and
+  `/mailwarden:triage` come with the Claude Code plugin only; the npm package ships the server alone,
+  so a `claude mcp add` setup — the route the README itself recommends for a narrower tier or a
+  second account — had the tools without the rules `triage` carries, and nothing said so. The README
+  now says it, and how to copy the skill from a clone.
 
 ### Security
 - **The `@vitest/mocker` advisory that 0.19.0 left open is closed.** The fixed 4.1.11 was inside
