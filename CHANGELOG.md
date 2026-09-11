@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`create_filter` can verify its backlog sweep** — `verify: true` alongside `applyToExisting`
+  reads the labels back after the sweep and adds `applied.verified` `{applied, notApplied,
+  unverifiable}`, the same check `bulk_modify` already offers. Until now the sweep could only
+  report `submittedMessages`, and the README told the reader to re-run `bulk_modify` with the same
+  query when the outcome had to be certain — doing by hand what the tool could do. Off by default
+  (one `threads.get` per affected thread). A read-back that fails lands in `unverifiable` and does
+  not fail the call: the filter is created before the sweep, and a verification problem must not
+  read as a failed `create_filter`. (#7)
+
 ## [0.20.0] - 2026-09-11
 
 ### Fixed

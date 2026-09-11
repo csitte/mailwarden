@@ -290,8 +290,10 @@ given label actions — the mailbox keeps triaging itself with no assistant in t
   because it would match almost the whole mailbox — create such a filter without the flag.
   The outcome comes back under `applied` (the `query` used, `matchedMessages`/`submittedMessages`/`submittedThreadCount`
   counts, `capped` when the match set hit `maxMessages`, per-chunk `failed`, and an `error` string if the whole
-  pass failed); it's `null` when `applyToExisting` was not set. The backlog pass does not verify what landed —
-  `bulk_modify`'s `verify` does; re-run it with the same query when the sweep's outcome has to be certain. The filter is created first, so a partial or
+  pass failed); it's `null` when `applyToExisting` was not set. `submittedMessages` is what was handed to the API,
+  not what changed — pass `verify: true` alongside `applyToExisting` to read the labels back and get
+  `applied.verified` `{applied, notApplied, unverifiable}`, the same check as `bulk_modify`'s `verify`
+  (one extra read per affected thread, so off by default). The filter is created first, so a partial or
   failed backlog pass is *reported* in `applied`, never raised — the rule still stands.
 - **No forwarding** — see [Security & privacy](#security--privacy).
 - Requires the `gmail.settings.basic` scope; re-run `--auth` once if you authorized an older version.

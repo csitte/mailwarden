@@ -40,7 +40,8 @@ So:
 accepted request is not a performed one. **Do not tell the user that N messages were archived on
 the strength of that number.** Pass `verify: true` when the outcome will be reported as done or
 cannot be easily reversed, and quote `verified.applied` — the only field that reports something
-observed.
+observed. The same holds for `create_filter` with `applyToExisting`: its `applied.submittedMessages`
+is a submitted count, and `verify: true` adds `applied.verified`.
 
 ## Unsubscribing
 

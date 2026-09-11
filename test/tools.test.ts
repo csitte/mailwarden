@@ -936,6 +936,82 @@ describe("tool results — structured content + fenced text", () => {
       capped: false,
       failed: [],
     });
+    // Without verify the sweep claims only what it submitted.
+    expect(res.structuredContent.applied.verified).toBeUndefined();
+  });
+
+  it("create_filter applyToExisting verify:true reads the sweep back and reports what landed", async () => {
+    const threadGets: string[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        labels: { list: async () => ({ data: { labels: [] } }) },
+        settings: { filters: { create: async (r: any) => ({ data: { id: "f-v", ...r.requestBody } }) } },
+        messages: {
+          list: async () => ({
+            data: { messages: [{ id: "m1", threadId: "t1" }, { id: "m2", threadId: "t2" }] },
+          }),
+          batchModify: async () => ({}),
+        },
+        threads: {
+          get: async (req: any) => {
+            threadGets.push(req.id);
+            // t1 left the inbox as asked; t2 silently did not.
+            return req.id === "t1"
+              ? { data: { messages: [{ id: "m1", labelIds: [] }] } }
+              : { data: { messages: [{ id: "m2", labelIds: ["INBOX"] }] } };
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "create_filter",
+      arguments: { from: "news@x.com", removeLabels: ["INBOX"], applyToExisting: true, verify: true },
+    });
+
+    expect(res.isError).toBeFalsy();
+    expect(res.structuredContent.applied.submittedMessages).toBe(2); // still what was sent
+    expect(res.structuredContent.applied.verified).toEqual({
+      applied: 1,
+      notApplied: ["m2"],
+      unverifiable: [],
+    });
+    expect(threadGets.sort()).toEqual(["t1", "t2"]);
+  });
+
+  it("create_filter verify: a failed read-back is unverifiable, not a failed create_filter", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        labels: { list: async () => ({ data: { labels: [] } }) },
+        settings: { filters: { create: async (r: any) => ({ data: { id: "f-w", ...r.requestBody } }) } },
+        messages: {
+          list: async () => ({
+            data: { messages: [{ id: "m1", threadId: "t1" }, { id: "m2", threadId: "t2" }] },
+          }),
+          batchModify: async () => ({}),
+        },
+        threads: {
+          get: async () => {
+            throw Object.assign(new Error("gone"), { status: 404 });
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "create_filter",
+      arguments: { from: "news@x.com", removeLabels: ["INBOX"], applyToExisting: true, verify: true },
+    });
+
+    expect(res.isError).toBeFalsy(); // the filter stands
+    expect(res.structuredContent.id).toBe("f-w");
+    expect(res.structuredContent.applied.error).toBeUndefined(); // the write happened
+    expect(res.structuredContent.applied.submittedMessages).toBe(2);
+    expect(res.structuredContent.applied.verified).toEqual({
+      applied: 0,
+      notApplied: [],
+      unverifiable: ["m1", "m2"],
+    });
   });
 
   it("create_filter refuses applyToExisting for an exclusion-only rule (no whole-mailbox sweep)", async () => {

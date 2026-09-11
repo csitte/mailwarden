@@ -163,14 +163,24 @@ const filterSummarySchema = z.object({
   forward: z.string().optional(),
 });
 
+// What a verified batch modify observed (bulk_modify and create_filter's sweep, both with
+// verify:true). `unverifiable` is not `notApplied` — the end state could not be read,
+// which is a reason to look again, not to retry blindly.
+const verifiedBatchSchema = z.object({
+  applied: z.number(),
+  notApplied: z.array(z.string()),
+  unverifiable: z.array(z.string()),
+});
+
 // Result of optionally applying a new filter's actions to already-arrived mail.
 const filterAppliedSchema = z.object({
   query: z.string(),
   matchedMessages: z.number(),
-  // Handed to the API, not confirmed changed — the backlog sweep does not verify
-  // (bulk_modify's `verify` does). See BatchModifyResult on why 204 is not proof.
+  // Handed to the API, not confirmed changed. Only `verified` (verify:true) reports an
+  // observed outcome — see BatchModifyResult on why 204 is not proof.
   submittedMessages: z.number(),
   submittedThreadCount: z.number(),
+  verified: verifiedBatchSchema.optional(),
   // True when more messages matched than maxMessages — the rest were left untouched.
   capped: z.boolean(),
   failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
@@ -616,15 +626,8 @@ function registerManageTools(server: McpServer): void {
         submittedMessages: z.number(),
         submittedThreadCount: z.number(),
         submittedThreads: z.array(z.string()),
-        // Present only with verify:true. `unverifiable` is not `notApplied` — the end
-        // state could not be read, which is a reason to look again, not to retry blindly.
-        verified: z
-          .object({
-            applied: z.number(),
-            notApplied: z.array(z.string()),
-            unverifiable: z.array(z.string()),
-          })
-          .optional(),
+        // Present only with verify:true.
+        verified: verifiedBatchSchema.optional(),
         // True when the match set was truncated at maxMessages — more remain unprocessed.
         capped: z.boolean(),
         // Conditions in the query that search would have re-verified and this tool did not
@@ -1012,6 +1015,9 @@ function registerFilterTools(server: McpServer): void {
         "A filter only affects mail arriving AFTER it's created; set applyToExisting:true to ALSO apply the same " +
         "actions once to mail already in the mailbox (builds a Gmail search from the criteria and runs a bulk modify — " +
         "same unverified-index caveat as bulk_modify — the sweep acts on what the index returns, which can be badly stale on read state; up to maxMessages, default 1000). " +
+        "The sweep's `applied.submittedMessages` is how many ids were handed to the API, NOT how many messages changed; " +
+        "set verify:true alongside applyToExisting to read the labels back afterwards and get `applied.verified` {applied, notApplied[], unverifiable[]}. " +
+        "It costs one extra read per affected thread, so it is off by default; a read-back that fails lands in `unverifiable` and never fails the call — the filter stands either way. " +
         "USE WHEN: setting up a persistent auto-triage rule (e.g. 'always archive + label newsletters from x'), optionally cleaning up the existing backlog too. " +
         "NOTE: forwarding filters are intentionally not supported — mailwarden creates no send/exfiltration path. " +
         "SIDE EFFECTS: adds a server-side rule affecting future mail (reversible via delete_filter); with applyToExisting also modifies existing messages. Requires gmail.settings.basic.",
@@ -1033,13 +1039,16 @@ function registerFilterTools(server: McpServer): void {
         // Also apply the actions once to mail that already matches (default: future mail only).
         applyToExisting: z.boolean().default(false),
         maxMessages: z.number().int().min(1).max(10000).default(1000),
+        // Read the sweep's labels back afterwards (only meaningful with applyToExisting). Off by
+        // default for the same reason as bulk_modify: one threads.get per affected thread.
+        verify: z.boolean().default(false),
       },
       // `applied` is null unless applyToExisting was set.
       outputSchema: { ...filterSummarySchema.shape, applied: filterAppliedSchema.nullable() },
       // destructive: with applyToExisting + addLabels:['TRASH'] this bulk-trashes existing mail.
       annotations: { title: "Create filter", ...write, destructiveHint: true, idempotentHint: false },
     },
-    async ({ addLabels, removeLabels, applyToExisting, maxMessages, ...criteria }) => {
+    async ({ addLabels, removeLabels, applyToExisting, maxMessages, verify, ...criteria }) => {
       // `sizeComparison` and `excludeChats` only MODIFY an otherwise-matching
       // filter, and `negatedQuery` only EXCLUDES — none is a positive match
       // condition on its own. Split them out so each guard can reason precisely.
@@ -1107,6 +1116,7 @@ function registerFilterTools(server: McpServer): void {
         matchedMessages: number;
         submittedMessages: number;
         submittedThreadCount: number;
+        verified?: { applied: number; notApplied: string[]; unverifiable: string[] };
         capped: boolean;
         failed: { messageIds: string[]; error: string }[];
         error?: string;
@@ -1122,15 +1132,27 @@ function registerFilterTools(server: McpServer): void {
       // Best-effort backlog cleanup: the filter is already created, so ANY failure
       // here (a failed list/label-resolve, or per-chunk modify errors) is reported
       // in `applied` — never raised — so the caller learns the rule still stands.
+      // verify keeps to that without help: batchModifyMessages lets a failed read-back land
+      // in `unverifiable` rather than throw, so it can never turn a done write into `error`.
       if (query) {
         try {
           const refs = await gmail.listMessageRefs({ query, max: maxMessages });
-          const res = await gmail.batchModifyMessages(refs, addLabels, removeLabels);
+          const res = await gmail.batchModifyMessages(refs, addLabels, removeLabels, { verify });
           applied = {
             query,
             matchedMessages: refs.length,
             submittedMessages: res.submittedMessages,
             submittedThreadCount: res.submittedThreads.length,
+            // Id lists capped as in bulk_modify, so a large sweep cannot flood the context.
+            ...(res.verified
+              ? {
+                  verified: {
+                    applied: res.verified.applied,
+                    notApplied: res.verified.notApplied.slice(0, 500),
+                    unverifiable: res.verified.unverifiable.slice(0, 500),
+                  },
+                }
+              : {}),
             capped: refs.length >= maxMessages,
             failed: res.failed,
           };
