@@ -231,25 +231,35 @@ tool's outputSchema, which describes a success.) A `rate_limited` failure also c
 ### Quotas: the one failure that fixes itself
 
 Gmail bills each call against a per-user budget of **6,000 units per minute**, and the units are
-not uniform — reading a thread in full is the expensive one:
+not uniform — fetching a thread is the expensive part, in whatever format it is fetched:
 
 | Tool | Units per call |
-|---|---:|
-| `get_thread` (full) | 40 |
-| `get_message`, `trash`, attachment fetches | 20 |
-| `search`, `archive`, `modify_labels`, `snooze` | 10 |
-| `bulk_modify` | 50 for the whole batch, up to 1,000 ids |
-| `list_labels`, profile reads | 1 |
+|---|---|
+| `search` | 10 per list page, plus 40 for every candidate thread it fetches — about 1,000 at the default size, up to about 4,000 when the query carries a read-state or category condition |
+| `get_thread` (full and metadata alike) | 40 |
+| `trash`, `download_attachment` | 20 |
+| `archive`, `mark_read`, `untrash` | 10 |
+| `modify_labels`, `snooze` | 10, plus 1 for each label looked up by name and 5 for each label it has to create |
+| `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches |
+| `list_labels`, `get_profile` | 1 |
+
+`mark_unread` costs what `mark_read` does.
 
 Two consequences worth knowing before you build on this. **Parallel agents share one budget** —
 they reach Gmail through a single server process as a single user, so four of them reading threads
-at once spend four times as fast. And **`bulk_modify` is dramatically cheaper than looping**: past
-six threads, one batch beats N separate calls, and the batch cost does not grow with the list.
+at once spend four times as fast. And **`bulk_modify` is cheaper than looping from six threads
+on**: up to 500 matching messages it costs 55 units, the price of five and a half `archive` calls,
+and it grows by the thousand messages, not by the thread. `verify: true` reverses that — reading
+the labels back costs 40 per thread, more than the loop it replaced.
 
-If you do exceed it, Gmail answers with `rate_limited` and `retryAfterSeconds: 60`. **That failure
-is temporary and waiting genuinely fixes it** — the budget refills on a minute boundary. mailwarden
-absorbs one such wait itself before reporting; past that it hands the decision back rather than
-holding your tool call open. Note that Gmail reports this as a `403` as readily as a `429`, so a
+If you do exceed it, mailwarden fails the call with `rate_limited` and `retryAfterSeconds: 60`.
+**That failure is temporary and waiting genuinely fixes it** — the budget is counted per minute.
+mailwarden absorbs one such wait (about 20 seconds) itself before reporting; past that it hands the
+decision back rather than holding your tool call open. That holds for the tools that fetch many
+threads in one call too: `search` fails with `rate_limited` rather than returning a list the quota
+cut short, and `bulk_modify` with `verify` and `list_subscriptions` stop fetching and report what
+they did not reach as `unverifiable` and `unknown` (for `bulk_modify` the change is already made,
+and failing would hide it). Note that Gmail reports this as a `403` as readily as a `429`, so a
 client keying on the status alone will mistake it for a permission problem — key on the `code`.
 
 ### How snooze works (no Gmail API snooze exists — we build it)
