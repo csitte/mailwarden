@@ -33,7 +33,7 @@
  *
  * Needs a built tree (`npm run build`) and an authorized token (`mailwarden --auth`).
  */
-import { google } from "googleapis";
+import { gmail as gmailApi } from "@googleapis/gmail";
 import { getAuth } from "../dist/auth.js";
 import { deriveLabelFilters } from "../dist/gmail.js";
 
@@ -66,7 +66,7 @@ const QUERIES = argv.length
     ];
 
 const auth = await getAuth(false);
-const api = google.gmail({ version: "v1", auth });
+const api = gmailApi({ version: "v1", auth });
 
 const profile = await api.users.getProfile({ userId: "me" });
 console.log(`Mailbox: ${profile.data.emailAddress}`);

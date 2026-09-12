@@ -1,4 +1,4 @@
-import { google } from "googleapis";
+import { auth as googleAuth, gmail as gmailApi } from "@googleapis/gmail";
 import { OAuth2Client } from "google-auth-library";
 import { runConsentFlow } from "./consent.js";
 import { guardEgress } from "./egress.js";
@@ -310,7 +310,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
     // there is nothing left to remember. `guardEgress` is idempotent, so the caller that does
     // wrap stays correct.
     return guardEgress(
-      google.auth.fromJSON(parsed as Parameters<typeof google.auth.fromJSON>[0]) as OAuth2Client,
+      googleAuth.fromJSON(parsed as Parameters<typeof googleAuth.fromJSON>[0]) as OAuth2Client,
     );
   } catch {
     return null; // valid JSON but not an authorized_user shape → not authorized
@@ -557,7 +557,7 @@ async function identifyStoredToken(): Promise<{ exists: boolean; email: string |
  */
 async function probeEmail(client: OAuth2Client): Promise<{ email: string | null; dead: boolean }> {
   try {
-    const res = await google.gmail({ version: "v1", auth: client }).users.getProfile({ userId: "me" });
+    const res = await gmailApi({ version: "v1", auth: client }).users.getProfile({ userId: "me" });
     return { email: res.data.emailAddress ?? null, dead: false };
   } catch (err) {
     return { email: null, dead: isInvalidGrant(err) };

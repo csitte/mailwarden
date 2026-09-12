@@ -1,5 +1,5 @@
 import { CliError, ToolError } from "./cli.js";
-import { google, gmail_v1 } from "googleapis";
+import { gmail as gmailApi, gmail_v1 } from "@googleapis/gmail";
 import type { OAuth2Client } from "google-auth-library";
 import fs from "node:fs/promises";
 import path from "node:path";
@@ -866,7 +866,7 @@ export class Gmail {
   constructor(authOrApi: OAuth2Client | gmail_v1.Gmail) {
     this.api = isGmailApi(authOrApi)
       ? authOrApi
-      : google.gmail({ version: "v1", auth: authOrApi });
+      : gmailApi({ version: "v1", auth: authOrApi });
   }
 
   /** Every API call goes through here: 429/5xx are retried with backoff. */

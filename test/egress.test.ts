@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { google } from "googleapis";
+import { gmail as gmailApi } from "@googleapis/gmail";
 import { OAuth2Client } from "google-auth-library";
 import { checkEgress, guardEgress, allowRuleFor, ALLOW_RULES } from "../src/egress.js";
 
@@ -110,7 +110,7 @@ describe("guardEgress — in front of the real googleapis client", () => {
       calls.push(`${opts.method ?? "GET"} ${opts.url}`);
       return { data: {} };
     }) as typeof auth.request;
-    return { gmail: google.gmail({ version: "v1", auth: guardEgress(auth) }), calls };
+    return { gmail: gmailApi({ version: "v1", auth: guardEgress(auth) }), calls };
   }
 
   it("blocks messages.send before it reaches the transport", async () => {
@@ -148,7 +148,7 @@ describe("guardEgress — in front of the real googleapis client", () => {
    * questions of the same list: that each one gets through, and that no allowlist entry
    * exists which none of them reaches.
    */
-  async function everyCallMailwardenMakes(gmail: ReturnType<typeof google.gmail>) {
+  async function everyCallMailwardenMakes(gmail: ReturnType<typeof gmailApi>) {
     await gmail.users.getProfile({ userId: "me" });
     await gmail.users.threads.list({ userId: "me", q: "is:unread" });
     await gmail.users.threads.get({ userId: "me", id: "t1" });

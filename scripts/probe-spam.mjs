@@ -22,7 +22,7 @@
  *
  * Needs a built tree (`npm run build`) and an authorized token (`mailwarden --auth`).
  */
-import { google } from "googleapis";
+import { gmail as gmailApi } from "@googleapis/gmail";
 import { getAuth } from "../dist/auth.js";
 import { deriveSignals } from "../dist/signals.js";
 
@@ -50,7 +50,7 @@ if (!Number.isInteger(max) || max < 1 || max > 500) {
 }
 
 const auth = await getAuth();
-const api = google.gmail({ version: "v1", auth });
+const api = gmailApi({ version: "v1", auth });
 const pct = (n, d) => (d === 0 ? "n/a" : `${Math.round((n / d) * 100)}%`);
 
 // ── Question 1: reachability ────────────────────────────────────────────────────────────────────

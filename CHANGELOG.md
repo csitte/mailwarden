@@ -17,6 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   not fail the call: the filter is created before the sweep, and a verification problem must not
   read as a failed `create_filter`. (#7)
 
+### Changed
+- **The server now depends on `@googleapis/gmail` instead of the whole `googleapis` barrel, and
+  starts in about a quarter of the time.** mailwarden used three things from that package —
+  `google.gmail()`, `google.auth.fromJSON()` and the `gmail_v1` types — and paid for all of Google's
+  APIs to be loaded to get them. Measured on one machine, warm cache, with a built tree: importing
+  `googleapis` took 16s (33s cold), and the server answered its first `initialize` after 25s; with
+  the dedicated package the same server answers after 4.4s, and `auth.ts` imports in 1.5s. The
+  package is 1.2 MB unpacked where the barrel was 208 MB.
+  **Why it matters beyond speed:** an MCP client gives a server a fixed window to complete its
+  handshake, and a server that misses it is indistinguishable from a broken one — the failure the
+  user sees is "cannot connect", with nothing in it about time. Behaviour is unchanged: the same
+  client library (`googleapis-common`/`gaxios`) does the routing, so the egress guard sees exactly
+  what it saw before, and the egress test still drives the real client through every method in
+  Gmail's discovery document.
+- **`google-auth-library` 10.5.0 → 11.0.2, still pinned to an exact version.** The pin is the same
+  rule as before, applied to the new dependency: `@googleapis/gmail` depends on one exact version,
+  and a caret range resolves to another, which leaves two copies of the library in the tree and
+  surfaces as a type error about "separate declarations of a private property 'redirectUri'".
+- **The four `uuid` advisories are gone, and not because they were silenced.** They reached us
+  through `googleapis` → `googleapis-common`/`gaxios` → `uuid`; the chain behind `@googleapis/gmail`
+  has no `uuid` in it at all. `npm audit` now reports zero, with and without dev dependencies, and
+  without an `overrides` entry — so the tree that reports clean is the tree `npm install mailwarden`
+  produces. See `SECURITY.md`.
+
 ## [0.20.0] - 2026-09-11
 
 ### Fixed

@@ -59,11 +59,11 @@ mailbox content).
   addition to the allowlist cannot quietly re-open one. This is what turns "no tool would do that"
   into "no code path in this server can", whatever a prompt-injected mail talks a model into asking
   for. The deny list matches a *normalized* path, because `/gmail/v1/...` is not the only spelling
-  Google serves: hand a method `media` and `googleapis` targets `/upload/gmail/v1/...` instead —
+  Google serves: hand a method `media` and Google's client targets `/upload/gmail/v1/...` instead —
   which is how a large message would really be uploaded. Rules anchored at `/gmail/v1` never saw
   that route; it used to be refused for falling off the allowlist instead, i.e. by exactly the rule the
   deny list exists to outlive. The checkpoint also stops a request whose *host* was rewritten:
-  `googleapis` honours `GOOGLE_CLOUD_UNIVERSE_DOMAIN` from the environment and a `rootUrl` client
+  Google's client honours `GOOGLE_CLOUD_UNIVERSE_DOMAIN` from the environment and a `rootUrl` client
   option, either of which can aim an authenticated call at another host without a line of mailwarden
   changing — and the environment is not mailwarden's to control, since an MCP client config carries
   an `env` block per server entry. Both are refused before the access token leaves the process. Every
@@ -310,32 +310,23 @@ the same line: a compromised client or machine is outside what this server can d
 
 ## Dependency advisories
 
-`npm audit` reports **4 moderate advisories** in mailwarden's production tree. They all trace to one
-upstream issue, and we would rather explain it than hide it:
+`npm audit` reports **no advisories** in mailwarden's tree, with or without dev dependencies.
 
-- **What it is.** `uuid` below 11.1.1 is missing a buffer bounds check — but only in `v3`/`v5`/`v6`
-  *when the caller supplies a `buf` argument*
-  ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)). It reaches us through
-  Google's own client chain: `googleapis` → `googleapis-common` / `gaxios` → `uuid`.
-- **Why it is not reachable here.** Both `gaxios` and `googleapis-common` call `uuid.v4()` only, with
-  no `buf` argument. `v4` is not among the affected functions, so no code path in mailwarden can
-  trigger the bug.
-- **Why we do not silence it.** An npm `overrides` entry would force a patched `uuid` — but overrides
-  apply only to the *root* project, so it would clear the advisory in **our** checkout while every
-  user still resolved the original version. That buys a clean report at the cost of testing a
-  dependency tree nobody actually runs. We removed such an override for exactly this reason: our
-  tree now matches what `npm install mailwarden` produces.
-- **Status — a fixed line exists, and we cannot reach it yet.** Later `googleapis` releases drop
-  `uuid` altogether rather than patching it: `googleapis-common` 8 → `gaxios` 7 →
-  `google-auth-library` 10 has no `uuid` anywhere, and 174.0.1 is current (checked 2026-08-13, we are
-  on `^144.0.0`). Raising that range **on its own would not clear these advisories.**
-  `@google-cloud/local-auth` — the package that runs the one-time browser consent behind `--auth` — is
-  at its own latest, 3.0.1, and pins `google-auth-library` to `^9`, whose `gaxios` 6 still pulls
-  `uuid` 9. Upgrading `googleapis` alone would install a *second* copy of `google-auth-library` and
-  leave all four advisories standing. Clearing them means first replacing `@google-cloud/local-auth`
-  with our own loopback consent flow — a small amount of code in the most safety-critical path we
-  have, so it gets its own change rather than riding along with a feature. This note changes when
-  that lands.
+- **What changed.** Until 0.20.0 there were four moderate ones, all tracing to `uuid` below 11.1.1
+  missing a buffer bounds check ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)).
+  They reached us through Google's client chain: `googleapis` → `googleapis-common`/`gaxios` →
+  `uuid`. They were never reachable from mailwarden — both callers use `uuid.v4()` with no `buf`
+  argument, and `v4` is not among the affected functions — but an advisory you have to explain is
+  worse than one you do not have. Depending on `@googleapis/gmail` instead of the `googleapis`
+  barrel removed the chain: there is no `uuid` anywhere in the tree.
+- **What we still do not do.** An npm `overrides` entry would have cleared the report earlier by
+  forcing a patched version — in *our* checkout only, since overrides apply to the root project,
+  while every user kept resolving the original. We removed such an override once for that reason
+  and did not add it back. The tree that reports clean here is the tree `npm install mailwarden`
+  produces.
+- **What to expect.** This note changes when an advisory actually lands, not when one is worked
+  around. If `npm audit` disagrees with this paragraph in your checkout, the paragraph is the thing
+  that is out of date — please open an issue.
 
 ## Explicit non-goals (what mailwarden does NOT defend against)
 

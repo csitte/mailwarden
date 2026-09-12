@@ -452,7 +452,7 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   uses and refuses the rest — with `messages.send`, `drafts.*`, `messages.import`/`insert`,
   permanent deletion and every non-filter `settings` endpoint named in a deny list checked first, so
   a later edit to the allowlist cannot reopen them by accident — including through the
-  `/upload/gmail/v1/...` route `googleapis` takes when a method is handed `media`. A request whose
+  `/upload/gmail/v1/...` route Google's client takes when a method is handed `media`. A request whose
   host was rewritten (`GOOGLE_CLOUD_UNIVERSE_DOMAIN`, a `rootUrl` option) is refused before the token
   leaves the process. Every method in Gmail's discovery document is tested against the guard. It
   guards *this server*, not the
@@ -690,7 +690,7 @@ those rules come from).
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `googleapis`, covered by a vitest suite (1216 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (1218 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 

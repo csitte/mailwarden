@@ -6,8 +6,12 @@ import path from "node:path";
 /**
  * Pay the cold module load ONCE, in a hook with its own budget.
  *
- * `auth.ts` pulls in `googleapis`, and the first load of that costs seconds on a
- * cold cache — measured at 4.4s against vitest's 5s per-test default. Every test
+ * `auth.ts` pulls in the Gmail API client, and the first load of that costs seconds
+ * on a cold cache — measured at 4.4s against vitest's 5s per-test default, back when
+ * that client was the whole `googleapis` barrel. Dropping the barrel cut it to about
+ * 1.5s, which makes the budget comfortable rather than unnecessary: a cold cache on a
+ * loaded machine still overruns five seconds, and it did so here on the first run after
+ * an `npm install`. Every test
  * below re-imports `auth.ts` (see `freshAuth`), so without this the FIRST one to
  * run carries that cost inside its own budget and fails whenever the machine is
  * busy enough to push it past five seconds. That failure says nothing about the

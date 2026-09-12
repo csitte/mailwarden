@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import type { gmail_v1 } from "googleapis";
+import type { gmail_v1 } from "@googleapis/gmail";
 import { parseSender } from "../src/digest.js";
 import fs from "node:fs/promises";
 import os from "node:os";
