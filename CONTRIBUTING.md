@@ -53,7 +53,7 @@ working, not a bug. Add the endpoint there in the same PR.
 The two lists in that file are deliberately asymmetric, and it matters:
 
 - the **deny list** matches a *normalized* path (upload prefixes stripped, repeated slashes
-  folded), because `googleapis` targets `/upload/gmail/v1/...` for media uploads — a real send
+  folded), because Google's client targets `/upload/gmail/v1/...` for media uploads — a real send
   route that rules anchored at `/gmail/v1` never saw;
 - the **allow list** matches the **raw** path and must keep doing so, or every permitted endpoint
   would gain a second, unchecked spelling.

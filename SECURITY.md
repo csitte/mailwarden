@@ -312,7 +312,7 @@ the same line: a compromised client or machine is outside what this server can d
 
 `npm audit` reports **no advisories** in mailwarden's tree, with or without dev dependencies.
 
-- **What changed.** Until 0.20.0 there were four moderate ones, all tracing to `uuid` below 11.1.1
+- **What changed.** Through 0.20.0 there were four moderate ones, all tracing to `uuid` below 11.1.1
   missing a buffer bounds check ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)).
   They reached us through Google's client chain: `googleapis` → `googleapis-common`/`gaxios` →
   `uuid`. They were never reachable from mailwarden — both callers use `uuid.v4()` with no `buf`
