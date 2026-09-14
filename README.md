@@ -616,8 +616,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 8 `read` + 14 `manage` + 3 `filters`, so a
-full instance advertises 25 tools and four of them advertise 100. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 9 `read` + 14 `manage` + 3 `filters`, so a
+full instance advertises 26 tools and four of them advertise 104. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to
