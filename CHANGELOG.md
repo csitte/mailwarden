@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The npm wait added for the registry race was itself too short, and asked the wrong question.**
+  It fired for the first time on 0.22.0 and failed the run: `npm publish` succeeded at 20:37:35,
+  the thirty 10-second attempts ran out at 20:42:44, and npm records the version as published at
+  20:43:42 — **just over six minutes**, against a five-minute budget. For 0.21.0 the same wait
+  would have cleared in 30 seconds, so the delay is npm's queue and not a constant; the budget is
+  now ten minutes and still no guarantee. The second half matters more: at 20:43:58 the two npm
+  views disagreed — `/mailwarden/0.22.0` answered 200 while the package document did not list the
+  version and `dist-tags.latest` still said 0.21.0, catching up only by 20:45:39. **`npm install`
+  reads the package document**, so a wait that checks the version endpoint alone can go green while
+  the version is still uninstallable. Both are checked now and must agree, which also makes a
+  re-run dispatched on a superseded tag wait rather than register it. Parsed with `node` instead
+  of `jq` so the loop can be run where the repository is developed: this step only fires on a tag,
+  so the main-branch CI never exercises it, and a step only CI can run is a step only CI can debug.
+  All three cases were run against the live registry before committing.
+  📌 **A retry budget is a measurement, not a guess — and the first thing to check about a wait is
+  whether it is waiting for the right signal.**
+
 ## [0.22.0] - 2026-09-17
 
 ### Added

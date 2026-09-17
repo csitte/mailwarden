@@ -74,30 +74,55 @@ jobs:
 
       # The MCP registry checks that the npm version exists before it accepts the entry, and npm
       # does not serve a freshly published version right away — `npm publish` succeeding only means
-      # npm took it. Registering three seconds later therefore failed with a 400 carrying npm's own
-      # 404 ("version was not found"), for 0.20.0 and again for 0.21.0: the npm release was fine
-      # both times, only the registry entry was missing, and both needed this workflow re-run by
-      # hand, which then succeeded about four minutes after the failed run. The nine releases
-      # before 0.20.0 went straight through, so on most runs this step waits for nothing. How long
-      # npm really needs we have not measured precisely: for 0.21.0 a query 30 seconds after the
-      # first 404 already answered 200. Waiting costs nothing once the version is served — which
-      # is also the case on a `workflow_dispatch` re-run, where the npm step is skipped. And if
-      # five minutes are not enough, failing beats registering an entry that points at a version
-      # nobody can install yet.
+      # npm took it, and it says so: "Your package is being processed and may take a few minutes to
+      # become available." Registering three seconds later failed with a 400 carrying npm's own 404
+      # ("version was not found") for 0.20.0 and again for 0.21.0; the npm release was fine both
+      # times, only the registry entry was missing.
+      #
+      # Two things about the wait are measured rather than assumed, both on 0.22.0 (2026-09-17),
+      # which is the run that made this step earn its keep by failing:
+      #
+      #  - HOW LONG. `npm publish` returned 20:37:35; the version document answered 200 somewhere
+      #    between 20:42:44 (the 30th and last 10-second attempt, still 404) and 20:43:58, and npm
+      #    records the publish time as 20:43:42 — just over six minutes. The five-minute budget
+      #    missed it by about a minute. Note how far this is from the 30 seconds 0.21.0 took: the
+      #    delay is npm's queue, not a constant, so the budget is now sixty attempts (ten minutes)
+      #    and still not a guarantee.
+      #  - WHAT TO ASK. At 20:43:58 the two npm views disagreed: /mailwarden/0.22.0 answered 200
+      #    while the package document did not list 0.22.0 and `dist-tags.latest` still said 0.21.0
+      #    — it caught up by 20:45:39. `npm install mailwarden` reads the package document, so a
+      #    wait that only checks the version endpoint can go green while the version is still
+      #    uninstallable. Both are checked now, and the loop exits only when they agree.
+      #
+      # Most runs wait for nothing (the nine releases before 0.20.0 went straight through), and
+      # waiting costs nothing once the version is served — also on a `workflow_dispatch` re-run,
+      # where the npm step is skipped and both checks pass on the first attempt. If ten minutes are
+      # not enough, failing still beats registering an entry that points at a version nobody can
+      # install yet: the fix is a re-run, which the error message names.
+      #
+      # The document is parsed with `node`, not `jq`, although the runner has both: `node` is set
+      # up for this job anyway and is what the line above already uses, and it is present wherever
+      # this repository is developed. A step only CI can run is a step only CI can debug — and this
+      # one fires on a tag, so the main-branch CI never exercises it. Run against the live registry
+      # on 2026-09-17, the loop body exits 0 for the served version, keeps waiting for one that
+      # does not exist, and — the case the old condition got wrong — keeps waiting for an OLDER
+      # version whose endpoint answers 200 while `latest` points elsewhere. That last one also
+      # means a re-run dispatched on a superseded tag now waits instead of registering it.
       - name: Wait for npm to serve the published version
         run: |
           version="$(node -p "require('./package.json').version")"
           url="https://registry.npmjs.org/mailwarden/$version"
-          for attempt in $(seq 1 30); do
+          for attempt in $(seq 1 60); do
             code="$(curl -s -o /dev/null -w '%{http_code}' "$url" || true)"
-            if [ "$code" = "200" ]; then
-              echo "npm serves mailwarden@$version (attempt $attempt)"
+            latest="$(curl -s https://registry.npmjs.org/mailwarden | node -pe 'JSON.parse(require("fs").readFileSync(0,"utf8"))["dist-tags"].latest' 2>/dev/null || true)"
+            if [ "$code" = "200" ] && [ "$latest" = "$version" ]; then
+              echo "npm serves mailwarden@$version and dist-tags.latest agrees (attempt $attempt)"
               exit 0
             fi
-            echo "attempt $attempt/30: $url -> $code"
+            echo "attempt $attempt/60: $url -> $code, dist-tags.latest -> ${latest:-unreadable}"
             sleep 10
           done
-          echo "::error::npm still does not serve mailwarden@$version after 5 minutes — the npm publish is done; re-run this workflow (workflow_dispatch on the tag) to register the entry"
+          echo "::error::npm still does not serve mailwarden@$version after 10 minutes — the npm publish is done; re-run this workflow (workflow_dispatch on the tag) to register the entry"
           exit 1
 
       - name: Install mcp-publisher
