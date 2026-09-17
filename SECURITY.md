@@ -312,13 +312,18 @@ the same line: a compromised client or machine is outside what this server can d
 
 `npm audit` reports **no advisories** in mailwarden's tree, with or without dev dependencies.
 
-- **What changed.** Through 0.20.0 there were four moderate ones, all tracing to `uuid` below 11.1.1
-  missing a buffer bounds check ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)).
-  They reached us through Google's client chain: `googleapis` → `googleapis-common`/`gaxios` →
-  `uuid`. They were never reachable from mailwarden — both callers use `uuid.v4()` with no `buf`
-  argument, and `v4` is not among the affected functions — but an advisory you have to explain is
-  worse than one you do not have. Depending on `@googleapis/gmail` instead of the `googleapis`
-  barrel removed the chain: there is no `uuid` anywhere in the tree.
+- **What changed, and when.** Through 0.12.0 there were four moderate ones, all tracing to `uuid`
+  below 11.1.1 missing a buffer bounds check
+  ([GHSA-w5hq-g745-h8pq](https://github.com/advisories/GHSA-w5hq-g745-h8pq)). They reached us through
+  `@google-cloud/local-auth`, a sample helper frozen at 3.0.1 that pinned `google-auth-library@^9` →
+  `gaxios@6` → `uuid@9`. They were never reachable from mailwarden — both callers use `uuid.v4()`
+  with no `buf` argument, and `v4` is not among the affected functions — but an advisory you have to
+  explain is worse than one you do not have. **0.13.0 (19 August 2026) removed that package** and the
+  chain with it; every release since installs with no `uuid` in the tree at all. Dropping the
+  `googleapis` barrel for `@googleapis/gmail` in 0.21.0 is sometimes credited with this and did not
+  do it: by then `gaxios` had not carried `uuid` for over a year, so the barrel's chain was already
+  clean. `npm install mailwarden@0.20.0` into an empty project reports zero today, exactly as
+  0.21.0 does — measured 17 September 2026.
 - **What we still do not do.** An npm `overrides` entry would have cleared the report earlier by
   forcing a patched version — in *our* checkout only, since overrides apply to the root project,
   while every user kept resolving the original. We removed such an override once for that reason

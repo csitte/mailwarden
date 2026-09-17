@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`SECURITY.md` credited the wrong release with clearing the four `uuid` advisories.** It said
+  they stood "through 0.20.0" and that depending on `@googleapis/gmail` removed the chain. Neither
+  holds: they came through `@google-cloud/local-auth` → `google-auth-library@^9` → `gaxios@6` →
+  `uuid@9`, and **0.13.0 dropped that package on 19 August 2026** — which this changelog's own
+  0.13.0 entry records. `gaxios` itself stopped depending on `uuid` with 7.0.0 in June 2025, so the
+  barrel's chain was clean long before we left it. Measured rather than reasoned: `npm install
+  mailwarden@0.20.0` into an empty project resolves 160 packages, reports `found 0 vulnerabilities`
+  and contains no `uuid`; 0.21.0 resolves 119 with the same result. The 0.21.0 entry below is
+  corrected in place. Reported by csitte.at, who checked the claim against a published tree instead
+  of taking it from the changelog — **a dependency claim is about a tree, so it has to be measured
+  in one; ours was inferred from the diff that happened to be in front of us.**
+
 ## [0.21.0] - 2026-09-14
 
 ### Added
@@ -37,11 +50,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule as before, applied to the new dependency: `@googleapis/gmail` depends on one exact version,
   and a caret range resolves to another, which leaves two copies of the library in the tree and
   surfaces as a type error about "separate declarations of a private property 'redirectUri'".
-- **The four `uuid` advisories are gone, and not because they were silenced.** They reached us
-  through `googleapis` → `googleapis-common`/`gaxios` → `uuid`; the chain behind `@googleapis/gmail`
-  has no `uuid` in it at all. `npm audit` now reports zero, with and without dev dependencies, and
-  without an `overrides` entry — so the tree that reports clean is the tree `npm install mailwarden`
-  produces. See `SECURITY.md`.
+- `npm audit` reports zero for this release, with and without dev dependencies and without an
+  `overrides` entry. **Corrected on 17 September 2026:** this entry originally credited the switch
+  with removing the four `uuid` advisories. It did not — they went with
+  `@google-cloud/local-auth` in 0.13.0, a month earlier. See the note under `[Unreleased]` and
+  `SECURITY.md`.
 
 ## [0.20.0] - 2026-09-11
 
