@@ -49,8 +49,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   forward, where `create_filter` keeps the capability and removes the risk. **The same fork is the
   clearest evidence for where this project puts its own no-send promise:** it drops `gmail.send`
   but keeps `gmail.compose` — commented "for draft creation/editing only (NOT sending)" — and
-  `gmail.modify`, while Google documents `gmail.compose` as "Manage drafts and send emails". Its
-  token can send; only its tool list cannot. That sentence is in `send-claims.mjs`'s allowlist with
+  `gmail.modify`, which Google documents as "Manage drafts and send emails" and "Read, compose, and
+  send emails" respectively. The promise there rests not on one scope too many but on two, and
+  `gmail.modify` alone would be enough — the scope this project's own `manage` tier holds, which is
+  precisely why its no-send row points at the tool surface. Its token can send; only its tool list
+  cannot. That sentence is in `send-claims.mjs`'s allowlist with
   the citation attached, since without it it is the exact assertion the guard exists to stop.
 
 ### Fixed

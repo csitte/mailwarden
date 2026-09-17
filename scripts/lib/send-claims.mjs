@@ -95,7 +95,7 @@ export const ALLOWED = [
   {
     file: "README.md",
     excerpt: "it drops `gmail.send` but keeps `gmail.compose`",
-    why: "About a THIRD PARTY's scopes (c0webster/hardened-google-workspace-mcp), and it makes this guard's own point rather than breaking it: their code comments gmail.compose as 'NOT sending' while Google documents it as 'Manage drafts and send emails', so their token can send and only their tool list cannot. Cites Google's scope page for the claim. Keep the citation with the sentence — without it this is the exact assertion the guard exists to stop.",
+    why: "About a THIRD PARTY's scopes (c0webster/hardened-google-workspace-mcp), and it makes this guard's own point rather than breaking it: their code comments gmail.compose as 'NOT sending' while Google documents it as 'Manage drafts and send emails' AND gmail.modify -- which they also keep -- as 'Read, compose, and send emails'. So their token can send twice over, and gmail.modify alone would do it: the same scope this project's manage tier holds, which is why our own row points at the tool surface. Cites Google's scope page for both. Keep the citation with the sentence — without it this is the exact assertion the guard exists to stop.",
   },
   {
     file: "README.md",
