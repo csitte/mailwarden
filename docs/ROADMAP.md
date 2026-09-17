@@ -44,6 +44,15 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
    Planned for late 2026.
 
+That is the whole list, and the short list is the finding rather than an omission. The September
+2026 survey turned up no capability gap worth closing: of the five servers in the README's
+comparison table, none has snooze, none re-verifies a search result against live labels, none reads
+`Authentication-Results`, and none declares an `outputSchema` on more than a single tool. What it
+did turn up was a way of doing something this project already does — `aaronsb/google-workspace-mcp`
+checks an account's access level against the *granted* scopes at call time, where scope gating here
+happened only at registration — and that has been adopted (see `CHANGELOG.md`). The next entry on
+this list is more likely to come from that kind of reading than from a feature another server ships.
+
 ## Non-goals
 
 - **Sending mail** (compose/reply/forward/send). Deliberate: a triage server that cannot send gives
