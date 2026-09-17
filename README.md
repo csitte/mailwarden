@@ -231,7 +231,8 @@ tool's outputSchema, which describes a success.) A `rate_limited` failure also c
 `retryAfterSeconds`, because there the wait *is* the remedy. An `insufficient_scope` failure names
 the gap rather than the possibilities — which scope is missing, what it covers, and what the saved
 authorization grants instead — by reading the token's own scopes when it lands, and the server
-prints the same line on stderr at startup. That matters most with an encrypted token: the tier gate
+prints the same line on stderr at startup. It explains the refusal rather than preventing it:
+the call still goes to Google, and Google is what turns it down. That matters most with an encrypted token: the tier gate
 at registration cannot decrypt, so the surface is advertised in full and the gap would otherwise
 surface as a bare 403 mid-task.
 

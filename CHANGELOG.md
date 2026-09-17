@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Said plainly what 0.22.0's call-time scope check does and does not do:** it explains a refusal,
+  it does not prevent one. The request goes to Google and comes back rejected; what changed is that
+  the answer then names the gap instead of listing every scope that could be missing. A gate that
+  blocked the call up front would need each method's required scopes, not the tier's — a different
+  and heavier feature. Prompted by csitte.at, who also corrected a claim we made about
+  `aaronsb/google-workspace-mcp` when reporting this release: we implied his call-time check reads
+  the scopes from Google while ours reads the token. **It does not** — `accountAccess` in
+  `src/factory/safety.ts` takes them from `readCredential(ctx.account)`, written once at consent,
+  and `tokeninfo` appears nowhere in his repository. Our own `docs/comparison-sources.json` has
+  said "read from the credential file" since 8 September; the claim contradicted a check this
+  project had already done and written down. So the remaining difference is order, not source: his
+  check blocks before the request, ours explains after it, and a right revoked at Google surfaces
+  as a 403 for both. 📌 **The notes exist so a claim can be looked up instead of reconstructed —
+  reconstructing one anyway is how a checked fact turns back into a guess.**
+
 ### Fixed
 - **The npm wait added for the registry race was itself too short, and asked the wrong question.**
   It fired for the first time on 0.22.0 and failed the run: `npm publish` succeeded at 20:37:35,

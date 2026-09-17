@@ -74,6 +74,11 @@ export function servedTiers(env: NodeJS.ProcessEnv = process.env): Set<ToolTier>
 /**
  * Turn a scope failure into one that names the actual gap.
  *
+ * This EXPLAINS a refusal; it does not prevent one. The request has already gone to Google and
+ * come back rejected by the time this runs — a gate that blocked the call up front would be a
+ * different feature, and a heavier one, since it would have to know each method's required scopes
+ * rather than the tier's.
+ *
  * `gmail.ts` raises `insufficient_scope` without knowing which scope is missing: it is a neutral
  * API wrapper with no access to the token, so its sentence has to list every scope that could be
  * the one — the reader is left to work out which case they are in. Here auth.ts is already a
