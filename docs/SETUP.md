@@ -247,10 +247,21 @@ account JSON won't work.
 Scopes are tied to tool tiers. Filter management (`list_filters`/`create_filter`/`delete_filter`)
 needs `gmail.settings.basic`; write actions (label/archive/trash/snooze, and the snooze sweep) need
 `gmail.modify`. If your stored token was granted before you needed a scope — or you authorized with a
-narrower `MAILWARDEN_TOOLS` (e.g. `read` or `read,manage`) than you now run with — mailwarden either
-**hides the filter tools at startup** (with a one-line stderr hint) or, for older tokens that predate
-the recorded-scope check, surfaces the message **at call time**. A read-only grant likewise can't run
-the snooze sweep (`--sweep` / `MAILWARDEN_AUTO_SWEEP`), and warns at startup. Fix in all cases: run
+narrower `MAILWARDEN_TOOLS` (e.g. `read` or `read,manage`) than you now run with — mailwarden tells
+you in up to three places, and which ones you get depends on what it can read about your token:
+
+- **At startup, a one-line stderr warning** naming the missing scope, what it covers and what the
+  token grants instead. This reads the token asynchronously and decrypts it when
+  `MAILWARDEN_TOKEN_PASSPHRASE` is set, so it works for an encrypted token too.
+- **The filter tools are hidden** (also with a stderr hint) when the token is *known* to lack
+  `gmail.settings.basic`. That check runs while the tool surface is being built, which is
+  synchronous and cannot decrypt — so **an encrypted token keeps its filter tools on display**, and
+  the startup warning above is what tells you they will not work.
+- **At call time**, a failure with code `insufficient_scope` whose message names the same gap. This
+  is the only one an assistant sees, since stderr does not reach it.
+
+A read-only grant likewise can't run the snooze sweep (`--sweep` / `MAILWARDEN_AUTO_SWEEP`), and
+warns at startup. Fix in all cases: run
 `npx -y mailwarden --auth` with the tiers you need enabled — the default (`MAILWARDEN_TOOLS` unset)
 grants `gmail.modify` + `gmail.settings.basic` and covers everything. See the README "Tool tiers"
 section for how tiers map to tools and scopes.

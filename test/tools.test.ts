@@ -3,13 +3,24 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { registerTools, resolveEnabledTiers } from "../src/tools.js";
-import { getAuth, hasFilterScope } from "../src/auth.js";
+import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "../src/auth.js";
 
 // getAuth is the only seam to the outside world. It may return a ready-made
 // gmail_v1.Gmail (anything with a `users` object) — the Gmail class then uses
 // it directly, so tools run end-to-end against a fake API. hasFilterScope gates
 // the filters tier; default vi.fn() returns undefined = "unknown" → advertised.
-vi.mock("../src/auth.js", () => ({ getAuth: vi.fn(), hasFilterScope: vi.fn() }));
+//
+// readGrantedScopes and activeAccount belong here for a reason worth remembering: the failure
+// wrapper calls them, and a mock that omits an export hands back `undefined`, which throws on
+// call. The wrapper swallows that and returns the original error — so every test stayed green
+// while the path under test never ran. An export missing from a mock is not a missing stub, it
+// is a silently disabled code path.
+vi.mock("../src/auth.js", () => ({
+  getAuth: vi.fn(),
+  hasFilterScope: vi.fn(),
+  readGrantedScopes: vi.fn(async () => ({ known: false, reason: "no-token" })),
+  activeAccount: vi.fn(() => undefined),
+}));
 
 async function connect() {
   const server = new McpServer({ name: "mailwarden", version: "0.0.0" });
@@ -248,6 +259,97 @@ describe("tool results — structured content + fenced text", () => {
     });
     // An error carries no structuredContent: the outputSchema describes a success.
     expect(res.structuredContent).toBeUndefined();
+  });
+
+  // ---- insufficient_scope is rewritten to name the actual gap ----
+
+  const scopeDenial = () =>
+    Object.assign(new Error("Request had insufficient authentication scopes."), {
+      code: 403,
+      errors: [{ reason: "insufficientPermissions" }],
+    });
+
+  const errorBody = (res: any) =>
+    JSON.parse(res.content[0].text.replace(/<\/?untrusted-tool-output>/g, "").trim()).error;
+
+  it("names the missing scope and what the token does grant", async () => {
+    (getAuth as Mock).mockResolvedValue({
+      users: { threads: { list: async () => { throw scopeDenial(); } } },
+    });
+    (readGrantedScopes as Mock).mockResolvedValue({
+      known: true,
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    });
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,manage");
+
+    const client = await connect();
+    const res: any = await client.callTool({ name: "search", arguments: { query: "in:inbox" } });
+
+    expect(res.isError).toBe(true);
+    const error = errorBody(res);
+    expect(error.code).toBe("insufficient_scope");
+    expect(error.message).toContain("gmail.modify");
+    // The half the generic message could not have: what the grant actually is.
+    expect(error.message).toContain("It currently grants gmail.readonly");
+  });
+
+  it("leaves the original scope error alone when the grant covers the enabled tiers", async () => {
+    // The 403 is then about something this wrapper cannot see. Replacing a true message with a
+    // confident wrong one is worse than saying less.
+    (getAuth as Mock).mockResolvedValue({
+      users: { threads: { list: async () => { throw scopeDenial(); } } },
+    });
+    (readGrantedScopes as Mock).mockResolvedValue({
+      known: true,
+      scopes: ["https://www.googleapis.com/auth/gmail.modify"],
+    });
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,manage");
+
+    const client = await connect();
+    const res: any = await client.callTool({ name: "search", arguments: { query: "in:inbox" } });
+
+    expect(res.isError).toBe(true);
+    // gmail.ts has already turned Google's raw 403 into the generic message — the one that has to
+    // list every scope that might be the missing one. That is exactly what stays here.
+    const message = errorBody(res).message;
+    expect(message).toContain("Filter management");
+    expect(message).not.toContain("It currently grants");
+  });
+
+  it("names the account in the re-auth command it suggests", async () => {
+    // A bare `mailwarden --auth` writes the DEFAULT token — telling a named-account user to run
+    // it would overwrite a different account and leave this failure in place.
+    (getAuth as Mock).mockResolvedValue({
+      users: { threads: { list: async () => { throw scopeDenial(); } } },
+    });
+    (readGrantedScopes as Mock).mockResolvedValue({
+      known: true,
+      scopes: ["https://www.googleapis.com/auth/gmail.readonly"],
+    });
+    (activeAccount as Mock).mockReturnValue("work");
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,manage");
+
+    const client = await connect();
+    const res: any = await client.callTool({ name: "search", arguments: { query: "in:inbox" } });
+
+    expect(errorBody(res).message).toContain("mailwarden --auth --account work");
+  });
+
+  it("still answers with a structured failure when the scope lookup itself throws", async () => {
+    // The wrapper runs on EVERY failure. If it could throw, it would turn a reported tool error
+    // into an unhandled rejection — the one thing a diagnostic must never do.
+    (getAuth as Mock).mockResolvedValue({
+      users: { threads: { list: async () => { throw scopeDenial(); } } },
+    });
+    (readGrantedScopes as Mock).mockRejectedValue(new Error("token file is a directory"));
+
+    const client = await connect();
+    const res: any = await client.callTool({ name: "search", arguments: { query: "in:inbox" } });
+
+    expect(res.isError).toBe(true);
+    expect(errorBody(res).code).toBe("insufficient_scope");
+    // Falls back to gmail.ts's generic message rather than failing the call.
+    expect(errorBody(res).message).toContain("Filter management");
   });
 
   it("codes mailwarden's own argument checks as invalid_input", async () => {

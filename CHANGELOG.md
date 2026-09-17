@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **A missing OAuth scope is now reported before Google refuses the call, and the report names what
   the token actually has.** Two halves, because a server and an assistant read different channels:
-  a one-line warning on stderr once the transport is up, and — the half a tool result carries — an
+  a one-line warning on stderr at startup, and — the half a tool result carries — an
   `insufficient_scope` failure rewritten to name the gap. Until now that message had to list every
   scope that *might* be the missing one, because `gmail.ts` is a neutral API wrapper that cannot
   read the token; the new path reads the granted scopes where auth.ts is already available, so it
@@ -22,8 +22,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   server: the startup check is not awaited (a diagnostic must not compete for the client's
   handshake window), both swallow their own failures, and when the grant *does* cover the enabled
   tiers the original error is passed through untouched rather than replaced with a confident wrong
-  one. The gap itself is computed by a pure function (`scopeGapMessage` in `tiers.ts`), which is
-  what the tests exercise. Direction borrowed from `aaronsb/google-workspace-mcp`, which checks an
+  one — there the caller keeps the older, generic message that lists every scope that could be the
+  missing one. The gap itself is computed by a pure function (`scopeGapMessage` in `tiers.ts`). Direction borrowed from `aaronsb/google-workspace-mcp`, which checks an
   account's level against the granted scopes at call time where this project checked only at
   registration.
 - **`SECURITY.md` now names the limit that matters most in practice: the other tools in the same
@@ -32,7 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   folder, run code or call a second MCP server still carries everything an injected message needs,
   and this server, doing its job, is what puts that message in front of it. The non-goals section
   had "a compromised AI client"; this is the *uncompromised* one, which is the normal setup rather
-  than an edge case. The README's no-send bullet now says the same in one sentence and links there.
+  than an edge case. The README's no-send bullet carries the short form and links there, and
+  `docs/SETUP.md`'s scope-troubleshooting section now lists all three places a gap is reported and
+  says which of them an encrypted token does not get.
   Prompted by `c0webster/hardened-google-workspace-mcp`, whose security note opens by stating this
   about itself. **A narrow claim that holds beats a broad one that a reader can puncture** — and
   the narrow one is still the strongest sentence here: no tool can carry mail outward, and an

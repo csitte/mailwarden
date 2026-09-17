@@ -87,8 +87,12 @@ export function servedTiers(env: NodeJS.ProcessEnv = process.env): Set<ToolTier>
  * message with a confident wrong one.
  */
 async function explainScopeFailure(err: unknown): Promise<unknown> {
-  if (classifyError(err).code !== "insufficient_scope") return err;
   try {
+    // Inside the try, not before it: `fail()` calls this on EVERY failure, so a throw here would
+    // escape `guarded`'s catch and turn a reported tool error into an unhandled rejection. The
+    // classifier is defensive, but "this cannot throw" is not a property worth relying on in the
+    // one function whose job is to never make a failure worse.
+    if (classifyError(err).code !== "insufficient_scope") return err;
     const granted = await readGrantedScopes();
     if (!granted.known) return err; // locked, absent or unrecorded — `--check` tells those apart
     const account = activeAccount();

@@ -27,7 +27,10 @@ import {
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
 /**
- * Report a gap between the granted scopes and the enabled tiers, once, after the transport is up.
+ * Report a gap between the granted scopes and the enabled tiers, once, at startup.
+ *
+ * Fired after `connect()` on stdio and before `startHttp()` in HTTP mode — that call does not
+ * return while the server is listening, so there is no "after" there to fire from.
  *
  * Registration cannot do this. `hasFilterScope()` reads the token synchronously and never decrypts,
  * so it returns `undefined` for every encrypted deployment — which then advertises its full tier
