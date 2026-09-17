@@ -816,8 +816,13 @@ export function classifyBatchModify(
 }
 
 /**
- * The predicates a query carries that `search` WOULD re-verify — for the tools that act on the raw
- * index instead (`bulk_modify`, and `create_filter`'s applyToExisting sweep).
+ * The predicates a query carries that `search` WOULD re-verify — for `bulk_modify`, which acts on
+ * the raw index instead.
+ *
+ * `create_filter`'s applyToExisting sweep acts on the raw index too but deliberately does NOT
+ * report this: its query is built by `filterCriteriaToQuery`, whose output always trips a
+ * `deriveLabelFilters` bail-out, so the list would be empty for every input it can receive. The
+ * reasoning is at the call site in tools.ts and pinned by test/filter-sweep-predicates.test.ts.
  *
  * Those tools cannot afford re-verification: it costs one fetch per hit, and a bulk op is sized in
  * thousands. That trade was always documented as a caveat; the 15.08.2026 measurement turned it into

@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
+- **The README promised `unverifiedPredicates` on a path that has never had the field.** It read
+  "`bulk_modify` (and `create_filter`'s `applyToExisting` sweep) … so they now report
+  `unverifiedPredicates`". Only `bulk_modify` does. The sweep's omission is deliberate and was
+  already argued at the call site, but the comment there named only half the reason — parentheses
+  around a `query` criterion — while `filterCriteriaToQuery` also double-quotes every
+  `from`/`to`/`subject` value, and `deriveLabelFilters` bails on `["(){}]` as a whole. The wider
+  half means the list would be empty for **every** filter that can be defined, not just for query
+  criteria. README, the triage skill (which told an assistant to read an empty list as "proceed"),
+  the call-site comment and the `unverifiedPredicates` doc comment now all say this, and
+  `test/filter-sweep-predicates.test.ts` holds the relationship the argument rests on — with a
+  control asserting the same predicates do derive from a hand-written query, so an always-empty
+  derive could not make the file pass. Found by csitte.at while re-reading the paragraph our
+  0.21.0 notice pointed them at. **A release notice asks "what did this version change?"; a
+  promise that has been too wide for three releases answers "nothing" and stays.**
 - **`SECURITY.md` credited the wrong release with clearing the four `uuid` advisories.** It said
   they stood "through 0.20.0" and that depending on `@googleapis/gmail` removed the chain. Neither
   holds: they came through `@google-cloud/local-auth` → `google-auth-library@^9` → `gaxios@6` →

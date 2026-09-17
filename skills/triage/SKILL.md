@@ -32,6 +32,13 @@ So:
 - `crossCheck: true` is the cheap middle option: it re-asks each predicate as a label filter and
   drops messages the two routes disagree about, for one extra list call per predicate. Read a
   disagreement as real and agreement as nothing — both routes read the same index.
+- **`create_filter` with `applyToExisting` carries no `unverifiedPredicates` at all** — do not read
+  its absence as an empty list. The sweep's query is built from your criteria, and the way it is
+  built (parentheses around a `query` criterion, quotes around every address or subject) switches
+  the derivation off for every filter that can be defined, so the field would be empty even where
+  the criteria do rest on read state. Treat a sweep as acting on the index's answer, always. When
+  the *set* has to be right before anything is written, resolve it with `search` and use
+  `bulk_modify` on those thread ids instead — then create the filter for future mail.
 
 ## Reporting what actually happened
 

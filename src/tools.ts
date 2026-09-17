@@ -1122,12 +1122,16 @@ function registerFilterTools(server: McpServer): void {
         error?: string;
       } | null = null;
       // Deliberately NO `unverifiedPredicates` here, unlike bulk_modify — do not "fix" this by
-      // adding the field. The query is BUILT from the criteria (filterCriteriaToQuery), which wraps
-      // a caller's `query` criterion in parentheses, and parenthesised queries yield no predicates
-      // by design (deriveLabelFilters bails on boolean grouping). The field would therefore report
-      // `[]` — which means "nothing to distrust" — for criteria that do carry `is:unread` inside
-      // those parens. An empty list that actually means "could not tell" is worse than no list at
-      // all, so the caveat stays in the tool description, where it holds unconditionally.
+      // adding the field. The query is BUILT from the criteria (filterCriteriaToQuery), and what it
+      // builds always trips one of deriveLabelFilters' bail-outs: a caller's `query` criterion is
+      // wrapped in parentheses, and every from/to/subject value is double-quoted — and that derive
+      // bails on `["(){}]` as a whole, not on grouping alone. So the field would report `[]` — which
+      // reads as "nothing to distrust" — for EVERY set of criteria this tool accepts, including ones
+      // carrying `is:unread` inside those parens; see test/filter-sweep-predicates.test.ts, which
+      // holds that. An empty list that actually means "could not tell" is worse than no list at all,
+      // so the caveat stays in the tool description, where it holds unconditionally.
+      // (The parenthesis half of this was all the comment named until csitte.at read it against
+      // filterCriteriaToQuery on 17.09.2026 and found the quoting half, which is the wider one.)
       //
       // Best-effort backlog cleanup: the filter is already created, so ANY failure
       // here (a failed list/label-resolve, or per-chunk modify errors) is reported
