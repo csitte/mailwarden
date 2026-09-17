@@ -1,7 +1,7 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import { Gmail, filterCriteriaToQuery, unverifiedPredicates } from "./gmail.js";
-import { getAuth, hasFilterScope } from "./auth.js";
+import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
 import {
@@ -10,7 +10,7 @@ import {
   listSubscriptions,
   unsubscribeThread,
 } from "./unsubscribe.js";
-import { resolveEnabledTiers } from "./tiers.js";
+import { resolveEnabledTiers, scopeGapMessage, type ToolTier } from "./tiers.js";
 import { ALL_SIGNALS } from "./signals.js";
 import { resolveLabelColor } from "./labels.js";
 import { fenceOutput, sanitizeStructured } from "./sanitize.js";
@@ -59,6 +59,51 @@ const fail = (err: unknown) => ({
 });
 
 /**
+ * The tiers this process actually serves: the configured set, minus a `filters` tier whose scope
+ * the stored token is KNOWN to lack, since `registerTools` registers no filter tools in that case.
+ *
+ * Exported because index.ts needs exactly this set for the `instructions` string and for the
+ * startup scope check — a tier the tool surface does not carry must not be described anywhere.
+ */
+export function servedTiers(env: NodeJS.ProcessEnv = process.env): Set<ToolTier> {
+  const tiers = resolveEnabledTiers(env);
+  if (tiers.has("filters") && hasFilterScope() === false) tiers.delete("filters");
+  return tiers;
+}
+
+/**
+ * Turn a scope failure into one that names the actual gap.
+ *
+ * `gmail.ts` raises `insufficient_scope` without knowing which scope is missing: it is a neutral
+ * API wrapper with no access to the token, so its sentence has to list every scope that could be
+ * the one — the reader is left to work out which case they are in. Here auth.ts is already a
+ * dependency, so the granted scopes can be read (decrypting when a passphrase is set) and the
+ * answer can name what IS granted. This is the call-time half of the check in index.ts, and it is
+ * the half an assistant sees: a startup warning goes to stderr, which no tool result carries.
+ *
+ * Runs only on this one code and only in the failure path, so a working call pays nothing for it.
+ * When the grant does cover the enabled tiers the original error is returned untouched — the 403
+ * is then about something this function cannot see, and overwriting it would replace a true
+ * message with a confident wrong one.
+ */
+async function explainScopeFailure(err: unknown): Promise<unknown> {
+  if (classifyError(err).code !== "insufficient_scope") return err;
+  try {
+    const granted = await readGrantedScopes();
+    if (!granted.known) return err; // locked, absent or unrecorded — `--check` tells those apart
+    const account = activeAccount();
+    const message = scopeGapMessage(
+      granted.scopes,
+      servedTiers(),
+      `mailwarden --auth${account ? ` --account ${account}` : ""}`,
+    );
+    return message ? new ToolError("insufficient_scope", `mailwarden: ${message}`) : err;
+  } catch {
+    return err; // a diagnostic must never replace the failure it was trying to explain
+  }
+}
+
+/**
  * `server.registerTool` with the error envelope wrapped around the handler, so no
  * tool can forget it. Returned as the same type it wraps, which keeps every call
  * site (and its schema inference) exactly as it was.
@@ -73,7 +118,7 @@ function guarded(server: McpServer): McpServer["registerTool"] {
         try {
           return await cb(...args);
         } catch (err) {
-          return fail(err);
+          return fail(await explainScopeFailure(err));
         }
       }) as never,
     )) as McpServer["registerTool"];

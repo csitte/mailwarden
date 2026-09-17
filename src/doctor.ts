@@ -24,7 +24,7 @@ import {
 } from "./auth.js";
 import { helpFooter } from "./cli.js";
 import { Gmail } from "./gmail.js";
-import { authScopesForTiers, missingScopes, resolveEnabledTiers, type ToolTier } from "./tiers.js";
+import { authScopesForTiers, missingScopes, resolveEnabledTiers, scopeShort, type ToolTier } from "./tiers.js";
 
 export type CheckStatus = "ok" | "warn" | "fail";
 export interface DoctorCheck {
@@ -50,7 +50,7 @@ export interface DoctorInputs {
   profile: { ok: true; email: string } | { ok: false; error: string } | null;
 }
 
-const SCOPE_SHORT = (s: string): string => s.replace("https://www.googleapis.com/auth/", "");
+const SCOPE_SHORT = scopeShort; // re-exported from tiers.ts, the one definition
 
 /** Build the diagnostic report from already-gathered inputs. Pure — no IO. */
 export function buildReport(i: DoctorInputs): DoctorCheck[] {

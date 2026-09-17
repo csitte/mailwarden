@@ -228,7 +228,12 @@ A **failure** is structured too: `isError` plus a fenced JSON body with a `code`
 `mailwarden --auth`" is something a client can decide, not something it has to infer from wording
 that may be reworded next release. (No `structuredContent` on errors: that is validated against the
 tool's outputSchema, which describes a success.) A `rate_limited` failure also carries
-`retryAfterSeconds`, because there the wait *is* the remedy.
+`retryAfterSeconds`, because there the wait *is* the remedy. An `insufficient_scope` failure names
+the gap rather than the possibilities — which scope is missing, what it covers, and what the saved
+authorization grants instead — by reading the token's own scopes when it lands, and the server
+prints the same line on stderr at startup. That matters most with an encrypted token: the tier gate
+at registration cannot decrypt, so the surface is advertised in full and the gap would otherwise
+surface as a bare 403 mid-task.
 
 ### Quotas: the one failure that fixes itself
 

@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **A missing OAuth scope is now reported before Google refuses the call, and the report names what
+  the token actually has.** Two halves, because a server and an assistant read different channels:
+  a one-line warning on stderr once the transport is up, and — the half a tool result carries — an
+  `insufficient_scope` failure rewritten to name the gap. Until now that message had to list every
+  scope that *might* be the missing one, because `gmail.ts` is a neutral API wrapper that cannot
+  read the token; the new path reads the granted scopes where auth.ts is already available, so it
+  says "the saved authorization is missing gmail.modify … It currently grants gmail.readonly"
+  instead. **The case this exists for is the encrypted token:** registration gates the filters tier
+  on the stored scopes, but that read is synchronous and never decrypts, so every encrypted
+  deployment advertises its full surface and finds out at the first 403 — as `--check` already
+  warned in prose. Both new paths read asynchronously and can decrypt. Neither can break a working
+  server: the startup check is not awaited (a diagnostic must not compete for the client's
+  handshake window), both swallow their own failures, and when the grant *does* cover the enabled
+  tiers the original error is passed through untouched rather than replaced with a confident wrong
+  one. The gap itself is computed by a pure function (`scopeGapMessage` in `tiers.ts`), which is
+  what the tests exercise. Direction borrowed from `aaronsb/google-workspace-mcp`, which checks an
+  account's level against the granted scopes at call time where this project checked only at
+  registration.
 - **`SECURITY.md` now names the limit that matters most in practice: the other tools in the same
   assistant.** Removing the send path closes the exfiltration route *through this server*. It does
   not close the assistant's other routes — a client that can fetch a URL, write into a synced

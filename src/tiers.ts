@@ -106,3 +106,46 @@ export function missingScopes(granted: string[], required: string[]): string[] {
   if (effective.has(GMAIL_MODIFY)) effective.add(GMAIL_READONLY);
   return required.filter((s) => !effective.has(s));
 }
+
+/** A scope as a user should read it: `gmail.modify`, not the full URL. */
+export const scopeShort = (s: string): string => s.replace("https://www.googleapis.com/auth/", "");
+
+/** Which tools stop working when a given scope is absent — the half a user actually notices. */
+const SCOPE_COVERS: Record<string, string> = {
+  [GMAIL_READONLY]: "reading anything at all (search, get_thread, …)",
+  [GMAIL_MODIFY]: "every write (label, archive, trash, snooze, sweep, bulk_modify)",
+  [GMAIL_SETTINGS_BASIC]: "filter management (list_filters, create_filter, delete_filter)",
+};
+
+/**
+ * The gap between what Google actually granted and what the enabled tiers need, as the sentence
+ * to put in front of the user — `null` when the grant covers them.
+ *
+ * Registration already hides the filters tier when the stored token is known to lack its scope
+ * (tools.ts), but "known" is the weak part: a token is unreadable at registration time whenever it
+ * is encrypted, since that path is synchronous and never decrypts. Those deployments advertise the
+ * full surface and only discover the gap when Google refuses a call. This function is what lets the
+ * later, asynchronous read say something precise instead — it is handed the scopes the token really
+ * carries, so the message can name what IS granted rather than list every scope that might be the
+ * one missing.
+ *
+ * Pure on purpose: the caller supplies the granted scopes (auth.ts, which may need a passphrase to
+ * read them) and the re-auth command (which depends on the active account). Neither belongs here.
+ */
+export function scopeGapMessage(
+  granted: string[],
+  tiers: Set<ToolTier>,
+  authCommand: string,
+): string | null {
+  const missing = missingScopes(granted, authScopesForTiers(tiers));
+  if (missing.length === 0) return null;
+  const names = (s: string[]) => s.map(scopeShort).join(", ");
+  const covers = missing.map((s) => SCOPE_COVERS[s]).filter(Boolean);
+  return (
+    `the saved authorization is missing ${names(missing)}, which the enabled ` +
+    `tier${tiers.size === 1 ? "" : "s"} (${[...tiers].join(", ")}) need${tiers.size === 1 ? "s" : ""}` +
+    `${covers.length ? ` — that covers ${covers.join("; ")}` : ""}. ` +
+    `It currently grants ${granted.length ? names(granted) : "no Gmail scope at all"}. ` +
+    `Re-run \`${authCommand}\` to grant the rest.`
+  );
+}

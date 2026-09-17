@@ -2,12 +2,18 @@
 import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { registerTools } from "./tools.js";
-import { getAuth, hasModifyScope, hasFilterScope, activeAccount, tokenPath } from "./auth.js";
+import { registerTools, servedTiers } from "./tools.js";
+import {
+  getAuth,
+  hasModifyScope,
+  readGrantedScopes,
+  activeAccount,
+  tokenPath,
+} from "./auth.js";
 import { Gmail } from "./gmail.js";
 import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
-import { resolveEnabledTiers, serverInstructions } from "./tiers.js";
+import { resolveEnabledTiers, scopeGapMessage, serverInstructions } from "./tiers.js";
 import { runDoctor } from "./doctor.js";
 import {
   CliError,
@@ -20,16 +26,43 @@ import {
 
 const VERSION: string = createRequire(import.meta.url)("../package.json").version;
 
+/**
+ * Report a gap between the granted scopes and the enabled tiers, once, after the transport is up.
+ *
+ * Registration cannot do this. `hasFilterScope()` reads the token synchronously and never decrypts,
+ * so it returns `undefined` for every encrypted deployment — which then advertises its full tier
+ * surface and discovers the gap only when Google refuses a call. This read is asynchronous and can
+ * decrypt, so it sees what the token really carries and can say so in advance.
+ *
+ * Deliberately not awaited by the caller: a client gives the server a fixed window to finish its
+ * handshake, and a diagnostic must never compete with it. Never throws, for the same reason a
+ * warning must not be able to break a server that works.
+ */
+async function warnAboutScopeGap(): Promise<void> {
+  try {
+    const granted = await readGrantedScopes();
+    // `known: false` is not a gap — no token, an encrypted one with no passphrase in the
+    // environment, or one written before scopes were recorded. `--check` tells those apart and
+    // says what to do; guessing here would produce a false alarm on a healthy setup.
+    if (!granted.known) return;
+    const account = activeAccount();
+    const message = scopeGapMessage(
+      granted.scopes,
+      servedTiers(),
+      `mailwarden --auth${account ? ` --account ${account}` : ""}`,
+    );
+    if (message) console.error(`mailwarden: ${message}`);
+  } catch {
+    // A diagnostic that fails stays silent; the call it warns about will still report for itself.
+  }
+}
+
 function makeServer(): McpServer {
   // `instructions` is what a tool-search client reads at session start to decide whether to look
-  // for our tools at all — derived from the same tier set that decides which tools get registered,
-  // with the same scope gate: a `filters` tier whose token is known to lack gmail.settings.basic
-  // registers no filter tools (tools.ts), so it must not advertise them here either.
-  const advertised = resolveEnabledTiers(process.env);
-  if (advertised.has("filters") && hasFilterScope() === false) advertised.delete("filters");
+  // for our tools at all — derived from the same tier set that decides which tools get registered.
   const server = new McpServer(
     { name: "mailwarden", version: VERSION },
-    { instructions: serverInstructions(advertised) },
+    { instructions: serverInstructions(servedTiers()) },
   );
   registerTools(server);
   return server;
@@ -121,12 +154,14 @@ async function main(): Promise<void> {
   }
 
   if (mode === "http") {
+    void warnAboutScopeGap();
     await startHttp(makeServer);
     return;
   }
 
   await makeServer().connect(new StdioServerTransport());
   console.error("mailwarden MCP server running on stdio.");
+  void warnAboutScopeGap();
 
   // Optional snooze sweep while the (long-lived) server runs: once at startup
   // (the first interval tick would otherwise be an hour away), then hourly.
