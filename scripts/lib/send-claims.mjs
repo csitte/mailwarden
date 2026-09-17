@@ -94,6 +94,11 @@ export function findScopeAnchoredClaims(text) {
 export const ALLOWED = [
   {
     file: "README.md",
+    excerpt: "it drops `gmail.send` but keeps `gmail.compose`",
+    why: "About a THIRD PARTY's scopes (c0webster/hardened-google-workspace-mcp), and it makes this guard's own point rather than breaking it: their code comments gmail.compose as 'NOT sending' while Google documents it as 'Manage drafts and send emails', so their token can send and only their tool list cannot. Cites Google's scope page for the claim. Keep the citation with the sentence — without it this is the exact assertion the guard exists to stop.",
+  },
+  {
+    file: "README.md",
     excerpt: "no send scope needed",
     why: "Tool claim about unsubscribe: RFC 8058 one-click needs no send scope, which is true in every tier. Says nothing about what the granted scopes could do.",
   },

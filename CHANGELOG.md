@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **Comparison table: the `taylorwilsdon` column is current again** (`fb89c818`, 57 commits on),
+  brought forward by diff. No cell moves. The Gmail changes are all on the sending path, and the
+  record worth keeping is what the diff does *not* contain: `auth/permissions.py`, `auth/scopes.py`
+  and `core/tool_registry.py` are not in the changed-file list at all, so the least-privilege cell
+  rests on provably identical code. The footnote also explains the filter row for the first time,
+  using a fork that exists for exactly this question:
+  `c0webster/hardened-google-workspace-mcp` removes the filter tools outright because a filter can
+  forward, where `create_filter` keeps the capability and removes the risk. **The same fork is the
+  clearest evidence for where this project puts its own no-send promise:** it drops `gmail.send`
+  but keeps `gmail.compose` — commented "for draft creation/editing only (NOT sending)" — and
+  `gmail.modify`, while Google documents `gmail.compose` as "Manage drafts and send emails". Its
+  token can send; only its tool list cannot. That sentence is in `send-claims.mjs`'s allowlist with
+  the citation attached, since without it it is the exact assertion the guard exists to stop.
+
 ### Fixed
 - **The README promised `unverifiedPredicates` on a path that has never had the field.** It read
   "`bulk_modify` (and `create_filter`'s `applyToExisting` sweep) … so they now report
