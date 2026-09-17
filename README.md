@@ -420,7 +420,11 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   filter (which would be an exfiltration path). `list_filters` still surfaces any forwarding filter
   already on the account, so you can spot one. This holds because no such tool exists and none can be
   registered at runtime; for the stronger variant, where *Google* refuses to send rather than
-  mailwarden declining to, see **Read-only mode** below.
+  mailwarden declining to, see **Read-only mode** below. **Read the promise as narrow, because it
+  is:** it closes the route out *through this server*, not the assistant's other routes — a client
+  that can fetch a URL, write to a synced folder or run code still has everything an injected
+  message needs, and this server is what puts that message in front of it. See
+  [non-goals](SECURITY.md#explicit-non-goals-what-mailwarden-does-not-defend-against).
 - **One outbound host, no model-chosen URL.** The `unsubscribe` tool is the only code path that
   contacts a non-Google host. Its endpoint is read from the message's `List-Unsubscribe` header —
   never from a tool argument — the request body is fixed and the response body is discarded, so it

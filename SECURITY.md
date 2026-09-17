@@ -346,6 +346,18 @@ Stating these plainly is part of the threat model:
   Gmail API directly, bypassing the tool surface entirely. In a `manage`/`filters` deployment that
   token carries `gmail.modify`, which Google accepts for sending; only a `read` deployment's
   `gmail.readonly` token is harmless in that scenario (threat 1).
+- **The other tools in the same assistant.** This is the limit most worth stating, because it is not
+  an edge case but the normal setup. Removing the send path closes the exfiltration route *through
+  this server*; it does not close the assistant's other routes. A client that can fetch a URL, write
+  a file into a synced folder, run code, or call a second MCP server still carries everything an
+  injected message needs — and mailwarden, doing its job, is what puts the attacker's text in front
+  of it. **So the honest claim is narrow: no tool here can carry your mail outward, and an injected
+  message finds no endpoint here to reach for.** What the assistant as a whole can do with what it
+  read is a property of that assistant, not of this server. The
+  [`<untrusted-tool-output>` fencing](#3-untrusted-content-confused-for-instructions) and the tier system reduce the chance the
+  text is obeyed at all, which is a different defence and a weaker one: fencing is a signal to a
+  model, while the missing send tool is a fact about the process. Run the server next to tools you
+  would be willing to see an injected mail operate.
 - **Google-side compromise.** Gmail is the upstream of record; `mailwarden` cannot protect data Google
   itself mishandles.
 - **Social-engineering of the human.** `mailwarden` reduces *autonomous* damage; it cannot stop a user

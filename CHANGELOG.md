@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`SECURITY.md` now names the limit that matters most in practice: the other tools in the same
+  assistant.** Removing the send path closes the exfiltration route *through this server*. It does
+  not close the assistant's other routes — a client that can fetch a URL, write into a synced
+  folder, run code or call a second MCP server still carries everything an injected message needs,
+  and this server, doing its job, is what puts that message in front of it. The non-goals section
+  had "a compromised AI client"; this is the *uncompromised* one, which is the normal setup rather
+  than an edge case. The README's no-send bullet now says the same in one sentence and links there.
+  Prompted by `c0webster/hardened-google-workspace-mcp`, whose security note opens by stating this
+  about itself. **A narrow claim that holds beats a broad one that a reader can puncture** — and
+  the narrow one is still the strongest sentence here: no tool can carry mail outward, and an
+  injected message finds no endpoint to reach for.
+
 ### Changed
 - **Comparison table: the `taylorwilsdon` column is current again** (`fb89c818`, 57 commits on),
   brought forward by diff. No cell moves. The Gmail changes are all on the sending path, and the
