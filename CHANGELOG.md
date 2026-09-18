@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Comparison table: the `taylorwilsdon` column is current again** (`e844d805`, v1.27.0, 16
+  commits on), brought forward by diff. No cell moves, and this round the Gmail half of the diff is
+  empty in the strongest sense: `gmail/` does not appear in the changed-file list at all, and
+  neither do `auth/permissions.py`, `auth/scopes.py`, `core/tool_registry.py` or
+  `auth/credential_store.py`. The weight of the round is Google Docs — a plain-text export path,
+  document links, markdown — which is outside this table. The one auth file that moved drops the
+  mirroring of `GOOGLE_*` into FastMCP's provider environment: bootstrap, not a scope map, despite
+  the scope-sounding name of the test that shrank with it. The two repository-wide claims were
+  checked at the HEAD instead of through the diff, because a diff cannot carry them: `output_schema`
+  still has no occurrence anywhere, and neither do `snooze`, `Authentication-Results` or `dmarc`.
 - **Said plainly what 0.22.0's call-time scope check does and does not do:** it explains a refusal,
   it does not prevent one. The request goes to Google and comes back rejected; what changed is that
   the answer then names the gap instead of listing every scope that could be missing. A gate that
@@ -24,6 +34,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reconstructing one anyway is how a checked fact turns back into a guess.**
 
 ### Fixed
+- **A tool count of ours was wrong for eighteen days:** `docs/comparison-sources.json` recorded
+  sixteen Gmail tools for `taylorwilsdon/google_workspace_mcp` from 31 August on, most recently as
+  “the count of sixteen stands” on 17 September. It is **fourteen**, and it was fourteen at every
+  revision we had recorded — counted at `cce49e11`, `54b1c56` and `fb89c818`, not inferred from
+  today's. The miscount therefore sits in the single round that read the file end to end, and the
+  three diff rounds after it carried the number forward unexamined, because a diff can only say
+  that a number did not change. No cell moves: the table never named a count, which is why nothing
+  caught it. The note states the correction where the wrong number stood rather than quietly
+  replacing it.
 - **The npm wait added for the registry race was itself too short, and asked the wrong question.**
   It fired for the first time on 0.22.0 and failed the run: `npm publish` succeeded at 20:37:35,
   the thirty 10-second attempts ran out at 20:42:44, and npm records the version as published at
