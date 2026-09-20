@@ -1091,6 +1091,55 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
     expect(getCalls[1].metadataHeaders).toBeUndefined();
   });
 
+  it("getThread full:false KEEPS `authentication` — the sparse fetch drops bodies, not the verdict", async () => {
+    // Promised in the tool description, and already relied on: a mailbox session answers
+    // "is this really from them?" without paying for a body (reported 2026-09-20). The
+    // guarantee is fragile in a specific way — the sparse path strips fields BY NAME, so
+    // it is adding a name to that list, not touching authentication, that would break it.
+    const api: any = {
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  threadId: "th-1",
+                  payload: {
+                    headers: [
+                      { name: "From", value: "Mein Postkorb <noreply@brz.gv.at>" },
+                      {
+                        name: "Authentication-Results",
+                        value:
+                          "mx.google.com; dkim=pass header.d=brz.gv.at; spf=pass smtp.mailfrom=noreply@brz.gv.at; dmarc=pass header.from=brz.gv.at",
+                      },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const res = await gmail.getThread("th-1", false);
+
+    expect(res.metadataOnly).toBe(true);
+    const msg = res.messages[0] as Record<string, unknown>;
+    // The body is gone — this is the sparse fetch, that is the point.
+    expect("plaintextBody" in msg).toBe(false);
+    // The verdict is not, and it is a real verdict, not an `unchecked` placeholder.
+    expect(msg.authentication).toMatchObject({
+      dmarc: "pass",
+      spf: "pass",
+      dkim: "pass",
+      headerFrom: "brz.gv.at",
+      authservId: "mx.google.com",
+    });
+    expect((msg.authentication as Record<string, unknown>).unchecked).toBeUndefined();
+  });
+
   it("PARSED_HEADERS covers every header the parse actually reads", () => {
     // The coupling this guards: a header read by parseMessage but missing from the list
     // is silently empty on every metadata fetch — and an empty header is indistinguishable

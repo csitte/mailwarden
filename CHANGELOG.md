@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **`get_thread` says that `full: false` keeps `authentication`** — it always did, and the
+  description never said so. It listed what the sparse fetch drops (bodies, attachment metadata)
+  and elsewhere that every message carries `authentication`; that both hold at once was left to be
+  discovered. A mailbox session discovered it and now relies on it, because it makes an authenticity
+  check cost no body. A test pins it, so what was an observation about the current build is a
+  promise the next one has to keep — and the way it could break is specific: the sparse path strips
+  fields by name, so the risk is a name added to that list, not a change to authentication itself.
 - **Comparison table: the `taylorwilsdon` column brought forward again** (`d80ddd92`, v1.27.1, 11
   commits on), two days after the last round, and this time the diff is not empty where it counts:
   `auth/permissions.py` and `auth/scopes.py` both moved, which are the two files the least-privilege
