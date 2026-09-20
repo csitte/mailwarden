@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Comparison table: the `taylorwilsdon` column brought forward again** (`d80ddd92`, v1.27.1, 11
+  commits on), two days after the last round, and this time the diff is not empty where it counts:
+  `auth/permissions.py` and `auth/scopes.py` both moved, which are the two files the least-privilege
+  cell rests on. The change is confined to the chat service — a new `chat.memberships.readonly`
+  scope and `contacts.readonly` added to chat's `readonly` level and to the read-only scope map —
+  while the `gmail` entry in the level table is unchanged and `core/tool_registry.py` does not
+  appear in the diff at all. No cell moves. Worth recording anyway, because it is the same caveat
+  our cell already carries, now visible in his code: a level named `readonly` pulls in a scope of a
+  different API, so the level names the intent of the service, not the reach of the grant. `gmail/`
+  is absent from the diff; the repository-wide claims were checked at the HEAD in a full checkout,
+  because a diff cannot carry them — no `output_schema`, no `snooze`, no `Authentication-Results`,
+  no `dmarc`, `GMAIL_METADATA_HEADERS` still ends at `List-Id`, and the fourteen `@server.tool`
+  decorators counted again at this revision rather than carried forward from the correction two
+  days ago. The other four columns are unmoved upstream, and their `verified` dates deliberately
+  stay where they are: a HEAD comparison shows that nothing changed, which is not the same as
+  having read anything.
 - **Comparison table: the `taylorwilsdon` column is current again** (`e844d805`, v1.27.0, 16
   commits on), brought forward by diff. No cell moves, and this round the Gmail half of the diff is
   empty in the strongest sense: `gmail/` does not appear in the changed-file list at all, and
