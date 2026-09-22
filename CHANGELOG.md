@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Comparison table: the `taylorwilsdon` column brought forward once more** (`8475cecf`, v1.28.0,
+  33 commits on), and this time the Gmail file itself moved: `gmail/gmail_tools.py` +116/-21, with
+  no tool added or removed. A label update no longer resets the two visibility settings to their
+  create defaults, an unresolvable `thread_id` on a draft is now an error instead of a silently
+  orphaned draft, and emails wrapped inside an email (`message/rfc822`) are rendered by the read
+  tools, capped in count and depth. That renderer labels the wrapped headers as claimed by the
+  attachment and unverified — the closest the repository comes to the subject of the
+  sender-authentication cell, and it still verifies none, so the cell stands. The four files the
+  least-privilege and token-encryption cells rest on are absent from the diff; the one
+  permissions-named test file that grew carries file-limit validation, as on 18 September. The
+  repository-wide claims were checked at the HEAD in a full checkout: no `output_schema`, no
+  `snooze`, no `Authentication-Results`, no `dmarc`, `GMAIL_METADATA_HEADERS` still ends at
+  `List-Id`, fourteen `@server.tool` decorators counted again. The other four columns are unmoved
+  upstream and keep their `verified` dates — settled on 22 September as the rule for this file: the
+  date is the day the cells were read, and an unchanged HEAD is not a reading.
 - **`get_thread` says that `full: false` keeps `authentication`** — it always did, and the
   description never said so. It listed what the sparse fetch drops (bodies, attachment metadata)
   and elsewhere that every message carries `authentication`; that both hold at once was left to be
