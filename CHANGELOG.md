@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Comparison table: three columns moved at once, and one cell changed.** `npm run table-sources`
+  reported `klodr`, `a-bonus` and `taylorwilsdon` all ahead of the recorded revision; each was brought
+  forward by reading the diff and the repository-wide claims re-checked in a fresh checkout. `klodr`
+  (`2fa333bd`) moved for the first time since July and grew a `download_all_attachments` tool that
+  carries an output schema of its own, so the structured-outputs cell now says two tools rather than
+  one — the only cell to change. The same round corrected a sentence of ours: the 3 September note
+  claimed no occurrence of `dmarc` or `spf` in that repository, and `src/prompts.ts` has carried
+  "DMARC/SPF failure hints" in a phishing-triage prompt all along — a guess from a header mismatch,
+  not a read of `Authentication-Results`, so the cell stays a dash, but the note's zero was wrong and
+  is now corrected in place. `a-bonus` (`2e40593d`) touched no Gmail file: credential-loading error
+  text, a deferred Google client so the MCP handshake succeeds without credentials, and a Drive
+  save-path guard. `taylorwilsdon` (`ed70fb90`, v1.29.0, 84 commits on) adds a headers-only format
+  and a label visibility value inside existing Gmail tools, and its two scope files widen the Sheets
+  and Apps Script levels while the Gmail level table stays as read on 7 September — the second
+  instance of a level named for one service reaching into another API. Its new schema middleware
+  rewrites input schemas for Gemini and is not an output schema; `output_schema` still has no
+  occurrence there. The README's table note now describes this bring-forward practice instead of
+  the 18 September state it had frozen at.
 - **Comparison table: the `taylorwilsdon` column brought forward once more** (`8475cecf`, v1.28.0,
   33 commits on), and this time the Gmail file itself moved: `gmail/gmail_tools.py` +116/-21, with
   no tool added or removed. A label update no longer resets the two visibility settings to their
