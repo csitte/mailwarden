@@ -127,6 +127,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   📌 **A retry budget is a measurement, not a guess — and the first thing to check about a wait is
   whether it is waiting for the right signal.**
 
+### Security
+- **Four advisories in the runtime tree closed by moving `@modelcontextprotocol/sdk` 1.30.0 to 1.32.1.**
+  Dependabot flagged two of them on the 10 October push and `npm audit --omit=dev` showed four, all
+  reached through the SDK: `proxy-addr` 2.0.7 (critical, IP spoofing through an IPv4-mapped IPv6 trust
+  subnet, GHSA-jqcg-44mw-7w3h), the SDK itself at 1.12.0 to 1.30.1 (high, its OAuth *client* could be
+  steered to send credentials to an authorization server the MCP server names, GHSA-6qxp-vccf-f47h),
+  `fast-uri` 3.1.7 (moderate, host case normalisation, GHSA-hrr3-gc8f-f4qj) and `ip-address` 10.4.0
+  (moderate, four subnet and link-local findings, GHSA-2vr4-cq9g-pvrc and others). `npm audit fix`
+  resolved all of them inside the declared `^1.30.0` range, so only the lockfile moves: the SDK to
+  1.32.1, `proxy-addr` to 2.0.8, `fast-uri` to 3.1.8, `ip-address` to 10.7.3 and `source-map-js` to
+  1.2.2. Two of the findings are worth placing: mailwarden is an MCP *server* and never instantiates
+  the SDK's OAuth client, so the high one had no path here; and `proxy-addr` is Express's
+  trust-proxy resolver, which only acts once Express is told to trust a proxy, and `--http` never
+  sets that. Build, the full test suite and `npm run smoke` pass on the new tree; at the time of this
+  entry the runtime dependency tree carries no known advisory. As before: an audit result is a date,
+  not a property.
+
 ## [0.22.0] - 2026-09-17
 
 ### Added
