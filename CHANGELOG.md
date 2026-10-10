@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **Comparison table: three columns moved again, and the sweep cell for `taylorwilsdon` changed.** `npm run table-sources`
+  reported `taylorwilsdon`, `aaronsb` and `klodr` ahead of the recorded revisions; each was brought forward by reading the
+  diff, with the repository-wide claims re-checked in a fresh checkout. `taylorwilsdon` (`78973045`, v2.1.0, 170 commits
+  on) gained an `apply` action on its filter tool that translates a filter's criteria into a Gmail search, pages
+  `messages.list` and relabels the matches through `batchModify` — the first query-driven bulk path on that column, so the
+  cell no longer says explicit ids alone. It is labels only, and the ids are never re-checked against live labels, which
+  the cell and the paragraph under the table now say. `aaronsb` (`14c25e66`, v4.6.0) added `listDrafts`, `deleteDraft` and
+  `createLabel`, with the permanent draft deletion added to its `no-delete` policy — no cell moves; the same round
+  corrected a count of ours in `docs/comparison-sources.json` (the 8 September note said fifteen Gmail operations and
+  listed sixteen; it was sixteen, and is nineteen now). `klodr` (`ddb9da01`) moved only its version string. The table
+  marker stays at 3 September, the Google column's date.
 - **Comparison table: three columns moved at once, and one cell changed.** `npm run table-sources`
   reported `klodr`, `a-bonus` and `taylorwilsdon` all ahead of the recorded revision; each was brought
   forward by reading the diff and the repository-wide claims re-checked in a fresh checkout. `klodr`
