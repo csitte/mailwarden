@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-10-11
+
 ### Changed
 - **Comparison table: three columns moved again, and the sweep cell for `taylorwilsdon` changed.** `npm run table-sources`
   reported `taylorwilsdon`, `aaronsb` and `klodr` ahead of the recorded revisions; each was brought forward by reading the
@@ -1762,7 +1764,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/csitte/mailwarden/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/csitte/mailwarden/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/csitte/mailwarden/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/csitte/mailwarden/compare/v0.19.0...v0.20.0
