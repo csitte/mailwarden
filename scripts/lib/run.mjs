@@ -4,7 +4,9 @@
  *
  * npm is `npm.cmd` on Windows, which Node refuses to spawn directly (it is a batch file, not an
  * executable) — so that platform needs `shell: true`, and with a shell the arguments have to be
- * quoted themselves: temp and repo paths can contain spaces.
+ * quoted themselves: temp and repo paths can contain spaces. So can the command: `process.execPath`
+ * is `C:\Program Files\nodejs\node.exe` on a default Windows install, and an unquoted one made
+ * cmd.exe run `C:\Program` (found on the first release cut from such a machine, 0.22.1).
  */
 import { spawnSync } from "node:child_process";
 
@@ -14,9 +16,10 @@ export const npm = onWindows ? "npm.cmd" : "npm";
 export function run(cmd, args, opts = {}) {
   // With a shell, pass ONE pre-quoted command string and no argv array — Node deprecates
   // (DEP0190) the array form under `shell: true` because it concatenates without escaping.
-  const quoted = args.map((a) => (/[\s"]/.test(a) ? `"${a}"` : a)).join(" ");
+  const quote = (a) => (/[\s"]/.test(a) ? `"${a}"` : a);
+  const quoted = args.map(quote).join(" ");
   const res = onWindows
-    ? spawnSync(`${cmd} ${quoted}`, [], { encoding: "utf8", shell: true, ...opts })
+    ? spawnSync(`${quote(cmd)} ${quoted}`, [], { encoding: "utf8", shell: true, ...opts })
     : spawnSync(cmd, args, { encoding: "utf8", ...opts });
   if (res.status !== 0) {
     console.error(`\n${cmd} ${args.join(" ")} failed (exit ${res.status}):`);

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`npm run mcpb` failed on a Windows machine whose Node lives under a path with a space.** The
+  spawn helper in `scripts/lib/run.mjs` quoted every argument for the shell but not the command
+  itself, so `process.execPath` = `C:\Program Files\nodejs\node.exe` reached cmd.exe as
+  `C:\Program`, and the first `mcpb validate` step died before the bundle existed. It had never
+  shown because every earlier release was cut from a machine whose Node sits in a space-free path.
+  The command is now quoted by the same rule as the arguments. The 0.22.1 bundles were built on the
+  clean tag checkout through the 8.3 short path (`C:\PROGRA~1`), so they are unaffected; the fix
+  is for the next machine.
+
 ## [0.22.1] - 2026-10-11
 
 ### Changed
