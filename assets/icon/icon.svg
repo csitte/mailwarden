@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000">
+  <!-- mailwarden icon: a shield with an envelope inside. Slate ground, white strokes. -->
+  <rect width="1000" height="1000" rx="220" fill="#1E293B"/>
+  <g fill="none" stroke="#FFFFFF" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M190 150 H810 V486 Q810 766 500 850 Q190 766 190 486 Z" stroke-width="58"/>
+    <rect x="330" y="360" width="340" height="230" stroke-width="46"/>
+    <path d="M330 360 L500 500 L670 360" stroke-width="46"/>
+  </g>
+</svg>

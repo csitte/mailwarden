@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A plugin icon.** A shield with an envelope inside, white strokes on a slate ground, drawn on a
+  1000-unit grid: `assets/icon/icon.svg` is the source, `.claude-plugin/icon.png` the 1024 px render
+  the plugin directory looks for, and `assets/icon/` holds the other sizes, two transparent glyphs
+  and a favicon set (see `assets/icon/README.md`). None of it ships in the npm package. The directory's
+  check listed the missing icon as a warning; the listing otherwise shows a blank tile.
+
 ### Changed
 - **The Claude Code plugin pins the package it launches.** `.claude-plugin/plugin.json` now starts
   `npx -y mailwarden@<version>` instead of `npx -y mailwarden`, carries a `version` of its own, and
