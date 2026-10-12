@@ -25,7 +25,7 @@
   "scripts": {
     "build": "tsc",
     "prepare": "npm run build",
-    "version": "node scripts/sync-version.mjs && git add server.json",
+    "version": "node scripts/sync-version.mjs && git add server.json .claude-plugin/plugin.json skills",
     "postversion": "node scripts/check-site-notice.mjs --warn",
     "site-notice": "node scripts/check-site-notice.mjs",
     "prepublishOnly": "npm run build && npm test",

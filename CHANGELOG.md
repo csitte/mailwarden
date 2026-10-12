@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The Claude Code plugin pins the package it launches.** `.claude-plugin/plugin.json` now starts
+  `npx -y mailwarden@<version>` instead of `npx -y mailwarden`, carries a `version` of its own, and
+  the setup skill's `--auth`/`--check` commands name the same version. Anthropic's plugin directory
+  held the submission of 15 August under its policy against unpinned launchers: a reviewer approves
+  one revision of the code, and an unpinned `npx` would run whatever npm serves later. The pin is
+  kept current by `scripts/sync-version.mjs` on every `npm version`, the same step that already
+  syncs `server.json`, and a test fails the build when the manifest, the skills and `package.json`
+  disagree — a version written in three files is a version that drifts. A `claude mcp add` setup is
+  unaffected; this is about the plugin alone.
+
 ### Fixed
 - **`npm run mcpb` failed on a Windows machine whose Node lives under a path with a space.** The
   spawn helper in `scripts/lib/run.mjs` quoted every argument for the shell but not the command
