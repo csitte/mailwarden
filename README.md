@@ -542,7 +542,10 @@ from a clone:
 claude --plugin-dir /path/to/mailwarden
 ```
 It is submitted to Anthropic's community marketplace; once listed, `/plugin marketplace add anthropics/claude-plugins-community`
-then `/plugin install mailwarden@claude-community` does the same without a clone. The plugin runs the full
+then `/plugin install mailwarden@claude-community` does the same without a clone. The plugin starts the
+exact published version (`npx -y mailwarden@<version>`, bumped by the release script together with
+`server.json`), because the directory reviews one revision and refuses a launcher that would run whatever
+npm serves later. The plugin runs the full
 tool surface — for a narrower tier (`MAILWARDEN_TOOLS=read`) or a second account, use `claude mcp add` with
 the env you want instead (see [Config](#config-env) and [Multiple accounts](#multiple-accounts)).
 That route gets the server without the skills: the npm package ships the server alone, and the skills
