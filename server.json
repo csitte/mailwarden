@@ -33,7 +33,7 @@
         },
         {
           "name": "MAILWARDEN_DOWNLOAD_DIR",
-          "description": "Restrict download_attachment writes to this directory (recommended for HTTP hosting)",
+          "description": "Restrict download_attachment and export_thread writes to this directory (recommended for HTTP hosting)",
           "isRequired": false
         }
       ]

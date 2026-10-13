@@ -80,8 +80,8 @@ mailbox content).
   alternative — checking in the tool or handler layer, where the intent is legible and the error
   messages are nicer — has a failure mode that this one does not: a new code path gets no check
   unless whoever wrote it remembers to add one, and nothing reports the omission. That is not a
-  hypothetical trade-off. `aaronsb/google-workspace-mcp`, the only other server in the comparison
-  table that can refuse to send, runs its safety policies in the handler pipeline, and the file says
+  hypothetical trade-off. `aaronsb/google-workspace-mcp`, one of two other servers in the comparison
+  table that can be made to refuse sending, runs its safety policies in the handler pipeline, and the file says
   what followed: a hand-registered tool shipped without a policy check and had to call one
   explicitly afterwards, which its own comment names as how that path went uncovered. The same
   mistake reached this repository from the other direction and is worth recording rather than

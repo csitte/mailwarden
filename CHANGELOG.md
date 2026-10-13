@@ -62,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected; this is about the plugin alone.
 
 ### Fixed
+- **"The only other server that can refuse to send" was no longer true.** README and SECURITY.md
+  said it of `aaronsb`; `agentcomms` can be set to a `never` send policy as well. Noticed by
+  csitte.at while taking over the new column, who had the same sentence.
 - **The comparison table understated Google's own Gmail MCP server on structured outputs.**
   Its tool reference documents an output schema for every tool, and has since July; the reading of
   3 September 2026 recorded none, so the README cell said "not offered" and `docs/ROADMAP.md` said
