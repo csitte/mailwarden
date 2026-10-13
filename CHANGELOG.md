@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   published on 18 September 2026, reads SPF, DKIM and DMARC from `Authentication-Results` as well,
   found in a landscape scan on 13 October 2026 and checked in its source. Snooze and search
   re-verification remain without a counterpart in anything we have read.
+- **The comparison table has a column for `agentcomms`** (`@agentcomms/gmail-mcp`), read at
+  `01cee751` on 13 October 2026. It earns the column on two rows: it reads `Authentication-Results`
+  pinned to Gmail's own report, and its bulk changes return an exact per-message undo. Its npm reach
+  passed `klodr`'s within a month of its first release. The cells record that it sends behind a
+  per-message approval whose default is a yes in the conversation, and that its bulk path takes ids,
+  not a query.
 - **`npm run mcpb` failed on a Windows machine whose Node lives under a path with a space.** The
   spawn helper in `scripts/lib/run.mjs` quoted every argument for the shell but not the command
   itself, so `process.execPath` = `C:\Program Files\nodejs\node.exe` reached cmd.exe as
