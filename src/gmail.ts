@@ -1725,9 +1725,10 @@ export class Gmail {
     messageCount: number;
     bytes: number;
   }> {
-    const dest = await resolveLocalDest(destPath);
+    // Fetch first: a thread that does not exist must not leave empty directories behind.
     const thread = await this.getThread(threadId, true);
     const messages = thread.messages as ParsedMessage[];
+    const dest = await resolveLocalDest(destPath);
     const buf = Buffer.from(renderThread(threadId, messages, format, new Date()), "utf8");
     return { saved: await writeUnique(dest, buf), messageCount: messages.length, bytes: buf.length };
   }

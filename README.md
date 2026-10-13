@@ -227,7 +227,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
-| `export_thread` | Write a whole thread to a local file instead of returning it — Markdown for people (headers, sender authentication, attachment list, each body in a fence the mail text cannot close) or JSON as `get_thread` returns it. Same path rules as attachments |
+| `export_thread` | Write a whole thread to a local file instead of returning it — Markdown for people (headers and attachment names as code, so a preview never loads an image or follows a link the sender wrote; sender authentication; each body in a fence the mail text cannot close) or JSON as `get_thread` returns it. Same path rules as attachments |
 | **`unsubscribe`** | One-click opt-out (RFC 8058) using the endpoint from the message's own header — the only tool that contacts a non-Google host ([details](#unsubscribing--the-one-outbound-request)) |
 | **`bulk_unsubscribe`** | The same for several threads, sequentially and **at most one request per sender** (remembered across calls for as long as the server runs, so a retry contacts nobody twice); partial success reported per thread. `dryRun: true` runs the same header reads and dedupe and reports the endpoint each thread `wouldCall` — contacting nobody |
 | **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`), a date+time (`2026-06-20 9am`), or a preset (`tomorrow`, `tomorrow 9am`, `weekend`, `next week`, a weekday name, `in N days`, `in N hours`) |

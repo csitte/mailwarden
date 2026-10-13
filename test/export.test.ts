@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { fenceFor, htmlToText, renderThread } from "../src/export.js";
+import { codeSpan, fenceFor, htmlToText, renderThread } from "../src/export.js";
 import { Gmail, type ParsedMessage } from "../src/gmail.js";
 
 const AT = new Date("2026-10-13T12:00:00Z");
@@ -60,12 +60,12 @@ describe("renderThread", () => {
       "markdown",
       AT,
     );
-    expect(out).toContain("# Quarterly numbers\n");
+    expect(out).toContain("# ` Quarterly numbers `\n");
     expect(out).toContain("Thread `t1`, 2 messages, exported 2026-10-13T12:00:00.000Z.");
-    expect(out).toContain("## 1. Ann <ann@x.example>");
+    expect(out).toContain("## 1. ` Ann <ann@x.example> `");
     expect(out).toContain("- **Sender authentication:** spf=pass, dkim=pass, dmarc=pass, dkimAligned=true");
     expect(out).toContain("- **Sender authentication:** unchecked (no report from Gmail)");
-    expect(out).toContain("- **Attachments:** q3.pdf (application/pdf, 1024 bytes)");
+    expect(out).toContain("- **Attachments:** ` q3.pdf ` (` application/pdf `, 1024 bytes)");
     expect(out).toContain("```text\nHello,\nthe numbers are attached.\n```");
   });
 
@@ -77,8 +77,22 @@ describe("renderThread", () => {
 
   it("keeps a header newline from starting a new markdown line", () => {
     const out = renderThread("t1", [m({ subject: "a\n# b", from: "x\n- **To:** forged" })], "markdown", AT);
-    expect(out).toContain("# a # b\n");
+    expect(out).toContain("# ` a # b `\n");
     expect(out).not.toMatch(/^- \*\*To:\*\* forged/m);
+  });
+
+  it("renders sender-written headers as code, so a preview never loads an image or follows a link", () => {
+    const out = renderThread(
+      "t1",
+      [m({ subject: "![p](https://track.example/p.png)", from: "[bank](https://evil.example) <x@evil.example>" })],
+      "markdown",
+      AT,
+    );
+    expect(out).toContain("# ` ![p](https://track.example/p.png) `\n");
+    expect(out).toContain("- **From:** ` [bank](https://evil.example) <x@evil.example> `");
+    // A backtick in the value gets a longer delimiter, so it cannot end the span early.
+    expect(codeSpan("a ` b")).toBe("`` a ` b ``");
+    expect(codeSpan("")).toBe("");
   });
 
   it("falls back to the HTML reduced to text when there is no plain part", () => {
@@ -143,6 +157,15 @@ describe("Gmail.exportThread writes under the download fence", () => {
     expect(first.messageCount).toBe(1);
     expect((await fs.readFile(first.saved, "utf8")).length).toBeGreaterThan(0);
     expect(first.bytes).toBe((await fs.readFile(first.saved)).length);
+  });
+
+  it("creates no directory for a thread that does not exist", async () => {
+    const g = new Gmail({} as never);
+    (g as unknown as { api: unknown }).api = {
+      users: { threads: { get: async () => { throw Object.assign(new Error("Not Found"), { code: 404 }); } } },
+    };
+    await expect(g.exportThread("nope", "sub/dir/x.md", "markdown")).rejects.toThrow();
+    await expect(fs.stat(path.join(dir, "sub"))).rejects.toThrow();
   });
 
   it("refuses a path that escapes the fence", async () => {

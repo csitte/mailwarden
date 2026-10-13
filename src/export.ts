@@ -2,8 +2,9 @@
  * A thread rendered to a file, so a long conversation can be kept, shared or read in pieces
  * without passing through the model context.
  *
- * Two formats. `markdown` is for people: one section per message with its headers, its
- * sender authentication and its attachment list, and the body in a code fence. The fence is
+ * Two formats. `markdown` is for people: one section per message with its headers (each in an
+ * inline code span, see `codeSpan`), its sender authentication and its attachment list, and
+ * the body in a code fence. The fence is
  * chosen longer than any backtick run inside the body, so text the sender wrote — which may
  * contain Markdown, or a fence of its own — cannot close it and render as part of the
  * document. `json` is for programs: the parsed messages as `get_thread` returns them.
@@ -52,6 +53,21 @@ function oneLine(v: string): string {
   return v.replace(/[\r\n]+/g, " ").trim();
 }
 
+/**
+ * A header value as an inline code span: rendered as written, never as a link, an image or
+ * emphasis. The sender writes From, Subject and attachment names, and a Markdown preview
+ * would otherwise turn `![x](https://tracker/p.png)` in a subject into a remote image that
+ * loads when the file is opened. The delimiter is longer than any backtick run inside, and
+ * the padding spaces are the ones CommonMark strips, so the value shows unchanged.
+ */
+export function codeSpan(v: string): string {
+  const s = oneLine(v);
+  if (s === "") return "";
+  const longest = Math.max(0, ...[...s.matchAll(/`+/g)].map((m) => m[0].length));
+  const tick = "`".repeat(longest + 1);
+  return `${tick} ${s} ${tick}`;
+}
+
 function authLine(m: ParsedMessage): string {
   const a = m.authentication;
   if (a.unchecked) return "unchecked (no report from Gmail)";
@@ -70,7 +86,7 @@ export function renderThread(
   if (format === "json") {
     return JSON.stringify({ threadId, exportedAt: exportedAt.toISOString(), messages }, null, 2) + "\n";
   }
-  const subject = oneLine(messages[0]?.subject ?? "") || "(no subject)";
+  const subject = codeSpan(messages[0]?.subject ?? "") || "(no subject)";
   const out: string[] = [
     `# ${subject}`,
     "",
@@ -83,18 +99,18 @@ export function renderThread(
       "",
       "---",
       "",
-      `## ${i + 1}. ${oneLine(m.from) || "(unknown sender)"}`,
+      `## ${i + 1}. ${codeSpan(m.from) || "(unknown sender)"}`,
       "",
-      `- **From:** ${oneLine(m.from)}`,
-      `- **To:** ${oneLine(m.to)}`,
-      `- **Date:** ${oneLine(m.date)}`,
-      `- **Subject:** ${oneLine(m.subject)}`,
+      `- **From:** ${codeSpan(m.from)}`,
+      `- **To:** ${codeSpan(m.to)}`,
+      `- **Date:** ${codeSpan(m.date)}`,
+      `- **Subject:** ${codeSpan(m.subject)}`,
       `- **Sender authentication:** ${authLine(m)}`,
     );
     if (m.attachments.length > 0) {
       out.push(
         `- **Attachments:** ${m.attachments
-          .map((a) => `${oneLine(a.filename)} (${a.mimeType}, ${a.size} bytes)`)
+          .map((a) => `${codeSpan(a.filename)} (${codeSpan(a.mimeType)}, ${a.size} bytes)`)
           .join("; ")}`,
       );
     }

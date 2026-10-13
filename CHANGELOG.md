@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`export_thread` — a thread to a local file.** Markdown for people (one section per message
   with headers, sender authentication and attachment list, each body in a code fence chosen longer
   than any backtick run in it, so the mail text cannot close the fence and render as part of the
-  document; HTML-only mail is reduced to text) or JSON exactly as `get_thread` returns it. For
+  document; From, To, Subject and attachment names as inline code, so a preview cannot turn a
+  subject into a tracking image or a sender name into a link; HTML-only mail is reduced to text) or
+  JSON exactly as `get_thread` returns it. The thread is fetched before any directory is created. For
   keeping or handing on a conversation, or reading a long one without loading it into the context.
   Manage tier, like `download_attachment`, and under the same path rules: the path check is now one
   shared function, so `MAILWARDEN_DOWNLOAD_DIR` fences both, never overwrites for both, and the
