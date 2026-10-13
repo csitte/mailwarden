@@ -9,6 +9,7 @@ import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
 import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./history.js";
 import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
+import { renderThread, type ExportFormat } from "./export.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -1696,46 +1697,68 @@ export class Gmail {
   }
 
   async downloadAttachment(messageId: string, attachmentId: string, destPath: string): Promise<string> {
-    // destPath is MCP-client-controlled. With MAILWARDEN_DOWNLOAD_DIR set,
-    // relative paths resolve inside it and the result must stay inside it —
-    // without the fence, an HTTP-hosted deployment would hand every client an
-    // arbitrary file write on the server.
-    const root = process.env.MAILWARDEN_DOWNLOAD_DIR;
-    let dest: string;
-    if (root) {
-      await fs.mkdir(root, { recursive: true });
-      // realpath-canonicalize the fence so `..`/symlinks in the ROOT itself
-      // can't shift the boundary. Containment is checked as a relative path —
-      // against the root as configured AND its canonical form, so an absolute
-      // destPath under either spelling passes (e.g. /tmp/dl/x when /tmp is a
-      // symlink to /private/tmp) while anything outside both is rejected.
-      const givenRoot = path.resolve(root);
-      const fence = await fs.realpath(root);
-      const escapes = (rel: string) => rel === "" || rel.startsWith("..") || path.isAbsolute(rel);
-      let rel = path.relative(givenRoot, path.resolve(givenRoot, destPath));
-      if (escapes(rel)) rel = path.relative(fence, path.resolve(fence, destPath));
-      if (escapes(rel)) {
-        throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR (${fence}).`);
-      }
-      dest = path.join(fence, rel);
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-      // …and again against the REAL parent directory: a symlinked subdirectory
-      // inside the fence pointing outside would pass the lexical check above.
-      const realDir = await fs.realpath(path.dirname(dest));
-      if (realDir !== fence && !realDir.startsWith(fence + path.sep)) {
-        throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR via a symlink (${fence}).`);
-      }
-      dest = path.join(realDir, path.basename(dest));
-    } else {
-      dest = path.resolve(destPath);
-      await fs.mkdir(path.dirname(dest), { recursive: true });
-    }
+    const dest = await resolveLocalDest(destPath);
     const res = await this.req(() =>
       this.api.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId }),
     );
     if (!res.data.data) throw new Error("Attachment has no data.");
     return writeUnique(dest, Buffer.from(res.data.data, "base64url"));
   }
+
+  /** Write a full thread to a local file, under the same path rules as an attachment. */
+  async exportThread(threadId: string, destPath: string, format: ExportFormat): Promise<{
+    saved: string;
+    messageCount: number;
+    bytes: number;
+  }> {
+    const dest = await resolveLocalDest(destPath);
+    const thread = await this.getThread(threadId, true);
+    const messages = thread.messages as ParsedMessage[];
+    const buf = Buffer.from(renderThread(threadId, messages, format, new Date()), "utf8");
+    return { saved: await writeUnique(dest, buf), messageCount: messages.length, bytes: buf.length };
+  }
+}
+
+/**
+ * The local path a client-chosen `destPath` resolves to, created if missing and fenced
+ * by MAILWARDEN_DOWNLOAD_DIR when that is set. Shared by every tool that writes a file.
+ */
+async function resolveLocalDest(destPath: string): Promise<string> {
+  // destPath is MCP-client-controlled. With MAILWARDEN_DOWNLOAD_DIR set,
+  // relative paths resolve inside it and the result must stay inside it —
+  // without the fence, an HTTP-hosted deployment would hand every client an
+  // arbitrary file write on the server.
+  const root = process.env.MAILWARDEN_DOWNLOAD_DIR;
+  let dest: string;
+  if (root) {
+    await fs.mkdir(root, { recursive: true });
+    // realpath-canonicalize the fence so `..`/symlinks in the ROOT itself
+    // can't shift the boundary. Containment is checked as a relative path —
+    // against the root as configured AND its canonical form, so an absolute
+    // destPath under either spelling passes (e.g. /tmp/dl/x when /tmp is a
+    // symlink to /private/tmp) while anything outside both is rejected.
+    const givenRoot = path.resolve(root);
+    const fence = await fs.realpath(root);
+    const escapes = (rel: string) => rel === "" || rel.startsWith("..") || path.isAbsolute(rel);
+    let rel = path.relative(givenRoot, path.resolve(givenRoot, destPath));
+    if (escapes(rel)) rel = path.relative(fence, path.resolve(fence, destPath));
+    if (escapes(rel)) {
+      throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR (${fence}).`);
+    }
+    dest = path.join(fence, rel);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+    // …and again against the REAL parent directory: a symlinked subdirectory
+    // inside the fence pointing outside would pass the lexical check above.
+    const realDir = await fs.realpath(path.dirname(dest));
+    if (realDir !== fence && !realDir.startsWith(fence + path.sep)) {
+      throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR via a symlink (${fence}).`);
+    }
+    dest = path.join(realDir, path.basename(dest));
+  } else {
+    dest = path.resolve(destPath);
+    await fs.mkdir(path.dirname(dest), { recursive: true });
+  }
+  return dest;
 }
 
 /**

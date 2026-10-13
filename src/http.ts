@@ -70,7 +70,7 @@ export function assertAuthConfigured(cfg: HttpConfig): void {
 }
 
 /**
- * Warn when `--http` would serve `download_attachment` with no download fence.
+ * Warn when `--http` would serve `download_attachment` and `export_thread` with no download fence.
  *
  * `destPath` is chosen by the MCP client. Without `MAILWARDEN_DOWNLOAD_DIR` there is nothing to
  * resolve it against, so an authenticated client can write anywhere the server process can —
@@ -90,10 +90,10 @@ export function downloadFenceWarning(env: NodeJS.ProcessEnv = process.env): stri
   if (env.MAILWARDEN_DOWNLOAD_DIR) return null;
   if (!resolveEnabledTiers(env).has("manage")) return null;
   return (
-    "mailwarden: MAILWARDEN_DOWNLOAD_DIR is not set. `download_attachment` takes the destination " +
-    "path from the client, so over HTTP any authorized client can write to any path this process " +
-    "can reach. Set MAILWARDEN_DOWNLOAD_DIR=<dir> to confine downloads to one directory, or run " +
-    "with MAILWARDEN_TOOLS=read if the deployment does not need to save attachments."
+    "mailwarden: MAILWARDEN_DOWNLOAD_DIR is not set. `download_attachment` and `export_thread` take " +
+    "the destination path from the client, so over HTTP any authorized client can write to any path " +
+    "this process can reach. Set MAILWARDEN_DOWNLOAD_DIR=<dir> to confine both to one directory, or " +
+    "run with MAILWARDEN_TOOLS=read if the deployment does not need to save files."
   );
 }
 

@@ -220,6 +220,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
+| `export_thread` | Write a whole thread to a local file instead of returning it — Markdown for people (headers, sender authentication, attachment list, each body in a fence the mail text cannot close) or JSON as `get_thread` returns it. Same path rules as attachments |
 | **`unsubscribe`** | One-click opt-out (RFC 8058) using the endpoint from the message's own header — the only tool that contacts a non-Google host ([details](#unsubscribing--the-one-outbound-request)) |
 | **`bulk_unsubscribe`** | The same for several threads, sequentially and **at most one request per sender** (remembered across calls for as long as the server runs, so a retry contacts nobody twice); partial success reported per thread. `dryRun: true` runs the same header reads and dedupe and reports the endpoint each thread `wouldCall` — contacting nobody |
 | **`snooze`** | Archive now, resurface on/after a date (`YYYY-MM-DD`), a date+time (`2026-06-20 9am`), or a preset (`tomorrow`, `tomorrow 9am`, `weekend`, `next week`, a weekday name, `in N days`, `in N hours`) |
@@ -258,6 +259,7 @@ not uniform — fetching a thread is the expensive part, in whatever format it i
 | `search` | 10 per list page, plus 40 for every candidate thread it fetches — about 1,000 at the default size, up to about 4,000 when the query carries a read-state or category condition |
 | `get_thread` (full and metadata alike) | 40 |
 | `trash`, `download_attachment` | 20 |
+| `export_thread` | 40 |
 | `archive`, `mark_read`, `untrash` | 10 |
 | `modify_labels`, `snooze` | 10, plus 1 for each label looked up by name and 5 for each label it has to create |
 | `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches, `undo: true` 40 per thread |
@@ -483,10 +485,10 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   leaves the process. Every method in Gmail's discovery document is tested against the guard. It
   guards *this server*, not the
   token: a stolen `gmail.modify` token can still send from elsewhere.
-- **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, attachment writes are confined to that
-  directory (realpath-canonicalized, symlink-aware) and never overwrite an existing file. Without
-  it there is nothing to resolve the client-supplied path against, so `download_attachment` can
-  write anywhere this process can — which matters for `--http`, where the client is remote.
+- **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, file writes — attachments and thread
+  exports — are confined to that directory (realpath-canonicalized, symlink-aware) and never
+  overwrite an existing file. Without it there is nothing to resolve the client-supplied path
+  against, so `download_attachment` and `export_thread` can write anywhere this process can — which matters for `--http`, where the client is remote.
   Starting `--http` without the fence therefore prints a warning naming the exposure (it stays a
   warning, not a refusal: unlike a missing bearer token this needs an *authorized* client, and
   existing deployments depend on the current behaviour). A `read`-tier deployment is silent — it
@@ -645,8 +647,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 10 `read` + 15 `manage` + 3 `filters`, so a
-full instance advertises 28 tools and four of them advertise 112. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 10 `read` + 16 `manage` + 3 `filters`, so a
+full instance advertises 29 tools and four of them advertise 116. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to
@@ -707,7 +709,7 @@ those rules come from).
 | `MAILWARDEN_ACCOUNT` | select a named account (its token is `token.<name>.json`; names are lower-cased); unset = the default `token.json`. See [Multiple accounts](#multiple-accounts) |
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
-| `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
+| `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` and `export_thread` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/triage_digest/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |

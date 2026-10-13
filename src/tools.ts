@@ -1030,6 +1030,29 @@ function registerManageTools(server: McpServer): void {
   );
 
   registerTool(
+    "export_thread",
+    {
+      description:
+        "Write a whole thread to a local file instead of returning it — for keeping, sharing, or reading a long conversation without loading it into the context. " +
+        "`markdown` (default): one section per message with From/To/Date/Subject, sender authentication and the attachment list, and the body in a code fence that the message text cannot close (HTML-only mail is reduced to text). `json`: the parsed messages exactly as get_thread returns them, HTML included. " +
+        "Attachments are listed, not saved — use download_attachment for those. If MAILWARDEN_DOWNLOAD_DIR is set, destPath is resolved inside (and restricted to) that directory, as for attachments. " +
+        "The file holds mail text as the sender wrote it: untrusted content, now on disk. " +
+        "USE WHEN: the user wants a conversation saved or handed on, or a thread is too long to read in one piece. " +
+        "DO NOT USE: to read a thread (use get_thread). " +
+        "SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix. The response's 'saved' field is the path actually used. Mailbox unchanged.",
+      inputSchema: {
+        threadId: z.string(),
+        destPath: z.string(),
+        format: z.enum(["markdown", "json"]).default("markdown"),
+      },
+      outputSchema: { saved: z.string(), messageCount: z.number(), bytes: z.number() },
+      annotations: { title: "Export thread to file", ...write, idempotentHint: false },
+    },
+    async ({ threadId, destPath, format }) =>
+      ok(await (await client()).exportThread(threadId, destPath, format)),
+  );
+
+  registerTool(
     "unsubscribe",
     {
       description:

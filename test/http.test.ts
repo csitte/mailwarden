@@ -148,6 +148,9 @@ describe("downloadFenceWarning — an unfenced download_attachment over HTTP", (
     const w = downloadFenceWarning({});
     expect(w).toMatch(/MAILWARDEN_DOWNLOAD_DIR is not set/);
     expect(w).toMatch(/any authorized client can write to any path/);
+    // Both file-writing tools take their path from the client; the warning names both.
+    expect(w).toMatch(/download_attachment/);
+    expect(w).toMatch(/export_thread/);
     // A warning is only useful if it says what to do about it.
     expect(w).toMatch(/MAILWARDEN_TOOLS=read/);
   });

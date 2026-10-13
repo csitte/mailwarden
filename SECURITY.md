@@ -175,7 +175,8 @@ A backup, a synced folder, or another machine exposes `token.json`.
 ### 7. Path traversal via attachment download
 A crafted attachment filename tries to escape the download directory.
 
-- **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, writes are confined to that directory
+- **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, writes — `download_attachment` and
+  `export_thread` alike, through one shared path check — are confined to that directory
   (realpath-canonicalized, symlink-aware) and never overwrite an existing file (collisions get a
   numeric suffix).
 - **Unset, the fence is the operator's job, and the server says so.** `destPath` comes from the

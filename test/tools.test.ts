@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 28 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 29 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(28);
+    expect(tools).toHaveLength(29);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -84,7 +84,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("snooze");
     expect(names).not.toContain("search"); // no read tier
     expect(names).not.toContain("list_filters"); // no filters tier
-    expect(names).toHaveLength(15);
+    expect(names).toHaveLength(16);
   });
 
   it("hides the filters tier when the stored token is known to lack settings.basic", async () => {
@@ -94,7 +94,7 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("list_filters");
     expect(names).not.toContain("create_filter");
     expect(names).not.toContain("delete_filter");
-    expect(names).toHaveLength(25); // 28 - 3 filter tools
+    expect(names).toHaveLength(26); // 29 - 3 filter tools
   });
 });
 
