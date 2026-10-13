@@ -1390,6 +1390,15 @@ export class Gmail {
     const before = opts.undo
       ? await this.readLabelsBack([...new Set(refs.map((r) => r.threadId))])
       : undefined;
+    // An undo was asked for, so a change without one is not what the caller wanted: if any
+    // message's prior state could not be read (out of quota, thread gone), write nothing.
+    const unread = before ? refs.filter((r) => !before.has(r.id)).length : 0;
+    if (unread > 0) {
+      throw new ToolError(
+        "upstream_unavailable",
+        `An undo was requested, and the labels of ${unread} of ${refs.length} messages could not be read before the change, so nothing was written. Retry in a minute, or run without undo.`,
+      );
+    }
     const submittedThreads = new Set<string>();
     const submittedIds: string[] = [];
     const failed: BatchModifyResult["failed"] = [];
@@ -1436,6 +1445,11 @@ export class Gmail {
       );
     }
     return result;
+  }
+
+  /** Every message's live labels in these threads — see `readLabelsBack`. */
+  async readLabels(threadIds: string[]): Promise<Map<string, string[]>> {
+    return this.readLabelsBack(threadIds);
   }
 
   /**

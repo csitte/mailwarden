@@ -29,9 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   goes back, what it gained comes off, and a message that was already in the target state is left
   out. The new `undo_bulk_modify` tool replays that plan. Swapping `add` and `remove` is not an
   undo: archive a set of which some threads were already archived, and the swapped call puts those
-  in the inbox for the first time. The plan is built for up to 500 messages and for uncapped match
-  sets only, because it carries every message id through the context; otherwise `undoUnavailable`
-  says why. Prompted by `@agentcomms/gmail-mcp`, which returns an undo with every bulk change.
+  in the inbox for the first time. The plan is built for up to 500 messages, because it carries
+  every message id through the context. With `undo: true` nothing is written unless the plan can be
+  built: more messages than that, or a prior state that could not be read, is an error before the
+  first write. `undo_bulk_modify` takes label ids only, so an unknown name cannot be created instead
+  of restored, and with `verify` reads each thread back once. A label the bulk change created is
+  taken off again but stays in the mailbox, empty. Adding and removing the same label in one call
+  is refused. Prompted by `@agentcomms/gmail-mcp`, which returns an undo with every bulk change.
 - **A plugin icon.** A shield with an envelope inside, white strokes on a slate ground, drawn on a
   1000-unit grid: `assets/icon/icon.svg` is the source, `.claude-plugin/icon.png` the 1024 px render
   the plugin directory looks for, and `assets/icon/` holds the other sizes, two transparent glyphs

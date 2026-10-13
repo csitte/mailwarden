@@ -1,6 +1,6 @@
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { Gmail, filterCriteriaToQuery, unverifiedPredicates } from "./gmail.js";
+import { Gmail, classifyBatchModify, filterCriteriaToQuery, looksLikeLabelId, unverifiedPredicates } from "./gmail.js";
 import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "./auth.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
@@ -729,7 +729,7 @@ function registerManageTools(server: McpServer): void {
         "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. " +
         "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
-        "Set undo:true to get `undo`, the EXACT inverse of this call: before writing, every affected thread's labels are read live, and the plan says per message what to add back and what to take off — a message that was already in the target state is left out, which a swapped add/remove would not do. Pass `undo.steps` unchanged to undo_bulk_modify to revert. It costs one extra read per affected thread and is built only for up to 500 messages and an uncapped match set; otherwise `undoUnavailable` says why. " +
+        "Set undo:true to get `undo`, the EXACT inverse of this call: before writing, every affected thread's labels are read live, and the plan says per message what to add back and what to take off — a message that was already in the target state is left out, which a swapped add/remove would not do. Pass `undo.steps` unchanged to undo_bulk_modify to revert. It costs one extra read per affected thread. With undo:true the call writes NOTHING unless the plan can be built: more than 500 messages to change, or a prior state that could not be read, is an error before the first write — a change the caller asked to be reversible is never made irreversibly. A label the call created for a name in `add` is taken off again by the undo but stays in the mailbox, empty. " +
         "SIDE EFFECTS: modifies up to maxMessages messages in one call (none with dryRun); label changes are reversible — exactly with undo:true, approximately by the inverse call.",
       inputSchema: {
         // Non-empty: an empty query would match the ENTIRE mailbox (listMessageRefs
@@ -783,8 +783,6 @@ function registerManageTools(server: McpServer): void {
         // Present only with undo:true and a real run: the per-message inverse. Pass `steps`
         // to undo_bulk_modify unchanged.
         undo: undoPlanSchema.optional(),
-        // Present only with undo:true when no plan was built, and why.
-        undoUnavailable: z.string().optional(),
         failed: z.array(z.object({ messageIds: z.array(z.string()), error: z.string() })),
       },
       // destructive: add:['TRASH'] over a broad query bulk-trashes existing mail.
@@ -793,6 +791,10 @@ function registerManageTools(server: McpServer): void {
     async ({ query, add, remove, maxMessages, dryRun, verify, crossCheck, undo }) => {
       if (add.length === 0 && remove.length === 0) {
         throw new ToolError("invalid_input", "bulk_modify needs at least one label in add or remove — nothing to do.");
+      }
+      const both = add.filter((a) => remove.some((r) => r.toLowerCase() === a.toLowerCase()));
+      if (both.length > 0) {
+        throw new ToolError("invalid_input", `A label cannot be added and removed in one call: ${both.join(", ")}.`);
       }
       const gmail = await client();
       const matched = await gmail.listMessageRefs({ query, max: maxMessages });
@@ -839,24 +841,20 @@ function registerManageTools(server: McpServer): void {
           failed: [],
         });
       }
-      // An undo plan needs the whole set (a capped one is not the set the user asked about)
-      // and must fit the context it is returned through.
-      const undoUnavailable = !undo
-        ? undefined
-        : shared.capped
-          ? "the match set was capped at maxMessages, so the change covered only part of what the query matches — raise maxMessages to cover the whole set"
-          : refs.length > UNDO_LIMIT
-            ? `more than ${UNDO_LIMIT} messages — an undo plan lists every message id and would flood the context; narrow the query`
-            : undefined;
-      const res = await gmail.batchModifyMessages(refs, add, remove, {
-        verify,
-        undo: undo && !undoUnavailable,
-      });
+      // The plan lists every message id and has to fit the context it is returned through. Refused
+      // before the first write: the caller asked for a reversible change, not for this one. A capped
+      // match set is no obstacle — the plan inverts exactly the messages that were changed.
+      if (undo && refs.length > UNDO_LIMIT) {
+        throw new ToolError(
+          "invalid_input",
+          `undo:true is built for up to ${UNDO_LIMIT} messages and this query would change ${refs.length}; nothing was written. Narrow the query or lower maxMessages.`,
+        );
+      }
+      const res = await gmail.batchModifyMessages(refs, add, remove, { verify, undo });
       return ok({
         dryRun: false,
         ...shared,
         ...(res.undo ? { undo: res.undo } : {}),
-        ...(undoUnavailable ? { undoUnavailable } : {}),
         submittedMessages: res.submittedMessages,
         submittedThreadCount: res.submittedThreads.length,
         submittedThreads: res.submittedThreads.slice(0, 500),
@@ -882,13 +880,14 @@ function registerManageTools(server: McpServer): void {
       description:
         "Revert a bulk_modify exactly, from the `undo` plan it returned (bulk_modify with undo:true). " +
         "Pass `steps` unchanged: each step adds back the labels its messages lost and takes off the labels they gained, so a message that was already in the target state before the bulk change is left alone. " +
-        "The plan restores the state read just before the bulk change. A label changed by hand since then is changed again by the undo, and a label deleted since then makes its step fail — reported in `failed`, the other steps still run. " +
-        "Set verify:true to read the labels back afterwards (one read per thread), as with bulk_modify. " +
+        "Steps name labels by id, as the plan does; a label name is refused, because an unknown name would be created rather than restored. " +
+        "The plan restores the state read just before the bulk change. A label changed by hand since then is changed again by the undo, and a label deleted since then makes its step fail — reported in `failed`, the other steps still run. A label the bulk change created stays in the mailbox, empty. " +
+        "Set verify:true to read the labels back afterwards — one read per affected thread, however many steps name it. " +
         "USE WHEN: the user wants a bulk change taken back, and the bulk_modify result carried `undo`. " +
         "DO NOT USE: without a plan from bulk_modify (use bulk_modify or modify_labels), or to change labels in a new way — this applies exactly the steps it is given. " +
         "SIDE EFFECTS: label changes on the listed messages; reversible again by the inverse.",
       inputSchema: {
-        steps: z.array(undoStepSchema).min(1).max(64),
+        steps: z.array(undoStepSchema).min(1),
         verify: z.boolean().default(false),
       },
       outputSchema: {
@@ -906,29 +905,47 @@ function registerManageTools(server: McpServer): void {
           `undo_bulk_modify takes at most ${UNDO_LIMIT} messages, the size bulk_modify builds a plan for — this one lists ${total}.`,
         );
       }
+      for (const step of steps) {
+        const names = [...step.add, ...step.remove].filter((l) => !looksLikeLabelId(l));
+        if (names.length > 0) {
+          throw new ToolError(
+            "invalid_input",
+            `undo_bulk_modify takes label ids, as bulk_modify's plan carries them — not names: ${names.join(", ")}.`,
+          );
+        }
+        const both = step.add.filter((l) => step.remove.includes(l));
+        if (both.length > 0) {
+          throw new ToolError("invalid_input", `A step cannot add and remove the same label: ${both.join(", ")}.`);
+        }
+      }
       const gmail = await client();
       let submittedMessages = 0;
       const failed: { messageIds: string[]; error: string }[] = [];
-      const verified = { applied: 0, notApplied: [] as string[], unverifiable: [] as string[] };
+      const written: { ids: string[]; add: string[]; remove: string[] }[] = [];
       for (const step of steps) {
         if (step.messageIds.length === 0 || (step.add.length === 0 && step.remove.length === 0)) continue;
-        // The plan names threads per step, not per message; the thread id here is only
-        // used to choose what to read back, and `verifyThreads` supplies that.
+        // The plan names threads per step, not per message; thread ids are only needed for the
+        // read-back below, which reads the union of all steps' threads once.
         const res = await gmail.batchModifyMessages(
           step.messageIds.map((id) => ({ id, threadId: "" })),
           step.add,
           step.remove,
-          { verify, verifyThreads: step.threadIds },
         );
         submittedMessages += res.submittedMessages;
         failed.push(...res.failed);
-        if (res.verified) {
-          verified.applied += res.verified.applied;
-          verified.notApplied.push(...res.verified.notApplied);
-          verified.unverifiable.push(...res.verified.unverifiable);
-        }
+        const lost = new Set(res.failed.flatMap((f) => f.messageIds));
+        written.push({ ids: step.messageIds.filter((id) => !lost.has(id)), add: step.add, remove: step.remove });
       }
-      return ok({ submittedMessages, ...(verify ? { verified } : {}), failed });
+      if (!verify) return ok({ submittedMessages, failed });
+      const labels = await gmail.readLabels([...new Set(steps.flatMap((s) => s.threadIds))]);
+      const verified = { applied: 0, notApplied: [] as string[], unverifiable: [] as string[] };
+      for (const w of written) {
+        const v = classifyBatchModify(w.ids, labels, w.add, w.remove);
+        verified.applied += v.applied;
+        verified.notApplied.push(...v.notApplied);
+        verified.unverifiable.push(...v.unverifiable);
+      }
+      return ok({ submittedMessages, verified, failed });
     },
   );
 

@@ -734,7 +734,7 @@ describe("tool results — structured content + fenced text", () => {
     expect(batchBodies.at(-1)).toEqual({ ids: ["m1"], addLabelIds: ["INBOX"], removeLabelIds: [] });
   });
 
-  it("bulk_modify undo:true on a capped set builds no plan and says why", async () => {
+  it("bulk_modify undo:true on a capped set still builds the plan — it inverts what was changed", async () => {
     const reads: string[] = [];
     (getAuth as Mock).mockResolvedValue({
       users: {
@@ -742,7 +742,9 @@ describe("tool results — structured content + fenced text", () => {
           list: async () => ({ data: { messages: [{ id: "m1", threadId: "t1" }], nextPageToken: "more" } }),
           batchModify: async () => ({}),
         },
-        threads: { get: async (req: any) => (reads.push(req.id), { data: { messages: [] } }) },
+        threads: {
+          get: async (req: any) => (reads.push(req.id), { data: { messages: [{ id: "m1", labelIds: ["INBOX"] }] } }),
+        },
       },
     });
     const client = await connect();
@@ -750,9 +752,97 @@ describe("tool results — structured content + fenced text", () => {
       name: "bulk_modify",
       arguments: { query: "label:old", remove: ["INBOX"], maxMessages: 1, undo: true },
     });
-    expect(res.structuredContent.undo).toBeUndefined();
-    expect(res.structuredContent.undoUnavailable).toMatch(/capped/);
-    expect(reads).toHaveLength(0); // and pays for no reads it cannot use
+    expect(res.structuredContent.capped).toBe(true);
+    expect(res.structuredContent.undo.steps).toEqual([
+      { add: ["INBOX"], remove: [], messageIds: ["m1"], threadIds: ["t1"] },
+    ]);
+    expect(reads).toEqual(["t1"]);
+  });
+
+  it("bulk_modify undo:true writes nothing when the plan cannot be built", async () => {
+    let writes = 0;
+    const many = Array.from({ length: 501 }, (_, i) => ({ id: `m${i}`, threadId: `t${i}` }));
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: { list: async () => ({ data: { messages: many } }), batchModify: async () => (writes++, {}) },
+        threads: { get: async () => ({ data: { messages: [] } }) },
+      },
+    });
+    let client = await connect();
+    const tooMany: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "label:old", remove: ["INBOX"], undo: true },
+    });
+    expect(tooMany.isError).toBe(true);
+    expect(writes).toBe(0);
+
+    // A prior state that could not be read: t2 is gone. The change would be irreversible for m2.
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: {
+          list: async () => ({ data: { messages: [{ id: "m1", threadId: "t1" }, { id: "m2", threadId: "t2" }] } }),
+          batchModify: async () => (writes++, {}),
+        },
+        threads: {
+          get: async (req: any) => {
+            if (req.id === "t2") throw Object.assign(new Error("Not Found"), { code: 404 });
+            return { data: { messages: [{ id: "m1", labelIds: ["INBOX"] }] } };
+          },
+        },
+      },
+    });
+    client = await connect();
+    const unreadable: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "label:old", remove: ["INBOX"], undo: true },
+    });
+    expect(unreadable.isError).toBe(true);
+    expect(JSON.stringify(unreadable.content)).toMatch(/nothing was written/);
+    expect(writes).toBe(0);
+  });
+
+  it("bulk_modify refuses to add and remove the same label", async () => {
+    (getAuth as Mock).mockResolvedValue({ users: { messages: { list: async () => ({ data: {} }) } } });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "label:old", add: ["Done"], remove: ["done"] },
+    });
+    expect(res.isError).toBe(true);
+  });
+
+  it("undo_bulk_modify takes ids only, and reads each thread back once however many steps name it", async () => {
+    const reads: string[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: { batchModify: async () => ({}) },
+        threads: {
+          get: async (req: any) => (
+            reads.push(req.id),
+            { data: { messages: [{ id: "m1", labelIds: ["INBOX"] }, { id: "m2", labelIds: [] }] } }
+          ),
+        },
+      },
+    });
+    const client = await connect();
+    const named: any = await client.callTool({
+      name: "undo_bulk_modify",
+      arguments: { steps: [{ add: ["Archive/Old"], remove: [], messageIds: ["m1"], threadIds: ["t1"] }] },
+    });
+    expect(named.isError).toBe(true);
+
+    const res: any = await client.callTool({
+      name: "undo_bulk_modify",
+      arguments: {
+        verify: true,
+        steps: [
+          { add: ["INBOX"], remove: [], messageIds: ["m1"], threadIds: ["t1"] },
+          { add: [], remove: ["Label_9"], messageIds: ["m2"], threadIds: ["t1"] },
+        ],
+      },
+    });
+    expect(res.structuredContent.verified).toEqual({ applied: 2, notApplied: [], unverifiable: [] });
+    expect(reads).toEqual(["t1"]);
   });
 
   it("undo_bulk_modify refuses a plan larger than bulk_modify ever builds", async () => {
