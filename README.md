@@ -214,7 +214,8 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id; an optional `backgroundColor`/`textColor` pair colours it, including one that already exists |
 | `modify_labels` | Add/remove labels by **name or id** — an unknown name in `add` is auto-created (archive = remove `INBOX`, read = remove `UNREAD`) |
-| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `submittedThreadCount` has the total). Counts say **`submitted`**, because `messages.batchModify` answers `204` with no body and ignores unknown ids silently; `verify: true` reads the labels back and returns `verified` `{applied, notApplied, unverifiable}` — the only observed outcome on offer. Acts on the **raw index**, so `unverifiedPredicates` names the conditions it could not vouch for (see below). `dryRun: true` resolves the query and reports the matched threads and the labels it would create, touching nothing |
+| **`bulk_modify`** | Batch label changes for every message matching a query — 1000 messages per API request, partial success reported per chunk (thread-id list capped at 500, `submittedThreadCount` has the total). Counts say **`submitted`**, because `messages.batchModify` answers `204` with no body and ignores unknown ids silently; `verify: true` reads the labels back and returns `verified` `{applied, notApplied, unverifiable}` — the only observed outcome on offer. Acts on the **raw index**, so `unverifiedPredicates` names the conditions it could not vouch for (see below). `dryRun: true` resolves the query and reports the matched threads and the labels it would create, touching nothing. `undo: true` reads each affected thread's labels live before writing and returns `undo`, the exact per-message inverse (up to 500 messages, uncapped sets only) |
+| `undo_bulk_modify` | Replays the `undo` plan a `bulk_modify` returned: each message gets back exactly the labels it lost and loses exactly the ones it gained, so mail that was already in the target state stays as it was — which swapping `add` and `remove` would not do |
 | `archive` / `mark_read` / `mark_unread` | Convenience wrappers |
 | `trash` / `untrash` | Move to / restore from Trash |
 | `download_attachment` | Save an attachment to a local path (never overwrites — collisions get a numeric suffix) |
@@ -258,7 +259,8 @@ not uniform — fetching a thread is the expensive part, in whatever format it i
 | `trash`, `download_attachment` | 20 |
 | `archive`, `mark_read`, `untrash` | 10 |
 | `modify_labels`, `snooze` | 10, plus 1 for each label looked up by name and 5 for each label it has to create |
-| `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches |
+| `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches, `undo: true` 40 per thread |
+| `undo_bulk_modify` | 50 per step, plus 40 per thread with `verify: true` |
 | `list_labels`, `get_profile` | 1 |
 
 `mark_unread` costs what `mark_read` does.
@@ -641,8 +643,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 9 `read` + 14 `manage` + 3 `filters`, so a
-full instance advertises 26 tools and four of them advertise 104. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 9 `read` + 15 `manage` + 3 `filters`, so a
+full instance advertises 27 tools and four of them advertise 108. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to

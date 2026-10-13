@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **An exact undo for `bulk_modify`.** `undo: true` reads every affected thread's labels live
+  before writing and returns `undo`, the per-message inverse of the change: what each message lost
+  goes back, what it gained comes off, and a message that was already in the target state is left
+  out. The new `undo_bulk_modify` tool replays that plan. Swapping `add` and `remove` is not an
+  undo: archive a set of which some threads were already archived, and the swapped call puts those
+  in the inbox for the first time. The plan is built for up to 500 messages and for uncapped match
+  sets only, because it carries every message id through the context; otherwise `undoUnavailable`
+  says why. Prompted by `@agentcomms/gmail-mcp`, which returns an undo with every bulk change.
 - **A plugin icon.** A shield with an envelope inside, white strokes on a slate ground, drawn on a
   1000-unit grid: `assets/icon/icon.svg` is the source, `.claude-plugin/icon.png` the 1024 px render
   the plugin directory looks for, and `assets/icon/` holds the other sizes, two transparent glyphs

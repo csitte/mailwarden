@@ -50,6 +50,12 @@ cannot be easily reversed, and quote `verified.applied` — the only field that 
 observed. The same holds for `create_filter` with `applyToExisting`: its `applied.submittedMessages`
 is a submitted count, and `verify: true` adds `applied.verified`.
 
+**When the user may want it back, pass `undo: true`.** The result then carries `undo`, built from
+each message's labels read just before the write; hand `undo.steps` unchanged to
+`undo_bulk_modify` to revert. Do not revert by swapping `add` and `remove`: that also changes every
+message that was already in the target state. Without a plan, say that an exact undo is not
+available rather than improvising one.
+
 ## Unsubscribing
 
 - `list_unsubscribe` and `list_subscriptions` contact nobody. `unsubscribe` performs the RFC 8058

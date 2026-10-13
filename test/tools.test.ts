@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 26 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 27 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(26);
+    expect(tools).toHaveLength(27);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -83,7 +83,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("snooze");
     expect(names).not.toContain("search"); // no read tier
     expect(names).not.toContain("list_filters"); // no filters tier
-    expect(names).toHaveLength(14);
+    expect(names).toHaveLength(15);
   });
 
   it("hides the filters tier when the stored token is known to lack settings.basic", async () => {
@@ -93,7 +93,7 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("list_filters");
     expect(names).not.toContain("create_filter");
     expect(names).not.toContain("delete_filter");
-    expect(names).toHaveLength(23); // 26 - 3 filter tools
+    expect(names).toHaveLength(24); // 27 - 3 filter tools
   });
 });
 
@@ -681,6 +681,88 @@ describe("tool results — structured content + fenced text", () => {
       unverifiable: [],
     });
     expect(threadGets.sort()).toEqual(["t1", "t2"]);
+  });
+
+  it("bulk_modify undo:true reads the state first and returns the exact inverse, which undo_bulk_modify replays", async () => {
+    const calls: string[] = [];
+    const batchBodies: any[] = [];
+    // m1 was in the inbox, m2 was already archived: an archive changes only m1, and only
+    // m1 may go back — a swapped add/remove would put m2 in the inbox for the first time.
+    const labels: Record<string, string[]> = { m1: ["INBOX", "UNREAD"], m2: ["UNREAD"] };
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: {
+          list: async () => ({
+            data: { messages: [{ id: "m1", threadId: "t1" }, { id: "m2", threadId: "t2" }] },
+          }),
+          batchModify: async (req: any) => {
+            calls.push("write");
+            batchBodies.push(req.requestBody);
+            return {};
+          },
+        },
+        threads: {
+          get: async (req: any) => {
+            calls.push(`read:${req.id}`);
+            const id = req.id === "t1" ? "m1" : "m2";
+            return { data: { messages: [{ id, labelIds: labels[id] }] } };
+          },
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "label:old", remove: ["INBOX"], undo: true },
+    });
+    // Both reads happen before the write: an inverse built afterwards would be none.
+    expect(calls.indexOf("write")).toBeGreaterThan(calls.indexOf("read:t1"));
+    expect(calls.indexOf("write")).toBeGreaterThan(calls.indexOf("read:t2"));
+    expect(res.structuredContent.undo).toEqual({
+      steps: [{ add: ["INBOX"], remove: [], messageIds: ["m1"], threadIds: ["t1"] }],
+      unknown: [],
+    });
+    expect(res.structuredContent.undoUnavailable).toBeUndefined();
+
+    const back: any = await client.callTool({
+      name: "undo_bulk_modify",
+      arguments: { steps: res.structuredContent.undo.steps },
+    });
+    expect(back.isError).toBeFalsy();
+    expect(back.structuredContent.submittedMessages).toBe(1);
+    expect(batchBodies.at(-1)).toEqual({ ids: ["m1"], addLabelIds: ["INBOX"], removeLabelIds: [] });
+  });
+
+  it("bulk_modify undo:true on a capped set builds no plan and says why", async () => {
+    const reads: string[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        messages: {
+          list: async () => ({ data: { messages: [{ id: "m1", threadId: "t1" }], nextPageToken: "more" } }),
+          batchModify: async () => ({}),
+        },
+        threads: { get: async (req: any) => (reads.push(req.id), { data: { messages: [] } }) },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "label:old", remove: ["INBOX"], maxMessages: 1, undo: true },
+    });
+    expect(res.structuredContent.undo).toBeUndefined();
+    expect(res.structuredContent.undoUnavailable).toMatch(/capped/);
+    expect(reads).toHaveLength(0); // and pays for no reads it cannot use
+  });
+
+  it("undo_bulk_modify refuses a plan larger than bulk_modify ever builds", async () => {
+    (getAuth as Mock).mockResolvedValue({ users: { messages: { batchModify: async () => ({}) } } });
+    const client = await connect();
+    const ids = Array.from({ length: 501 }, (_, i) => `m${i}`);
+    const res: any = await client.callTool({
+      name: "undo_bulk_modify",
+      arguments: { steps: [{ add: ["INBOX"], remove: [], messageIds: ids, threadIds: ["t1"] }] },
+    });
+    expect(res.isError).toBe(true);
   });
 
   it("bulk_modify lists by query, batches, and reports partial success", async () => {

@@ -7,6 +7,7 @@ import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { parseAuthentication, type Authentication } from "./authentication.js";
 import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
 import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./history.js";
+import { buildUndo, type UndoPlan } from "./undo.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -124,6 +125,12 @@ export interface BatchModifyResult {
   failed: { messageIds: string[]; error: string }[];
   /** Present only when the caller asked to verify (costs one extra read per thread). */
   verified?: VerifiedBatchModify;
+  /**
+   * Present only when the caller asked for an undo: the per-message inverse of what was
+   * submitted, built from the labels read live just before the write. Messages in a
+   * failed chunk are not in it — nothing was changed for them.
+   */
+  undo?: UndoPlan;
 }
 
 /** A Gmail filter's match conditions — the subset mailwarden accepts/surfaces. */
@@ -1278,9 +1285,23 @@ export class Gmail {
     refs: MessageRef[],
     add: string[] = [],
     remove: string[] = [],
-    opts: { verify?: boolean } = {},
+    opts: {
+      verify?: boolean;
+      /** Read every affected thread's labels before writing and return the exact inverse. */
+      undo?: boolean;
+      /**
+       * Threads to read back for `verify`, when `refs` carry no thread ids — as when an undo
+       * plan is replayed, which names its threads per step rather than per message.
+       */
+      verifyThreads?: string[];
+    } = {},
   ): Promise<BatchModifyResult> {
     const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
+    // Read BEFORE the first write: an inverse built from the state after the change is
+    // no inverse at all. Live labels, not the index — this is the state being restored.
+    const before = opts.undo
+      ? await this.readLabelsBack([...new Set(refs.map((r) => r.threadId))])
+      : undefined;
     const submittedThreads = new Set<string>();
     const submittedIds: string[] = [];
     const failed: BatchModifyResult["failed"] = [];
@@ -1312,9 +1333,18 @@ export class Gmail {
     if (opts.verify && submittedIds.length > 0) {
       result.verified = classifyBatchModify(
         submittedIds,
-        await this.readLabelsBack([...submittedThreads]),
+        await this.readLabelsBack(opts.verifyThreads ?? [...submittedThreads]),
         addLabelIds,
         removeLabelIds,
+      );
+    }
+    if (before) {
+      const submitted = new Set(submittedIds);
+      result.undo = buildUndo(
+        refs.filter((r) => submitted.has(r.id)),
+        addLabelIds,
+        removeLabelIds,
+        before,
       );
     }
     return result;
