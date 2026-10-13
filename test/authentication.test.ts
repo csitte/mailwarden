@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAuthentication, type Authentication } from "../src/authentication.js";
+import { dkimAlignment, parseAuthentication, type Authentication } from "../src/authentication.js";
 import { parseMessage } from "../src/gmail.js";
 
 const H = (h: Record<string, string>) => Object.entries(h).map(([name, value]) => ({ name, value }));
@@ -413,6 +413,16 @@ describe("parseAuthentication — only Gmail's own report is read", () => {
     expect(a).toEqual({ unchecked: true, otherReports: 1 });
   });
 
+  it("reads a result written with spaces around '=' — RFC 8601 allows them", () => {
+    // Skipping `dkim = fail` would let the second, passing signature stand in for it.
+    const a = auth({ "Authentication-Results": "mx.google.com; dkim = fail header.d = x.example; dkim=pass header.d=x.example" });
+    expect(a.dkim).toBe("fail");
+    expect(a.signedBy).toBe("x.example");
+    expect(a.alsoReported).toEqual(["dkim=pass"]);
+    // Inside a quoted value the spaces stay.
+    expect(auth({ "Authentication-Results": 'mx.google.com; dmarc=pass header.from="a = b"' }).headerFrom).toBeUndefined();
+  });
+
   it("accepts Gmail's id with a port", () => {
     const a = auth({ "Authentication-Results": "mx.google.com:25; spf=pass smtp.mailfrom=a@x.example" });
     expect(a.spf).toBe("pass");
@@ -446,6 +456,12 @@ describe("parseAuthentication — dkimAligned", () => {
     expect(withFrom("a@authority.example", "mx.google.com; dkim=pass header.d=cloudflare-email.net").dkimAligned).toBe(false);
     expect(withFrom("a@bank.example", "mx.google.com; dkim=pass header.d=bank.example.evil.example").dkimAligned).toBe(false);
     expect(withFrom("a@bank.example", "mx.google.com; dkim=pass header.d=xbank.example").dkimAligned).toBe(false);
+  });
+
+  it("compares domains case- and trailing-dot-insensitively when called directly", () => {
+    expect(dkimAlignment("X.example", "x.example")).toBe(true);
+    expect(dkimAlignment("x.example.", "mail.x.example")).toBe(true);
+    expect(dkimAlignment("", "x.example")).toBeUndefined();
   });
 
   it("is absent for sibling subdomains — aligned or not, the tree alone cannot tell", () => {

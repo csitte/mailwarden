@@ -74,7 +74,7 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
     jobs.push(
       "archive, label, mark read/unread, trash/untrash (recoverable), bulk-change everything matching " +
         "a query, snooze a thread to a date/time or preset and sweep due snoozes back into the inbox, " +
-        "unsubscribe from newsletters (one-click, RFC 8058), and download attachments",
+        "unsubscribe from newsletters (one-click, RFC 8058), undo a bulk change exactly, and save attachments or whole threads to files",
     );
   }
   if (tiers.has("filters")) {

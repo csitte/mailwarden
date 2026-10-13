@@ -7,7 +7,7 @@
  * every `format=full` fetch already carries. Without it a caller is left with domain
  * spelling and gut feeling — which is exactly how a good phish gets through.
  *
- * Three things this module is careful about, because the input is attacker-supplied:
+ * Four things this module is careful about, because the input is attacker-supplied:
  *
  * 1. **Only Gmail's own report is read — the topmost one whose authserv-id is
  *    `mx.google.com`.** RFC 8601 §7.1 tells a reader to trust only the reports its own
@@ -17,7 +17,7 @@
  *    other id is never read, however convincing; `otherReports` counts every report that
  *    was not read, and a message with no report from Gmail is `unchecked`.
  *
- *    Until 0.22.1 this read the FIRST report whatever its id. That was right wherever
+ *    Through 0.22.1 this read the FIRST report whatever its id. That was right wherever
  *    Gmail had written one, and wrong exactly where it had not: a message with no Gmail
  *    report but a forged one of its own had that forgery read as the verdict, with only
  *    `authservId` to give it away. Measured on 13 October 2026 in two mailboxes before
@@ -93,7 +93,8 @@ export interface Authentication {
   alsoReported?: string[];
   /**
    * Whether a PASSING DKIM signature was made by the `From` domain or a parent or child of
-   * it. Absent when DKIM did not pass, or when either domain is unknown.
+   * it. Absent when DKIM did not pass, when either domain is unknown, or when the two are
+   * sibling subdomains that only a public-suffix list could judge.
    */
   dkimAligned?: boolean;
   /**
@@ -119,6 +120,27 @@ const DOMAIN_TOKEN = /^[a-z0-9_](?:[a-z0-9.\-_]{0,251}[a-z0-9_])?$/;
 
 /** An authserv-id may carry a port, so it allows one more character than a domain. */
 const AUTHSERV_TOKEN = /^[a-z0-9_](?:[a-z0-9.\-_:]{0,251}[a-z0-9_])?$/;
+
+/** Remove whitespace on either side of each `=` that sits outside double quotes. */
+function foldAroundEquals(v: string): string {
+  let out = "";
+  let quoted = false;
+  for (let i = 0; i < v.length; i++) {
+    const c = v[i];
+    if (quoted) {
+      out += c;
+      if (c === "\\" && i + 1 < v.length) out += v[++i];
+      else if (c === '"') quoted = false;
+    } else if (c === '"') {
+      quoted = true;
+      out += c;
+    } else if (c === "=") {
+      out = out.replace(/\s+$/, "") + "=";
+      while (i + 1 < v.length && /\s/.test(v[i + 1])) i++;
+    } else out += c;
+  }
+  return out;
+}
 
 /** Split at `sep` characters that sit outside double quotes. */
 function splitOutsideQuotes(v: string, sep: RegExp): string[] {
@@ -180,7 +202,9 @@ function parseResInfos(value: string): { authservId?: string; infos: ResInfo[] }
 
   const infos: ResInfo[] = [];
   for (const seg of segments) {
-    const tokens = splitOutsideQuotes(seg.trim(), /\s/).filter((t) => t !== "");
+    // RFC 8601 allows whitespace around "=" (`dkim = fail`). Without folding it the method
+    // would be skipped, and a second result for the same method would stand in for it.
+    const tokens = splitOutsideQuotes(foldAroundEquals(seg.trim()), /\s/).filter((t) => t !== "");
     if (tokens.length === 0) continue;
     const [methodPart, ...rest] = tokens;
     const eq = methodPart.indexOf("=");
@@ -218,7 +242,11 @@ function isTrusted(authservId: string | undefined): boolean {
  * labels (an organisational domain or a public suffix — undecidable without a list),
  * `false` otherwise.
  */
-export function dkimAlignment(signer: string, from: string): boolean | undefined {
+export function dkimAlignment(signerIn: string, fromIn: string): boolean | undefined {
+  const norm = (d: string) => d.trim().toLowerCase().replace(/\.+$/, "");
+  const signer = norm(signerIn);
+  const from = norm(fromIn);
+  if (signer === "" || from === "") return undefined;
   if (signer === from || signer.endsWith("." + from) || from.endsWith("." + signer)) return true;
   const a = signer.split(".").reverse();
   const b = from.split(".").reverse();

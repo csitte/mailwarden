@@ -801,6 +801,32 @@ describe("tool results — structured content + fenced text", () => {
     expect(writes).toBe(0);
   });
 
+  it("bulk_modify undo:true that cannot read the prior state creates no label either", async () => {
+    let creates = 0;
+    let writes = 0;
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        labels: {
+          list: async () => ({ data: { labels: [] } }),
+          create: async () => (creates++, { data: { id: "Label_new" } }),
+        },
+        messages: {
+          list: async () => ({ data: { messages: [{ id: "m1", threadId: "t1" }] } }),
+          batchModify: async () => (writes++, {}),
+        },
+        threads: { get: async () => { throw Object.assign(new Error("Not Found"), { code: 404 }); } },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "bulk_modify",
+      arguments: { query: "label:old", add: ["Brand/New"], undo: true },
+    });
+    expect(res.isError).toBe(true);
+    expect(creates).toBe(0);
+    expect(writes).toBe(0);
+  });
+
   it("bulk_modify refuses to add and remove the same label", async () => {
     (getAuth as Mock).mockResolvedValue({ users: { messages: { list: async () => ({ data: {} }) } } });
     const client = await connect();

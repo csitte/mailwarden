@@ -38,6 +38,15 @@ describe("htmlToText", () => {
     expect(htmlToText(html)).toBe("Hi there\n- one\n- two & three\nline\nbreak \u263A \u2603");
   });
 
+  it("keeps a bare < in text, unwraps CDATA, breaks on <br> with attributes", () => {
+    expect(htmlToText("a < b and c > d")).toBe("a < b and c > d");
+    expect(htmlToText("<![CDATA[x]]>ok")).toBe("xok");
+    expect(htmlToText("<br clear=all>x")).toBe("x");
+    expect(htmlToText("a<br clear=all>x")).toBe("a\nx");
+    // A removal cannot assemble a new script block from its own remains.
+    expect(htmlToText("<scr<script>z</script>ipt>hidden</script>ok")).toBe("ok");
+  });
+
   it("leaves an unknown or out-of-range entity as written", () => {
     expect(htmlToText("&bogus; &#99999999;")).toBe("&bogus; &#99999999;");
   });
@@ -147,6 +156,35 @@ describe("Gmail.exportThread writes under the download fence", () => {
   afterEach(async () => {
     vi.unstubAllEnvs();
     await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("strips the hidden characters every tool result is stripped of", async () => {
+    const g = gmail();
+    (g as unknown as { api: any }).api = {
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m1",
+                  threadId: "t1",
+                  labelIds: [],
+                  payload: {
+                    headers: [{ name: "Subject", value: "Pay\u200Bpal \u202Eexe.pdf" }],
+                    mimeType: "text/plain",
+                    body: { data: Buffer.from("x\u200By").toString("base64url") },
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    };
+    const r = await g.exportThread("t1", "h.json", "json");
+    const text = await fs.readFile(r.saved, "utf8");
+    expect(text).not.toMatch(/[\u200B\u202E]/);
   });
 
   it("writes inside the fence and never overwrites", async () => {

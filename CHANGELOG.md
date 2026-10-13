@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   than any backtick run in it, so the mail text cannot close the fence and render as part of the
   document; From, To, Subject and attachment names as inline code, so a preview cannot turn a
   subject into a tracking image or a sender name into a link; HTML-only mail is reduced to text) or
-  JSON exactly as `get_thread` returns it. The thread is fetched before any directory is created. For
+  JSON as `get_thread` returns it. Both formats strip the hidden characters every tool result is
+  stripped of. The thread is fetched before any directory is created. For
   keeping or handing on a conversation, or reading a long one without loading it into the context.
   Manage tier, like `download_attachment`, and under the same path rules: the path check is now one
   shared function, so `MAILWARDEN_DOWNLOAD_DIR` fences both, never overwrites for both, and the
@@ -24,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each thread is decided on its last message and that message's live labels, so a thread the index
   still lists under `in:inbox` after it was archived is dropped, as in `search`. Drafts and trashed
   or spam messages are never the last word, mail whose own headers mark it as a newsletter or as
-  automated is not "waiting on me", a note to the account's own address is not "waiting on them",
+  automated is not "waiting on me", a note to the account's own address is not "waiting on them" (To and Cc both count, as do the
+  spellings Gmail delivers to the same inbox: `+tags`, dots, `googlemail.com`),
   and a thread without a recorded date is left out rather than given an invented age. The two sides
   are fetched one after the other, so the call never runs more fetches at once than `search` does. Prompted by the follow-up views in other Gmail MCP servers.
 - **An exact undo for `bulk_modify`.** `undo: true` reads every affected thread's labels live
@@ -35,7 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the inbox for the first time. The plan is built for up to 500 messages, because it carries
   every message id through the context. With `undo: true` nothing is written unless the plan can be
   built: more messages than that, or a prior state that could not be read, is an error before the
-  first write. `undo_bulk_modify` takes label ids only, so an unknown name cannot be created instead
+  first write, and before any label named in `add` is created. `undo_bulk_modify` takes label ids only, so an unknown name cannot be created instead
   of restored, and with `verify` reads each thread back once. A label the bulk change created is
   taken off again but stays in the mailbox, empty. Adding and removing the same label in one call
   is refused. Prompted by `@agentcomms/gmail-mcp`, which returns an undo with every bulk change.
@@ -106,7 +108,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **New `dkimAligned` field.** Whether a passing DKIM signature was made by the `From` domain or a
   parent or child of it — relaxed alignment approximated by the domain tree, which is sound because
   a signing domain has to publish its key in its own DNS. `dkim: "pass"` alone says only that
-  someone signed. Absent when DKIM did not pass, a domain is unknown, or the two are sibling
+  someone signed. Results written with spaces around `=`, which RFC 8601 allows, are read too.
+  Absent when DKIM did not pass, a domain is unknown, or the two are sibling
   subdomains: `news.bank.example`/`mail.bank.example` are aligned and `a.co.uk`/`b.co.uk` are not,
   and without a public-suffix list they look alike — so the field says nothing rather than a
   `false` that would read as suspicious.

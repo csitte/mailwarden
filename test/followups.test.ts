@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { waitingOnMe, waitingOnThem, type TailMessage, type ThreadTail } from "../src/followups.js";
+import { mailboxKey, waitingOnMe, waitingOnThem, type TailMessage, type ThreadTail } from "../src/followups.js";
 
 const NOW = new Date("2026-10-13T12:00:00Z");
 const daysAgo = (n: number) => NOW.getTime() - n * 24 * 60 * 60 * 1000;
@@ -47,6 +47,27 @@ describe("waitingOnThem", () => {
     // Sent to someone else as well: that someone may still answer.
     const cc = thread("t2", msg(["SENT", "INBOX"], 5, { to: "me@y.example, ann@x.example" }));
     expect(waitingOnThem([cc], NOW, 3, ["me@y.example"])).toHaveLength(1);
+  });
+
+  it("keeps a note to myself that also went to someone else, in To or Cc", () => {
+    const own = ["chris@gmail.com"];
+    for (const [to, cc] of [
+      ["chris@gmail.com, boss@corp.example", undefined],
+      ["Me <chris@gmail.com>, Boss <boss@corp.example>", undefined],
+      ["Team: chris@gmail.com, boss@corp.example;", undefined],
+      ["chris@gmail.com", "boss@corp.example"],
+    ] as const) {
+      expect(waitingOnThem([thread("t", msg(["SENT"], 5, { to, cc }))], NOW, 3, own), `${to} / ${cc}`).toHaveLength(1);
+    }
+  });
+
+  it("recognises my own address in the spellings Gmail delivers to the same inbox", () => {
+    const own = ["chris@gmail.com"];
+    for (const to of ["chris+todo@gmail.com", "c.h.r.i.s@gmail.com", "chris@googlemail.com", "Chris@Gmail.com."]) {
+      expect(waitingOnThem([thread("t", msg(["SENT"], 5, { to }))], NOW, 3, own), to).toEqual([]);
+    }
+    // Dots matter outside Gmail.
+    expect(mailboxKey("c.hris@corp.example")).toBe("c.hris@corp.example");
   });
 
   it("leaves out a thread whose last message has no date instead of inventing an age", () => {

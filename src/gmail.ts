@@ -10,6 +10,7 @@ import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./
 import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
 import { renderThread, type ExportFormat } from "./export.js";
+import { sanitizeStructured } from "./sanitize.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -870,6 +871,7 @@ const GET_CONCURRENCY = 8;
 const TAIL_HEADERS = [
   "From",
   "To",
+  "Cc",
   "Subject",
   "List-Id",
   "List-Unsubscribe",
@@ -1075,7 +1077,10 @@ export class Gmail {
             return {
               labelIds: m.labelIds ?? [],
               from: decodeAddressHeader(header(m, "From")),
-              to: decodeAddressHeader(header(m, "To")),
+              // The whole address list, not the first mailbox: deciding "a note to myself"
+              // needs every recipient, and the result names who the mail went to.
+              to: decodeRfc2047(header(m, "To")),
+              cc: decodeRfc2047(header(m, "Cc")),
               ...(Number.isFinite(ms) && ms > 0 ? { dateMs: ms } : {}),
               signals: messageSignals(m),
             };
@@ -1384,9 +1389,9 @@ export class Gmail {
       verifyThreads?: string[];
     } = {},
   ): Promise<BatchModifyResult> {
-    const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
-    // Read BEFORE the first write: an inverse built from the state after the change is
-    // no inverse at all. Live labels, not the index — this is the state being restored.
+    // Read BEFORE the first write — and before resolving labels, which creates any unknown
+    // name in `add`: an undo that cannot be built must leave the mailbox exactly as it was,
+    // labels included. Live labels, not the index — this is the state being restored.
     const before = opts.undo
       ? await this.readLabelsBack([...new Set(refs.map((r) => r.threadId))])
       : undefined;
@@ -1399,6 +1404,7 @@ export class Gmail {
         `An undo was requested, and the labels of ${unread} of ${refs.length} messages could not be read before the change, so nothing was written. Retry in a minute, or run without undo.`,
       );
     }
+    const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
     const submittedThreads = new Set<string>();
     const submittedIds: string[] = [];
     const failed: BatchModifyResult["failed"] = [];
@@ -1727,7 +1733,9 @@ export class Gmail {
   }> {
     // Fetch first: a thread that does not exist must not leave empty directories behind.
     const thread = await this.getThread(threadId, true);
-    const messages = thread.messages as ParsedMessage[];
+    // The same hidden-character stripping every tool result gets: zero-width and bidi
+    // controls the sender put in a header or body must not survive into a file either.
+    const messages = sanitizeStructured(thread.messages as ParsedMessage[]);
     const dest = await resolveLocalDest(destPath);
     const buf = Buffer.from(renderThread(threadId, messages, format, new Date()), "utf8");
     return { saved: await writeUnique(dest, buf), messageCount: messages.length, bytes: buf.length };

@@ -22,7 +22,7 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
 - **Sender authentication, not sender spelling.** `get_thread` reports the SPF/DKIM/DMARC results
   the receiving server recorded, so "is this really from my bank?" is answered from the message's
   own headers instead of from how the domain looks. It reads Gmail's own report only — the one
-  signed off by `mx.google.com`; a message can carry forged ones of its own — says whether a passing
+  written under the id `mx.google.com`; a message can carry forged ones of its own — says whether a passing
   DKIM signature belongs to the `From` domain, and says `unchecked` when nobody checked, because a
   missing check is not a passing one.
 - **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
@@ -202,7 +202,7 @@ reached the mailbox without passing Gmail's inbound mail server — fetched from
 POP, or inserted by an app — may carry no Gmail report at all, and a forged one that *claims*
 `mx.google.com` is then indistinguishable from the real thing. Mail Gmail received itself always
 carries its own report on top, so there a forgery is never read; `otherReports` counts every report
-that was not read. (Until 0.22.1 the first report was read whatever its id — right wherever Gmail
+that was not read. (Through 0.22.1 the first report was read whatever its id — right wherever Gmail
 had written one, and wrong exactly where it had not.) Values are validated as tokens rather than passed through, so a field that reads
 like a verdict cannot carry a sentence. If two results for the same method disagree — a second DKIM
 signature that failed — the disagreement shows up in `alsoReported` instead of being swallowed.
@@ -217,7 +217,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting |
 | `what_changed` | Mailbox events since a `historyId` you hold — arrivals, removals, labels on and off, in one call |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |
-| `follow_ups` | Who is waiting on whom: threads whose last message is yours and unanswered for a few days (a note to your own address is left out), and inbox threads whose last message came from a person rather than a newsletter or a no-reply notice. Decided on each thread's last message and its **live** labels, so a thread the index still files under the inbox after it was archived is dropped |
+| `follow_ups` | Who is waiting on whom: threads whose last message is yours and unanswered for a few days (a note to your own address is left out; one other recipient in To or Cc keeps it), and inbox threads whose last message came from a person rather than a newsletter or a no-reply notice. Decided on each thread's last message and its **live** labels, so a thread the index still files under the inbox after it was archived is dropped |
 | `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`), plus body links when it advertises none — contacts nobody |
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id; an optional `backgroundColor`/`textColor` pair colours it, including one that already exists |

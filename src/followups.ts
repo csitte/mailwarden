@@ -22,6 +22,8 @@ export interface TailMessage {
   labelIds: string[];
   from: string;
   to: string;
+  /** The `Cc` header as written; recipients there can answer too. */
+  cc?: string;
   /** Gmail's internal date in epoch milliseconds; `undefined` when absent. */
   dateMs?: number;
   signals: Signal[];
@@ -69,12 +71,31 @@ function daysSince(dateMs: number, now: Date): number {
 }
 
 /**
+ * One mailbox, however it is spelled: lower case, no trailing dot, no `+tag`, and for Gmail
+ * addresses no dots in the local part and `googlemail.com` as `gmail.com` — the spellings
+ * Gmail delivers to the same inbox. Only for comparing; never shown.
+ */
+export function mailboxKey(address: string): string {
+  const a = address.trim().toLowerCase().replace(/\.+$/, "");
+  const at = a.lastIndexOf("@");
+  if (at === -1) return a;
+  let local = a.slice(0, at);
+  let domain = a.slice(at + 1);
+  const plus = local.indexOf("+");
+  if (plus > 0) local = local.slice(0, plus);
+  if (domain === "googlemail.com") domain = "gmail.com";
+  if (domain === "gmail.com") local = local.replace(/\./g, "");
+  return `${local}@${domain}`;
+}
+
+/**
  * Threads whose last message is yours and at least `nudgeAfterDays` old. Without a date the
  * age cannot be judged, and the thread is left out rather than shown with a made-up one.
  *
- * A note to yourself waits on nobody: a last message whose every `To` address is one of
- * `ownAddresses` is left out. Only the addresses passed in count — the account's primary
- * address is what the tool knows; a note sent to a send-as alias still shows.
+ * A note to yourself waits on nobody: a last message whose every recipient, `To` and `Cc`,
+ * is one of `ownAddresses` (in any spelling `mailboxKey` folds) is left out. One other
+ * recipient is enough to keep it: that person can still answer. Only the addresses passed
+ * in count — the tool knows the account's primary address; a send-as alias still shows.
  */
 export function waitingOnThem(
   threads: ThreadTail[],
@@ -82,13 +103,13 @@ export function waitingOnThem(
   nudgeAfterDays: number,
   ownAddresses: string[] = [],
 ): WaitingOnThem[] {
-  const own = new Set(ownAddresses.map((a) => a.toLowerCase()));
+  const own = new Set(ownAddresses.map(mailboxKey));
   const out: WaitingOnThem[] = [];
   for (const t of threads) {
     const last = lastMessage(t);
     if (!last || !last.labelIds.includes("SENT") || last.dateMs === undefined) continue;
-    const to = addressesOf(last.to);
-    if (to.length > 0 && to.every((a) => own.has(a))) continue;
+    const recipients = [...addressesOf(last.to), ...addressesOf(last.cc)];
+    if (recipients.length > 0 && recipients.every((a) => own.has(mailboxKey(a)))) continue;
     const days = daysSince(last.dateMs, now);
     if (days < nudgeAfterDays) continue;
     out.push({

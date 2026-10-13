@@ -23,13 +23,22 @@ export type ExportFormat = "markdown" | "json";
 /** Reduce an HTML body to readable text. Not a sanitizer: the output is never rendered. */
 export function htmlToText(html: string): string {
   const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
-  return html
-    .replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, "")
+  // Repeat until nothing changes, so a removal cannot assemble the next block from its
+  // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
+  // stays, as a browser shows it.
+  let s = html;
+  for (let prev = ""; prev !== s; ) {
+    prev = s;
+    s = s.replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, "");
+  }
+  return s
     .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+    .replace(/<br\b[^>]*>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|table|blockquote)\s*>/gi, "\n")
     .replace(/<li\b[^>]*>/gi, "- ")
-    .replace(/<[^>]+>/g, "")
+    // A tag starts with a letter, `/` or `!`; `a < b and c > d` is text, not a tag.
+    .replace(/<[/!]?[a-zA-Z][^>]*>/g, "")
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
       if (e[0] === "#") {
         const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
