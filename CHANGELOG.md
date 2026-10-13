@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unaffected; this is about the plugin alone.
 
 ### Fixed
+- **The comparison table understated Google's own Gmail MCP server on structured outputs.**
+  Its tool reference documents an output schema for every tool, and has since July; the reading of
+  3 September 2026 recorded none, so the README cell said "not offered" and `docs/ROADMAP.md` said
+  no server in the table declares one on more than a single tool. Both are corrected after a full
+  re-read on 13 October 2026, which also found an eleventh tool (`create_label`) the old list missed.
+  No other Google cell moves. The `a-bonus` column is brought forward to `d9e9bb21` in the same pass;
+  no cell moves there. The table's date marker moves to 10 October 2026, its oldest column check.
 - **`npm run mcpb` failed on a Windows machine whose Node lives under a path with a space.** The
   spawn helper in `scripts/lib/run.mjs` quoted every argument for the shell but not the command
   itself, so `process.execPath` = `C:\Program Files\nodejs\node.exe` reached cmd.exe as

@@ -47,7 +47,9 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 That is the whole list, and the short list is the finding rather than an omission. The September
 2026 survey turned up no capability gap worth closing: of the five servers in the README's
 comparison table, none has snooze, none re-verifies a search result against live labels, none reads
-`Authentication-Results`, and none declares an `outputSchema` on more than a single tool. What it
+`Authentication-Results`. (This sentence also said that none declares an `outputSchema` on more
+than a single tool. That was wrong for Google's own server, whose reference documents an output
+schema for every tool; corrected on 2026-10-13.) What it
 did turn up was a way of doing something this project already does — `aaronsb/google-workspace-mcp`
 checks an account's access level against the *granted* scopes at call time, where scope gating here
 happened only at registration — and that has been adopted (see `CHANGELOG.md`). The next entry on
