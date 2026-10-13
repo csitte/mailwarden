@@ -210,6 +210,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting |
 | `what_changed` | Mailbox events since a `historyId` you hold — arrivals, removals, labels on and off, in one call |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |
+| `follow_ups` | Who is waiting on whom: threads whose last message is yours and unanswered for a few days, and inbox threads whose last message came from a person rather than a newsletter or a no-reply notice. Decided on each thread's last message and its **live** labels, so a thread the index still files under the inbox after it was archived is dropped |
 | `list_unsubscribe` | What opt-out options a thread advertises (`List-Unsubscribe`), plus body links when it advertises none — contacts nobody |
 | **`list_subscriptions`** | A mailbox slice grouped by *sender*: thread/unread counts, the date span each was seen over, and each one's opt-out options — one header fetch per sender, contacts nobody. `sendersFound` reports how many senders there were before `topN` truncated the list |
 | `create_label` | Create a user label (idempotent; nested via `Parent/Child`) and return its id; an optional `backgroundColor`/`textColor` pair colours it, including one that already exists |
@@ -261,6 +262,7 @@ not uniform — fetching a thread is the expensive part, in whatever format it i
 | `modify_labels`, `snooze` | 10, plus 1 for each label looked up by name and 5 for each label it has to create |
 | `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches, `undo: true` 40 per thread |
 | `undo_bulk_modify` | 50 per step, plus 40 per thread with `verify: true` |
+| `follow_ups` | 10 per list page, plus 40 per thread scanned — up to 50 threads at the defaults, about 2,000 |
 | `list_labels`, `get_profile` | 1 |
 
 `mark_unread` costs what `mark_read` does.
@@ -643,8 +645,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 9 `read` + 15 `manage` + 3 `filters`, so a
-full instance advertises 27 tools and four of them advertise 108. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 10 `read` + 15 `manage` + 3 `filters`, so a
+full instance advertises 28 tools and four of them advertise 112. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to

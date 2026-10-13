@@ -65,7 +65,8 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   if (tiers.has("read")) {
     jobs.push(
       "search and read mail (search results are re-verified against live labels, so `is:unread`-style " +
-        "predicates are trustworthy), list labels, get a triage digest of a mailbox slice, and list " +
+        "predicates are trustworthy), list labels, get a triage digest of a mailbox slice, find who is " +
+        "waiting on whom (unanswered sent mail, unanswered inbox mail), and list " +
         "subscriptions/newsletters by sender with their opt-out options",
     );
   }
@@ -79,7 +80,7 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   if (tiers.has("filters")) {
     jobs.push("list, create and delete server-side Gmail filters (auto-triage rules; label actions only)");
   }
-  const triggers = ["asks about their Gmail inbox, specific emails or newsletters"];
+  const triggers = ["asks about their Gmail inbox, specific emails, newsletters or what still needs a reply"];
   if (tiers.has("manage")) triggers.push("wants to organize, defer (snooze) or clean up mail");
   if (tiers.has("filters")) triggers.push("wants Gmail to auto-triage incoming mail with rules");
   const scope =

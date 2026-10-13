@@ -8,6 +8,7 @@ import { parseAuthentication, type Authentication } from "./authentication.js";
 import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
 import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./history.js";
 import { buildUndo, type UndoPlan } from "./undo.js";
+import type { ThreadTail } from "./followups.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -861,6 +862,22 @@ const FILTER_SCAN_CAP = 100;
 /** Max concurrent threads.get calls while resolving search candidates. */
 const GET_CONCURRENCY = 8;
 
+/**
+ * Headers a follow-up decision reads: who, to whom, about what, and the ones the
+ * `newsletter` and `automated` signals are derived from.
+ */
+const TAIL_HEADERS = [
+  "From",
+  "To",
+  "Subject",
+  "List-Id",
+  "List-Unsubscribe",
+  "Precedence",
+  "Auto-Submitted",
+  "X-Auto-Response-Suppress",
+  "Reply-To",
+] as const;
+
 export interface SearchResult {
   threads: ThreadSummary[];
   /** Present when more results exist — pass back to `search` to fetch the next page. */
@@ -998,6 +1015,76 @@ export class Gmail {
    * parameter — not the search index, which can lag behind recent label changes —
    * and needs only cheap list pages, no per-thread fetch.
    */
+  /**
+   * Candidate threads for `follow_ups`, each with every message's labels, sender, recipients,
+   * internal date and header signals — what deciding "who wrote last" needs, and no body.
+   *
+   * `format=metadata` with the headers named, as `getThread(…, false)` does, so a header
+   * cannot be missing because it was not asked for. The calendar signal needs MIME parts,
+   * which this format omits; it plays no part in the follow-up decision.
+   *
+   * Returns `hasMore` when the listing had further pages. A thread that vanished between
+   * list and get is skipped; a quota refusal fails the call, as in `search`, because a list
+   * shortened by the quota reads exactly like a list with nothing more to show.
+   */
+  async listThreadTails(query: string, max: number): Promise<{ threads: ThreadTail[]; hasMore: boolean }> {
+    const ids: string[] = [];
+    let token: string | undefined;
+    do {
+      const pageToken = token;
+      const list = await this.req(() =>
+        this.api.users.threads.list({
+          userId: "me",
+          q: query,
+          maxResults: max - ids.length,
+          ...(pageToken ? { pageToken } : {}),
+        }),
+      );
+      ids.push(...(list.data.threads ?? []).map((t) => t.id!));
+      token = list.data.nextPageToken ?? undefined;
+    } while (token && ids.length < max);
+
+    const threads: ThreadTail[] = [];
+    for (let i = 0; i < ids.length; i += GET_CONCURRENCY) {
+      const chunk = ids.slice(i, i + GET_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        chunk.map((id) =>
+          this.req(() =>
+            this.api.users.threads.get({
+              userId: "me",
+              id,
+              format: "metadata",
+              metadataHeaders: [...TAIL_HEADERS],
+            }),
+          ),
+        ),
+      );
+      const throttled = settled.find((s) => s.status === "rejected" && isThrottled(s.reason));
+      if (throttled) throw (throttled as PromiseRejectedResult).reason;
+      for (const [j, s] of settled.entries()) {
+        if (s.status !== "fulfilled") continue;
+        const msgs = s.value.data.messages ?? [];
+        const header = (m: gmail_v1.Schema$Message, n: string) =>
+          m.payload?.headers?.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+        threads.push({
+          threadId: chunk[j],
+          subject: msgs[0] ? decodeRfc2047(header(msgs[0], "Subject")) : "",
+          messages: msgs.map((m) => {
+            const ms = Number(m.internalDate);
+            return {
+              labelIds: m.labelIds ?? [],
+              from: decodeAddressHeader(header(m, "From")),
+              to: decodeAddressHeader(header(m, "To")),
+              ...(Number.isFinite(ms) && ms > 0 ? { dateMs: ms } : {}),
+              signals: messageSignals(m),
+            };
+          }),
+        });
+      }
+    }
+    return { threads, hasMore: token !== undefined };
+  }
+
   async listThreadIdsByLabel(labelId: string): Promise<string[]> {
     const ids: string[] = [];
     let pageToken: string | undefined;

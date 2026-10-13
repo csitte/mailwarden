@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 27 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 28 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(27);
+    expect(tools).toHaveLength(28);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -52,6 +52,7 @@ describe("registerTools — tool surface", () => {
     const client = await connect();
     const { tools } = await client.listTools();
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "follow_ups",
       "get_profile",
       "get_thread",
       "list_labels",
@@ -73,7 +74,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("create_filter"); // filters tier
     expect(names).not.toContain("archive"); // manage tier excluded
     expect(names).not.toContain("snooze");
-    expect(names).toHaveLength(12); // 9 read + 3 filters
+    expect(names).toHaveLength(13); // 10 read + 3 filters
   });
 
   it("MAILWARDEN_TOOLS can register a single tier on its own", async () => {
@@ -93,7 +94,7 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("list_filters");
     expect(names).not.toContain("create_filter");
     expect(names).not.toContain("delete_filter");
-    expect(names).toHaveLength(24); // 27 - 3 filter tools
+    expect(names).toHaveLength(25); // 28 - 3 filter tools
   });
 });
 
@@ -763,6 +764,48 @@ describe("tool results — structured content + fenced text", () => {
       arguments: { steps: [{ add: ["INBOX"], remove: [], messageIds: ids, threadIds: ["t1"] }] },
     });
     expect(res.isError).toBe(true);
+  });
+
+  it("follow_ups decides on each thread's last message and live labels", async () => {
+    const day = 24 * 60 * 60 * 1000;
+    const at = (d: number) => String(Date.now() - d * day);
+    const h = (from: string, extra: { name: string; value: string }[] = []) => ({
+      headers: [{ name: "From", value: from }, { name: "To", value: "me@y.example" }, { name: "Subject", value: "Hi" }, ...extra],
+    });
+    const threads: Record<string, any> = {
+      // Mine, unanswered for five days.
+      s1: [{ id: "a", labelIds: ["SENT"], internalDate: at(5), payload: h("me@y.example") }],
+      // Answered: not waiting on anyone.
+      s2: [
+        { id: "b", labelIds: ["SENT"], internalDate: at(6), payload: h("me@y.example") },
+        { id: "c", labelIds: ["INBOX"], internalDate: at(1), payload: h("x@x.example") },
+      ],
+      // A person waits on me.
+      i1: [{ id: "d", labelIds: ["INBOX", "UNREAD"], internalDate: at(2), payload: h("Ann <ann@x.example>") }],
+      // A newsletter does not.
+      i2: [{ id: "e", labelIds: ["INBOX"], internalDate: at(2), payload: h("news@x.example", [{ name: "List-Id", value: "<n.x.example>" }]) }],
+      // The index still lists it under the inbox; its labels say it was archived.
+      i3: [{ id: "f", labelIds: [], internalDate: at(3), payload: h("bob@x.example") }],
+    };
+    const getReqs: any[] = [];
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          list: async (req: any) => ({
+            data: { threads: (req.q.startsWith("in:sent") ? ["s1", "s2"] : ["i1", "i2", "i3"]).map((id) => ({ id })) },
+          }),
+          get: async (req: any) => (getReqs.push(req), { data: { id: req.id, messages: threads[req.id] } }),
+        },
+      },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "follow_ups", arguments: {} });
+    const sc = res.structuredContent;
+    expect(sc.waitingOnThem.map((t: any) => [t.threadId, t.daysWaiting])).toEqual([["s1", 5]]);
+    expect(sc.waitingOnMe.map((t: any) => [t.threadId, t.from, t.unread])).toEqual([["i1", "Ann <ann@x.example>", true]]);
+    expect(sc.scanned).toEqual({ sent: 2, inbox: 3 });
+    // No body is fetched for this.
+    expect(getReqs.every((r) => r.format === "metadata" && r.metadataHeaders.includes("List-Id"))).toBe(true);
   });
 
   it("bulk_modify lists by query, batches, and reports partial success", async () => {

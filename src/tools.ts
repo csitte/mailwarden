@@ -17,6 +17,7 @@ import { fenceOutput, sanitizeStructured } from "./sanitize.js";
 import { classifyError } from "./errors.js";
 import { ToolError } from "./cli.js";
 import { UNDO_LIMIT } from "./undo.js";
+import { waitingOnMe, waitingOnThem } from "./followups.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -504,6 +505,62 @@ function registerReadTools(server: McpServer): void {
       // Over-reports only when exactly `max` matched — the safe direction.
       const hasMore = result.nextPageToken != null || result.threads.length >= max;
       return ok({ query, hasMore, ...digest });
+    },
+  );
+
+  registerTool(
+    "follow_ups",
+    {
+      description:
+        "Who is waiting on whom. `waitingOnThem`: threads whose LAST message is yours (SENT) and has had no answer for at least nudgeAfterDays — candidates for a nudge. `waitingOnMe`: threads still in the inbox whose last message came from someone else — a person, not a newsletter or an automated notice by its own headers — oldest first. " +
+        "Decided on each thread's last message and its LIVE labels: the search index only proposes candidates (`in:sent` / `in:inbox` within the last `days`), so a thread the index still files under the inbox after it was archived is dropped, as in search. Drafts, trash and spam messages do not count as a thread's last word. " +
+        "Scans at most `max` threads per side; `hasMore` says when more candidates existed. A thread with no recorded date is left out rather than given an invented age. " +
+        "USE WHEN: 'what am I waiting on?', 'who have I not answered?', 'what should I follow up on?' " +
+        "DO NOT USE: as an inbox overview (use triage_digest) or to read a thread (use get_thread). " +
+        "SIDE EFFECTS: none.",
+      inputSchema: {
+        days: z.number().int().min(1).max(180).default(30),
+        nudgeAfterDays: z.number().int().min(0).max(90).default(3),
+        max: z.number().int().min(1).max(100).default(25),
+      },
+      outputSchema: {
+        waitingOnThem: z.array(
+          z.object({
+            threadId: z.string(),
+            subject: z.string(),
+            to: z.string(),
+            lastSentAt: z.string(),
+            daysWaiting: z.number(),
+          }),
+        ),
+        waitingOnMe: z.array(
+          z.object({
+            threadId: z.string(),
+            subject: z.string(),
+            from: z.string(),
+            lastReceivedAt: z.string(),
+            daysWaiting: z.number(),
+            unread: z.boolean(),
+          }),
+        ),
+        scanned: z.object({ sent: z.number(), inbox: z.number() }),
+        hasMore: z.object({ sent: z.boolean(), inbox: z.boolean() }),
+      },
+      annotations: { title: "Follow-ups", ...readOnly },
+    },
+    async ({ days, nudgeAfterDays, max }) => {
+      const gmail = await client();
+      const [sent, inbox] = await Promise.all([
+        gmail.listThreadTails(`in:sent newer_than:${days}d`, max),
+        gmail.listThreadTails(`in:inbox newer_than:${days}d`, max),
+      ]);
+      const now = new Date();
+      return ok({
+        waitingOnThem: waitingOnThem(sent.threads, now, nudgeAfterDays),
+        waitingOnMe: waitingOnMe(inbox.threads, now),
+        scanned: { sent: sent.threads.length, inbox: inbox.threads.length },
+        hasMore: { sent: sent.hasMore, inbox: inbox.hasMore },
+      });
     },
   );
 
