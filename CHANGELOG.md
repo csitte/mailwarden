@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   check listed the missing icon as a warning; the listing otherwise shows a blank tile.
 
 ### Changed
+- **`docs/SETUP.md` explains Google's new "AI-powered agent" checkbox on OAuth clients.** It is a
+  self-declaration that grants nothing and that mailwarden does not need: it gates Google's own
+  hosted Workspace MCP servers, and mailwarden talks only to the Gmail REST API. The guide
+  recommends ticking it because it is the accurate answer, and warns that Google fixes the setting
+  for existing clients after a cut-over date.
 - **The Claude Code plugin pins the package it launches.** `.claude-plugin/plugin.json` now starts
   `npx -y mailwarden@<version>` instead of `npx -y mailwarden`, carries a `version` of its own, and
   the setup skill's `--auth`/`--check` commands name the same version. Anthropic's plugin directory

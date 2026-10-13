@@ -75,7 +75,8 @@ changes token lifetime and shows a one-time warning screen (next section).
 1. Go to **APIs & Services → Credentials** → **Create credentials → OAuth client ID**.
 2. **Application type: Desktop app.** (Not "Web application" — the desktop type is what
    allows the localhost redirect that `mailwarden --auth` uses.)
-3. Name it anything → **Create**.
+3. Name it anything. **Tick "Use this client for an AI-powered agent"** if your console shows it
+   (see below) → **Create**.
 4. In the confirmation dialog (or via the download icon in the client list), **download the
    JSON** file.
 5. Save it as `~/.mailwarden/credentials.json`:
@@ -97,6 +98,29 @@ changes token lifetime and shows a one-time warning screen (next section).
 
 > Treat this file like a password. It identifies *your* OAuth client; combined with a
 > refresh token it grants mailbox access. Don't commit it anywhere.
+
+### The "AI-powered agent" checkbox
+
+Since October 2026 the Cloud Console lets you mark an OAuth client as one that an AI agent uses.
+Google's help page calls the setting **"Use this client for an AI-powered agent"** and describes it
+as a self-declaration: it grants no extra scopes or privileges, and consent and app verification
+stay exactly as they were
+([Manage OAuth Clients](https://support.google.com/cloud/answer/15549257)).
+
+**mailwarden works either way.** The mark only matters for Google's own hosted Workspace MCP
+servers, which Google says will accept agentic clients only. mailwarden never calls those: it talks
+to the Gmail REST API, and its egress guard allows nothing else.
+
+**Tick it anyway, it is the accurate answer.** mailwarden is driven by an AI assistant, and Google
+asks for clients like that to be marked even when they use only the REST APIs. Two things worth
+knowing before you decide:
+
+- Google's notice to Cloud customers says the setting becomes **fixed** for existing clients after
+  a cut-over date; changing it later then means a new OAuth client, a new `credentials.json` and a
+  new `--auth`. For an existing client, set it under **APIs & Services → Credentials → your
+  client → edit**.
+- In a Google Workspace organisation, an administrator can apply separate policies to agentic
+  clients. On a personal Gmail account there is no such administrator.
 
 ## 5. Authorize once
 
