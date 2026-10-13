@@ -448,6 +448,15 @@ describe("parseAuthentication — dkimAligned", () => {
     expect(withFrom("a@bank.example", "mx.google.com; dkim=pass header.d=xbank.example").dkimAligned).toBe(false);
   });
 
+  it("is absent for sibling subdomains — aligned or not, the tree alone cannot tell", () => {
+    // news.bank.example / mail.bank.example are aligned under RFC 7489; a.co.uk / b.co.uk are
+    // not. Both share two trailing labels, and a `false` on the first would read as suspicious.
+    expect(withFrom("a@news.bank.example", "mx.google.com; dkim=pass header.d=mail.bank.example").dkimAligned).toBeUndefined();
+    expect(withFrom("a@a.co.uk", "mx.google.com; dkim=pass header.d=b.co.uk").dkimAligned).toBeUndefined();
+    // Sharing only the top-level domain decides it.
+    expect(withFrom("a@bank.example", "mx.google.com; dkim=pass header.d=evil.example").dkimAligned).toBe(false);
+  });
+
   it("compares IDN domains in one form", () => {
     expect(withFrom("a@münchen.example", "mx.google.com; dkim=pass header.d=xn--mnchen-3ya.example").dkimAligned).toBe(true);
   });

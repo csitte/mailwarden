@@ -37,10 +37,23 @@
  * 4. **Alignment is reported, not left to the caller.** `dkimAligned` says whether a
  *    passing DKIM signature was made by the `From` domain (or a parent or child of it) —
  *    the question a reader actually has about a signature, since anyone can sign mail with
- *    a key for a domain they own. Without a public-suffix list this is the relaxed
- *    alignment of RFC 7489 approximated by the domain tree: sound, because a signing
- *    domain has to publish its key in its own DNS, and no one publishes one at a public
- *    suffix.
+ *    a key for a domain they own. Without a public-suffix list this approximates the
+ *    relaxed alignment of RFC 7489 by the domain tree, and says nothing where the tree
+ *    cannot decide:
+ *    - same domain, or one under the other: `true` — sound, because a signing domain has
+ *      to publish its key in its own DNS, and no one publishes one at a public suffix;
+ *    - siblings sharing two or more trailing labels (`news.bank.example` and
+ *      `mail.bank.example`, but equally `a.co.uk` and `b.co.uk`): absent — the first pair
+ *      is aligned and the second is not, and only a public-suffix list tells them apart;
+ *    - anything else: `false`.
+ *    A `false` on an aligned pair would read as suspicious, and that is the error to avoid.
+ *
+ * What this cannot do: tell Gmail's report from a forged one that claims Gmail's id on a
+ * message Gmail never stamped. Mail received over SMTP always carries Gmail's own report
+ * on top, so a forgery below it is never read. Mail that reached the mailbox another way —
+ * fetched from another account over POP, or inserted by an app — may carry no report from
+ * Gmail at all, and there a forged `mx.google.com` report is the only one and is read.
+ * Unmeasured, and stated here rather than assumed away.
  *
  * Pure, so a header corpus can hold it.
  */
@@ -199,9 +212,19 @@ function isTrusted(authservId: string | undefined): boolean {
   return authservId !== undefined && authservId.replace(/:\d+$/, "") === TRUSTED_AUTHSERV_ID;
 }
 
-/** `a` and `b` are the same domain, or one sits under the other in the DNS tree. */
-function sameDomainTree(a: string, b: string): boolean {
-  return a === b || a.endsWith("." + b) || b.endsWith("." + a);
+/**
+ * Relaxed DKIM alignment as far as the domain tree can tell it: `true` for the same
+ * domain or a parent/child pair, `undefined` for siblings that share two or more trailing
+ * labels (an organisational domain or a public suffix — undecidable without a list),
+ * `false` otherwise.
+ */
+export function dkimAlignment(signer: string, from: string): boolean | undefined {
+  if (signer === from || signer.endsWith("." + from) || from.endsWith("." + signer)) return true;
+  const a = signer.split(".").reverse();
+  const b = from.split(".").reverse();
+  let shared = 0;
+  while (shared < a.length && shared < b.length && a[shared] === b[shared]) shared++;
+  return shared >= 2 ? undefined : false;
 }
 
 /** The value of the first header with this name, trimmed; `undefined` when absent or blank. */
@@ -266,7 +289,8 @@ export function parseAuthentication(headers: Headers): Authentication {
 
   const fromDomain = domainValue(addressOf(headerValue(headers, "From")));
   if (out.dkim === "pass" && out.signedBy && fromDomain) {
-    out.dkimAligned = sameDomainTree(out.signedBy, fromDomain);
+    const aligned = dkimAlignment(out.signedBy, fromDomain);
+    if (aligned !== undefined) out.dkimAligned = aligned;
   }
 
   // Drop the keys that came back undefined, so the object carries only what was found.

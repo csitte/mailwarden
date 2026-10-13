@@ -134,10 +134,12 @@ Model can't tell quoted mail from a command.
   the message he sends. Only Gmail's own report is read — the topmost one whose authserv-id is
   `mx.google.com` — and a report under any other id never is, with `otherReports` counting the
   reports that were not read. A message with no report from Gmail is `unchecked` even when it
-  carries a forged one: until 0.22.1 the first report was read whatever its id, which let a forged
-  pass stand as the verdict on exactly the messages Gmail had not stamped. Values are validated as tokens rather than passed through, so a
-  field a caller reads as a verdict cannot carry a sentence, and a message with no report at all is
-  marked `unchecked` rather than left blank. What the field does **not** claim: a passing DMARC says
+  carries a forged one under another id. Not covered: mail that never passed Gmail's inbound
+  server (a POP fetch from another account, an app's insert) may carry no Gmail report, and a
+  forgery claiming `mx.google.com` is then read as Gmail's. Until 0.22.1 the first report was read
+  whatever its id, which let a forged pass stand as the verdict on exactly the messages Gmail had
+  not stamped. Values are validated as tokens rather than passed through, so a field a caller reads
+  as a verdict cannot carry a sentence, and a message with no report from Gmail is marked `unchecked` rather than left blank. What the field does **not** claim: a passing DMARC says
   the mail really came from that domain, not that the domain is honest — a phisher can hold perfect
   authentication on his own lookalike domain (0.17.0).
 

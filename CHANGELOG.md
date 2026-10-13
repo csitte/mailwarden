@@ -90,11 +90,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its verdict, with only `authservId` to give it away. Such a message is now `unchecked`. Measured
   on 13 October 2026 in two mailboxes before the change: every received message's first report came
   from `mx.google.com`, and the only messages without one were sent mail, so no real verdict is
-  lost. Prompted by `@agentcomms/gmail-mcp`, which reads the same header under this rule.
+  lost. Prompted by `@agentcomms/gmail-mcp`, which reads the same header under this rule. Not
+  covered, and documented as such: mail that never passed Gmail's inbound server (a POP fetch, an
+  app's insert) may carry no Gmail report, and a forgery claiming `mx.google.com` is then read.
 - **New `dkimAligned` field.** Whether a passing DKIM signature was made by the `From` domain or a
   parent or child of it — relaxed alignment approximated by the domain tree, which is sound because
   a signing domain has to publish its key in its own DNS. `dkim: "pass"` alone says only that
-  someone signed. Absent when DKIM did not pass or a domain is unknown.
+  someone signed. Absent when DKIM did not pass, a domain is unknown, or the two are sibling
+  subdomains: `news.bank.example`/`mail.bank.example` are aligned and `a.co.uk`/`b.co.uk` are not,
+  and without a public-suffix list they look alike — so the field says nothing rather than a
+  `false` that would read as suspicious.
 
 ## [0.22.1] - 2026-10-11
 

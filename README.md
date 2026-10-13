@@ -181,7 +181,10 @@ it claims to be, and that is the problem".
 
 **`dkimAligned` answers the question a signature raises.** Anyone can sign mail with a key for a
 domain they own, so `dkim: "pass"` alone says only that *someone* signed. `dkimAligned` says whether
-that someone is the `From` domain, or a parent or child of it. In the forwarded example above it is
+that someone is the `From` domain, or a parent or child of it. For two sibling subdomains it says
+nothing: `news.bank.example` and `mail.bank.example` are aligned, `a.co.uk` and `b.co.uk` are not,
+and without a public-suffix list the two cases look the same — so the field is absent rather than
+wrong. In the forwarded example above it is
 `false`, and correctly so: the forwarder signed. It is absent when DKIM did not pass. As with the
 domains, `false` is an explanation, not a verdict — `dmarc` remains the check to read first.
 
@@ -194,7 +197,11 @@ instance — should be expected to have none.
 writes whatever he likes into the mail he sends. Only **Gmail's own** report is read: the topmost
 one whose authserv-id is `mx.google.com`, the trust boundary RFC 8601 tells a reader to rely on.
 A report under any other id is never read, however convincing it looks, and a message that has
-none from Gmail is `unchecked` even if it carries a forged one; `otherReports` counts every report
+none from Gmail is `unchecked` even if it carries a forged one under another id. The limit: mail that
+reached the mailbox without passing Gmail's inbound mail server — fetched from another account over
+POP, or inserted by an app — may carry no Gmail report at all, and a forged one that *claims*
+`mx.google.com` is then indistinguishable from the real thing. Mail Gmail received itself always
+carries its own report on top, so there a forgery is never read; `otherReports` counts every report
 that was not read. (Until 0.22.1 the first report was read whatever its id — right wherever Gmail
 had written one, and wrong exactly where it had not.) Values are validated as tokens rather than passed through, so a field that reads
 like a verdict cannot carry a sentence. If two results for the same method disagree — a second DKIM
@@ -205,7 +212,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | Tool | What it does |
 |---|---|
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
-| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `otherReports` for reports that were not read, and `unchecked: true` when the message carried no report at all — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
+| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `otherReports` for reports that were not read, `dkimAligned` for whether the DKIM signer is the `From` domain, and `unchecked: true` when the message carried no report from Gmail — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting |
 | `what_changed` | Mailbox events since a `historyId` you hold — arrivals, removals, labels on and off, in one call |
