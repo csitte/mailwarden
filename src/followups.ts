@@ -15,7 +15,7 @@
  * Pure, so the classification can be held by tests.
  */
 
-import type { Signal } from "./signals.js";
+import { addressesOf, type Signal } from "./signals.js";
 
 /** One message of a thread, as far as this classification needs it. */
 export interface TailMessage {
@@ -71,12 +71,24 @@ function daysSince(dateMs: number, now: Date): number {
 /**
  * Threads whose last message is yours and at least `nudgeAfterDays` old. Without a date the
  * age cannot be judged, and the thread is left out rather than shown with a made-up one.
+ *
+ * A note to yourself waits on nobody: a last message whose every `To` address is one of
+ * `ownAddresses` is left out. Only the addresses passed in count — the account's primary
+ * address is what the tool knows; a note sent to a send-as alias still shows.
  */
-export function waitingOnThem(threads: ThreadTail[], now: Date, nudgeAfterDays: number): WaitingOnThem[] {
+export function waitingOnThem(
+  threads: ThreadTail[],
+  now: Date,
+  nudgeAfterDays: number,
+  ownAddresses: string[] = [],
+): WaitingOnThem[] {
+  const own = new Set(ownAddresses.map((a) => a.toLowerCase()));
   const out: WaitingOnThem[] = [];
   for (const t of threads) {
     const last = lastMessage(t);
     if (!last || !last.labelIds.includes("SENT") || last.dateMs === undefined) continue;
+    const to = addressesOf(last.to);
+    if (to.length > 0 && to.every((a) => own.has(a))) continue;
     const days = daysSince(last.dateMs, now);
     if (days < nudgeAfterDays) continue;
     out.push({

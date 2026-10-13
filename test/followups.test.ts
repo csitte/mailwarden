@@ -41,6 +41,14 @@ describe("waitingOnThem", () => {
     expect(waitingOnThem([thread("t1", msg(["SENT"], 6), msg(["TRASH"], 1))], NOW, 3)).toHaveLength(1);
   });
 
+  it("leaves out a note to myself — it waits on nobody", () => {
+    const note = thread("t1", msg(["SENT", "INBOX"], 5, { from: "me@y.example", to: "Me <ME@y.example>" }));
+    expect(waitingOnThem([note], NOW, 3, ["me@y.example"])).toEqual([]);
+    // Sent to someone else as well: that someone may still answer.
+    const cc = thread("t2", msg(["SENT", "INBOX"], 5, { to: "me@y.example, ann@x.example" }));
+    expect(waitingOnThem([cc], NOW, 3, ["me@y.example"])).toHaveLength(1);
+  });
+
   it("leaves out a thread whose last message has no date instead of inventing an age", () => {
     expect(waitingOnThem([thread("t1", msg(["SENT"], 6, { dateMs: undefined }))], NOW, 0)).toEqual([]);
   });

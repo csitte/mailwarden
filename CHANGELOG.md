@@ -22,8 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   each thread is decided on its last message and that message's live labels, so a thread the index
   still lists under `in:inbox` after it was archived is dropped, as in `search`. Drafts and trashed
   or spam messages are never the last word, mail whose own headers mark it as a newsletter or as
-  automated is not "waiting on me", and a thread without a recorded date is left out rather than
-  given an invented age. Prompted by the follow-up views in other Gmail MCP servers.
+  automated is not "waiting on me", a note to the account's own address is not "waiting on them",
+  and a thread without a recorded date is left out rather than given an invented age. The two sides
+  are fetched one after the other, so the call never runs more fetches at once than `search` does. Prompted by the follow-up views in other Gmail MCP servers.
 - **An exact undo for `bulk_modify`.** `undo: true` reads every affected thread's labels live
   before writing and returns `undo`, the per-message inverse of the change: what each message lost
   goes back, what it gained comes off, and a message that was already in the target state is left

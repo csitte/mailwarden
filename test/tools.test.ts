@@ -859,12 +859,14 @@ describe("tool results — structured content + fenced text", () => {
   it("follow_ups decides on each thread's last message and live labels", async () => {
     const day = 24 * 60 * 60 * 1000;
     const at = (d: number) => String(Date.now() - d * day);
-    const h = (from: string, extra: { name: string; value: string }[] = []) => ({
-      headers: [{ name: "From", value: from }, { name: "To", value: "me@y.example" }, { name: "Subject", value: "Hi" }, ...extra],
+    const h = (from: string, extra: { name: string; value: string }[] = [], to = "me@y.example") => ({
+      headers: [{ name: "From", value: from }, { name: "To", value: to }, { name: "Subject", value: "Hi" }, ...extra],
     });
     const threads: Record<string, any> = {
       // Mine, unanswered for five days.
-      s1: [{ id: "a", labelIds: ["SENT"], internalDate: at(5), payload: h("me@y.example") }],
+      s1: [{ id: "a", labelIds: ["SENT"], internalDate: at(5), payload: h("me@y.example", [], "ann@x.example") }],
+      // A note to myself waits on nobody.
+      s3: [{ id: "g", labelIds: ["SENT", "INBOX"], internalDate: at(5), payload: h("me@y.example") }],
       // Answered: not waiting on anyone.
       s2: [
         { id: "b", labelIds: ["SENT"], internalDate: at(6), payload: h("me@y.example") },
@@ -880,9 +882,10 @@ describe("tool results — structured content + fenced text", () => {
     const getReqs: any[] = [];
     (getAuth as Mock).mockResolvedValue({
       users: {
+        getProfile: async () => ({ data: { emailAddress: "me@y.example" } }),
         threads: {
           list: async (req: any) => ({
-            data: { threads: (req.q.startsWith("in:sent") ? ["s1", "s2"] : ["i1", "i2", "i3"]).map((id) => ({ id })) },
+            data: { threads: (req.q.startsWith("in:sent") ? ["s1", "s2", "s3"] : ["i1", "i2", "i3"]).map((id) => ({ id })) },
           }),
           get: async (req: any) => (getReqs.push(req), { data: { id: req.id, messages: threads[req.id] } }),
         },
@@ -893,7 +896,7 @@ describe("tool results — structured content + fenced text", () => {
     const sc = res.structuredContent;
     expect(sc.waitingOnThem.map((t: any) => [t.threadId, t.daysWaiting])).toEqual([["s1", 5]]);
     expect(sc.waitingOnMe.map((t: any) => [t.threadId, t.from, t.unread])).toEqual([["i1", "Ann <ann@x.example>", true]]);
-    expect(sc.scanned).toEqual({ sent: 2, inbox: 3 });
+    expect(sc.scanned).toEqual({ sent: 3, inbox: 3 });
     // No body is fetched for this.
     expect(getReqs.every((r) => r.format === "metadata" && r.metadataHeaders.includes("List-Id"))).toBe(true);
   });

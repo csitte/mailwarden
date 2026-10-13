@@ -514,7 +514,7 @@ function registerReadTools(server: McpServer): void {
     "follow_ups",
     {
       description:
-        "Who is waiting on whom. `waitingOnThem`: threads whose LAST message is yours (SENT) and has had no answer for at least nudgeAfterDays — candidates for a nudge. `waitingOnMe`: threads still in the inbox whose last message came from someone else — a person, not a newsletter or an automated notice by its own headers — oldest first. " +
+        "Who is waiting on whom. `waitingOnThem`: threads whose LAST message is yours (SENT) and has had no answer for at least nudgeAfterDays — candidates for a nudge; a note to yourself (every recipient is the account's own address) is left out. `waitingOnMe`: threads still in the inbox whose last message came from someone else — a person, not a newsletter or an automated notice by its own headers — oldest first. " +
         "Decided on each thread's last message and its LIVE labels: the search index only proposes candidates (`in:sent` / `in:inbox` within the last `days`), so a thread the index still files under the inbox after it was archived is dropped, as in search. Drafts, trash and spam messages do not count as a thread's last word. " +
         "Scans at most `max` threads per side; `hasMore` says when more candidates existed. A thread with no recorded date is left out rather than given an invented age. " +
         "USE WHEN: 'what am I waiting on?', 'who have I not answered?', 'what should I follow up on?' " +
@@ -552,13 +552,15 @@ function registerReadTools(server: McpServer): void {
     },
     async ({ days, nudgeAfterDays, max }) => {
       const gmail = await client();
-      const [sent, inbox] = await Promise.all([
-        gmail.listThreadTails(`in:sent newer_than:${days}d`, max),
-        gmail.listThreadTails(`in:inbox newer_than:${days}d`, max),
-      ]);
+      // One side after the other: each already fetches in parallel up to the shared limit, and
+      // running both at once would double it — and leave one side running when the other is
+      // refused for quota.
+      const profile = await gmail.getProfile();
+      const sent = await gmail.listThreadTails(`in:sent newer_than:${days}d`, max);
+      const inbox = await gmail.listThreadTails(`in:inbox newer_than:${days}d`, max);
       const now = new Date();
       return ok({
-        waitingOnThem: waitingOnThem(sent.threads, now, nudgeAfterDays),
+        waitingOnThem: waitingOnThem(sent.threads, now, nudgeAfterDays, [profile.emailAddress]),
         waitingOnMe: waitingOnMe(inbox.threads, now),
         scanned: { sent: sent.threads.length, inbox: inbox.threads.length },
         hasMore: { sent: sent.hasMore, inbox: inbox.hasMore },
