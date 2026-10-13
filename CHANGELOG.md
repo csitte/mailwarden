@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   re-read on 13 October 2026, which also found an eleventh tool (`create_label`) the old list missed.
   No other Google cell moves. The `a-bonus` column is brought forward to `d9e9bb21` in the same pass;
   no cell moves there. The table's date marker moves to 10 October 2026, its oldest column check.
+- **The README no longer calls sender authentication unique.** `@agentcomms/gmail-mcp`, first
+  published on 18 September 2026, reads SPF, DKIM and DMARC from `Authentication-Results` as well,
+  found in a landscape scan on 13 October 2026 and checked in its source. Snooze and search
+  re-verification remain without a counterpart in anything we have read.
 - **`npm run mcpb` failed on a Windows machine whose Node lives under a path with a space.** The
   spawn helper in `scripts/lib/run.mjs` quoted every argument for the shell but not the command
   itself, so `process.execPath` = `C:\Program Files\nodejs\node.exe` reached cmd.exe as

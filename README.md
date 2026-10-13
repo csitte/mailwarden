@@ -53,7 +53,7 @@ Connectors that sync or cache your mailbox can lag behind it — and even Gmail'
 
 ## Compared to other Gmail MCP servers
 
-Most Gmail MCP servers cover the same read/label/send surface. Three capabilities are still unique to `mailwarden` (mailbox-side snooze, search re-verification, sender authentication), and one deliberate omission is a security feature, not a gap. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
+Most Gmail MCP servers cover the same read/label/send surface. Two capabilities are still unique to `mailwarden` as far as we have looked (mailbox-side snooze, search re-verification), and one deliberate omission is a security feature, not a gap. A third, sender authentication, was unique when it shipped and no longer is: `@agentcomms/gmail-mcp` has read `Authentication-Results` since 18 September 2026, trusting only the report whose authserv-id is `mx.google.com`. It sits outside the table below, which compares the servers a reader is most likely to reach for, not every server that exists. Google's own server is also narrower than it looks: draft-only, and no trash, filters or unsubscribe.
 
 <!-- comparison-table-verified: 2026-10-10 -->
 
