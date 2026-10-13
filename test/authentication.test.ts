@@ -314,8 +314,21 @@ describe("parseAuthentication — hostile input", () => {
       expect(a.spf).toBeUndefined();
       expect(a.dkim).toBeUndefined();
       expect(a.dmarc).toBeUndefined();
-      // A present-but-unreadable report is still a report: it is not `unchecked`.
-      expect(a.unchecked).toBeUndefined();
+    }
+  });
+
+  it("treats an unreadable report from Gmail as a report, and one with no id as no report", () => {
+    // Gmail's id is legible: a report, just one with nothing in it — not `unchecked`.
+    for (const value of ["mx.google.com;", "mx.google.com; =pass"]) {
+      expect(parseAuthentication([{ name: "Authentication-Results", value }]).unchecked).toBeUndefined();
+    }
+    // No legible id means no one we can name asserted it: nobody checked, and the
+    // header is still counted so a caller sees it was there.
+    for (const value of ["", ";", "=;=;=", "; spf="]) {
+      expect(parseAuthentication([{ name: "Authentication-Results", value }])).toEqual({
+        unchecked: true,
+        otherReports: 1,
+      });
     }
   });
 
@@ -358,6 +371,7 @@ describe("parseMessage carries the authentication of the message it parsed", () 
       signedBy: "brz.gv.at",
       mailedBy: "brz.gv.at",
       headerFrom: "brz.gv.at",
+      dkimAligned: true,
     });
   });
 
@@ -368,5 +382,79 @@ describe("parseMessage carries the authentication of the message it parsed", () 
       payload: { headers: [{ name: "From", value: "a@example.com" }] },
     });
     expect(m.authentication).toEqual({ unchecked: true });
+  });
+});
+
+describe("parseAuthentication — only Gmail's own report is read", () => {
+  it("skips a forged report above Gmail's and reads Gmail's", () => {
+    // Header order is not something a sender controls above Gmail's own line, but a
+    // relay can sit there; whatever it wrote, it is not the verdict of this mailbox.
+    const a = parseAuthentication([
+      { name: "Authentication-Results", value: "relay.example; spf=pass; dkim=pass; dmarc=pass header.from=bank.example" },
+      { name: "Authentication-Results", value: "mx.google.com; spf=fail smtp.mailfrom=x@evil.example; dmarc=fail header.from=bank.example" },
+    ]);
+    expect(a).toEqual({
+      authservId: "mx.google.com",
+      spf: "fail",
+      mailedBy: "evil.example",
+      dmarc: "fail",
+      headerFrom: "bank.example",
+      otherReports: 1,
+    });
+  });
+
+  it("reads nothing when the only report is someone else's — a forged pass stays unread", () => {
+    // The case the old first-header rule got wrong: no Gmail report, one forged report,
+    // and the forgery became the verdict.
+    const a = parseAuthentication([
+      { name: "From", value: "Bank <service@bank.example>" },
+      { name: "Authentication-Results", value: "mx.bank.example; spf=pass; dkim=pass header.d=bank.example; dmarc=pass header.from=bank.example" },
+    ]);
+    expect(a).toEqual({ unchecked: true, otherReports: 1 });
+  });
+
+  it("accepts Gmail's id with a port", () => {
+    const a = auth({ "Authentication-Results": "mx.google.com:25; spf=pass smtp.mailfrom=a@x.example" });
+    expect(a.spf).toBe("pass");
+    expect(a.authservId).toBe("mx.google.com:25");
+  });
+
+  it("does not accept a lookalike of Gmail's id", () => {
+    for (const id of ["mx.google.com.evil.example", "evil-mx.google.com.example", "xmx.google.com", "mx.google.co"]) {
+      expect(auth({ "Authentication-Results": `${id}; spf=pass` }).unchecked).toBe(true);
+    }
+  });
+});
+
+describe("parseAuthentication — dkimAligned", () => {
+  const withFrom = (from: string, ar: string) =>
+    parseAuthentication([
+      { name: "From", value: from },
+      { name: "Authentication-Results", value: ar },
+    ]);
+
+  it("is true when the From domain signed", () => {
+    expect(withFrom("a@x.example", "mx.google.com; dkim=pass header.d=x.example").dkimAligned).toBe(true);
+  });
+
+  it("is true for a parent or child of the From domain (relaxed alignment)", () => {
+    expect(withFrom("a@mail.x.example", "mx.google.com; dkim=pass header.d=x.example").dkimAligned).toBe(true);
+    expect(withFrom("a@x.example", "mx.google.com; dkim=pass header.d=mail.x.example").dkimAligned).toBe(true);
+  });
+
+  it("is false when someone else signed — a forwarder, or a lookalike", () => {
+    expect(withFrom("a@authority.example", "mx.google.com; dkim=pass header.d=cloudflare-email.net").dkimAligned).toBe(false);
+    expect(withFrom("a@bank.example", "mx.google.com; dkim=pass header.d=bank.example.evil.example").dkimAligned).toBe(false);
+    expect(withFrom("a@bank.example", "mx.google.com; dkim=pass header.d=xbank.example").dkimAligned).toBe(false);
+  });
+
+  it("compares IDN domains in one form", () => {
+    expect(withFrom("a@münchen.example", "mx.google.com; dkim=pass header.d=xn--mnchen-3ya.example").dkimAligned).toBe(true);
+  });
+
+  it("is absent when DKIM did not pass, or a domain is unknown", () => {
+    expect(withFrom("a@x.example", "mx.google.com; dkim=fail header.d=x.example").dkimAligned).toBeUndefined();
+    expect(withFrom("a@x.example", "mx.google.com; dkim=pass").dkimAligned).toBeUndefined();
+    expect(auth({ "Authentication-Results": "mx.google.com; dkim=pass header.d=x.example" }).dkimAligned).toBeUndefined();
   });
 });

@@ -21,8 +21,9 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
   its live labels. Paginated via `pageToken`/`nextPageToken`. ([the measurements](https://github.com/csitte/mailwarden/blob/main/docs/gmail-thread-read-state-drift.md))
 - **Sender authentication, not sender spelling.** `get_thread` reports the SPF/DKIM/DMARC results
   the receiving server recorded, so "is this really from my bank?" is answered from the message's
-  own headers instead of from how the domain looks. It reads the receiving server's report only —
-  a message can carry forged ones of its own — and says `unchecked` when nobody checked, because a
+  own headers instead of from how the domain looks. It reads Gmail's own report only — the one
+  signed off by `mx.google.com`; a message can carry forged ones of its own — says whether a passing
+  DKIM signature belongs to the `From` domain, and says `unchecked` when nobody checked, because a
   missing check is not a passing one.
 - **Bulk operations that scale.** `bulk_modify` archives/labels everything matching a query at
   1000 messages per API request — with per-chunk partial-success reporting instead of
@@ -61,7 +62,7 @@ Most Gmail MCP servers cover the same read/label/send surface. Two capabilities 
 |---|:--:|:--:|:--:|:--:|:--:|:--:|
 | **Mailbox-side snooze** — archive now, resurface in the inbox on a date/time or preset | ✅ | — | — | — | — | — |
 | **Search-result re-verification** — drops the thread index's false positives against live labels | ✅ | — | — | — | — | — |
-| **Sender authentication** — SPF/DKIM/DMARC as the receiving server recorded them, on every message | ✅ first header only, values token-validated | — | — | — | — | — |
+| **Sender authentication** — SPF/DKIM/DMARC as the receiving server recorded them, on every message | ✅ Gmail's own report only, values token-validated, DKIM alignment | — | — | — | — | — |
 | **Sweep / bulk over a query** — one action across every thread a search returns | ✅ 1000/req, partial-success | — | ⚠️ batch by explicit ids; filter `apply` relabels over a query, no re-check | — | ⚠️ batch by explicit ids | ⚠️ batch by explicit ids |
 | **Unsubscribe** — per-sender overview + RFC 8058 one-click opt-out, no send scope needed | ✅ | — | ⚠️ header shown, no action | — | — | — |
 | **Inbox triage overview** — one call that buckets what is waiting | ✅ sender/label/age + header signals | — | — | ✅ heuristic flags + stats | ⚠️ unread list, no buckets | — |
@@ -155,6 +156,7 @@ results **the receiving server** recorded, plus the domains each check actually 
   "spf": "pass",   "mailedBy":   "forwarder.example",        // envelope sender SPF checked
   "dkim": "pass",  "signedBy":   "routing.example",           // domain whose key signed it
   "dmarc": "pass", "headerFrom": "authority.example",        // the From domain DMARC evaluated
+  "dkimAligned": false,                                      // the signer is not the From domain
   "authservId": "mx.google.com",                             // who asserts all of the above
   "returnPath": "srs0=…=authority.example=…@forwarder.example"
 }
@@ -177,16 +179,24 @@ deserves anything. A phisher holds perfect SPF, DKIM and DMARC on the lookalike 
 registered this morning; authentication tells you *who sent it*, and the answer can be "exactly who
 it claims to be, and that is the problem".
 
-**What `unchecked: true` means.** The message carried no `Authentication-Results` header at all —
-nobody looked. It is not a failure, and it is not a pass. The header is written by a server that
+**`dkimAligned` answers the question a signature raises.** Anyone can sign mail with a key for a
+domain they own, so `dkim: "pass"` alone says only that *someone* signed. `dkimAligned` says whether
+that someone is the `From` domain, or a parent or child of it. In the forwarded example above it is
+`false`, and correctly so: the forwarder signed. It is absent when DKIM did not pass. As with the
+domains, `false` is an explanation, not a verdict — `dmarc` remains the check to read first.
+
+**What `unchecked: true` means.** The message carried no `Authentication-Results` header from
+Gmail — nobody looked. It is not a failure, and it is not a pass. The header is written by a server that
 *receives* a message, so anything that never arrived from outside — your own sent mail, for
 instance — should be expected to have none.
 
 **Forged reports.** A message can carry `Authentication-Results` headers of its own — an attacker
-writes whatever he likes into the mail he sends. Only the **first** such header is read, because
-each hop prepends its own and the first one is therefore the receiving server's; `authservId` names
-who is asserting the result (for Gmail, `mx.google.com`) and `otherReports` counts the ones that
-were not read. Values are validated as tokens rather than passed through, so a field that reads
+writes whatever he likes into the mail he sends. Only **Gmail's own** report is read: the topmost
+one whose authserv-id is `mx.google.com`, the trust boundary RFC 8601 tells a reader to rely on.
+A report under any other id is never read, however convincing it looks, and a message that has
+none from Gmail is `unchecked` even if it carries a forged one; `otherReports` counts every report
+that was not read. (Until 0.22.1 the first report was read whatever its id — right wherever Gmail
+had written one, and wrong exactly where it had not.) Values are validated as tokens rather than passed through, so a field that reads
 like a verdict cannot carry a sentence. If two results for the same method disagree — a second DKIM
 signature that failed — the disagreement shows up in `alsoReported` instead of being swallowed.
 

@@ -9,26 +9,38 @@
  *
  * Three things this module is careful about, because the input is attacker-supplied:
  *
- * 1. **Only the first report is read.** Trace headers are prepended by each hop, so the
- *    first `Authentication-Results` is the one the *receiving* server wrote. Anything
- *    below it was already in the message when it arrived — including a header an attacker
- *    put there. RFC 8601 §5 tells a receiver to strip forged reports carrying its own
- *    authserv-id, but that is the receiver's job, not ours to assume: `authservId` is
- *    reported alongside so a caller can see WHO is asserting the result, and
- *    `otherReports` counts the ones not read.
+ * 1. **Only Gmail's own report is read — the topmost one whose authserv-id is
+ *    `mx.google.com`.** RFC 8601 §7.1 tells a reader to trust only the reports its own
+ *    trust boundary added, and for a Gmail mailbox that boundary is Gmail. Trace headers
+ *    are prepended by each hop, so Gmail's report sits above anything the message already
+ *    carried when it arrived — including a header an attacker put there. A report from any
+ *    other id is never read, however convincing; `otherReports` counts every report that
+ *    was not read, and a message with no report from Gmail is `unchecked`.
+ *
+ *    Until 0.22.1 this read the FIRST report whatever its id. That was right wherever
+ *    Gmail had written one, and wrong exactly where it had not: a message with no Gmail
+ *    report but a forged one of its own had that forgery read as the verdict, with only
+ *    `authservId` to give it away. Measured on 13 October 2026 in two mailboxes before
+ *    the change: every received message's first report came from `mx.google.com`, and the
+ *    only messages without one were sent mail — so pinning the id drops no real verdict.
  *
  *    This rests on one assumption worth stating rather than burying: that Gmail hands
  *    `payload.headers` back in the order the message carries them. That is how the API
  *    behaves and how every trace-header convention is built, but it is not a documented
- *    guarantee — which is precisely why `otherReports` and `authservId` travel with the
- *    result instead of a bare verdict. A caller that must be certain can compare the
- *    asserting id against the server it expects.
+ *    guarantee — which is why `otherReports` travels with the result.
  * 2. **Nothing unrecognised is passed through.** A result is a short lowercase token or
  *    it is dropped; a domain must look like a domain. A header is free text, and a field
  *    that reads as a verdict must never be able to carry a sentence.
- * 3. **A missing check is not a passing check.** No `Authentication-Results` header at
- *    all yields `unchecked: true` rather than an empty object, so "nobody looked" cannot
+ * 3. **A missing check is not a passing check.** No `Authentication-Results` header from
+ *    Gmail yields `unchecked: true` rather than an empty object, so "nobody looked" cannot
  *    be misread as "nothing wrong".
+ * 4. **Alignment is reported, not left to the caller.** `dkimAligned` says whether a
+ *    passing DKIM signature was made by the `From` domain (or a parent or child of it) —
+ *    the question a reader actually has about a signature, since anyone can sign mail with
+ *    a key for a domain they own. Without a public-suffix list this is the relaxed
+ *    alignment of RFC 7489 approximated by the domain tree: sound, because a signing
+ *    domain has to publish its key in its own DNS, and no one publishes one at a public
+ *    suffix.
  *
  * Pure, so a header corpus can hold it.
  */
@@ -66,9 +78,17 @@ export interface Authentication {
    * result would quietly hide the disagreement.
    */
   alsoReported?: string[];
-  /** How many `Authentication-Results` headers were present beyond the one read. */
+  /**
+   * Whether a PASSING DKIM signature was made by the `From` domain or a parent or child of
+   * it. Absent when DKIM did not pass, or when either domain is unknown.
+   */
+  dkimAligned?: boolean;
+  /**
+   * How many `Authentication-Results` headers were present and NOT read — every one beyond
+   * Gmail's own, including all of them when Gmail wrote none.
+   */
   otherReports?: number;
-  /** The message carried no `Authentication-Results` header at all — nobody checked. */
+  /** The message carried no `Authentication-Results` header from Gmail — nobody checked. */
   unchecked?: true;
 }
 
@@ -167,6 +187,23 @@ function parseResInfos(value: string): { authservId?: string; infos: ResInfo[] }
   return { authservId, infos };
 }
 
+/**
+ * The one authserv-id whose reports are read. Gmail stamps every message it receives
+ * with it; a report under any other id was written before Gmail saw the message, by a
+ * server — or a sender — this mailbox has no reason to trust.
+ */
+export const TRUSTED_AUTHSERV_ID = "mx.google.com";
+
+/** `mx.google.com:25` is the same server as `mx.google.com`. */
+function isTrusted(authservId: string | undefined): boolean {
+  return authservId !== undefined && authservId.replace(/:\d+$/, "") === TRUSTED_AUTHSERV_ID;
+}
+
+/** `a` and `b` are the same domain, or one sits under the other in the DNS tree. */
+function sameDomainTree(a: string, b: string): boolean {
+  return a === b || a.endsWith("." + b) || b.endsWith("." + a);
+}
+
 /** The value of the first header with this name, trimmed; `undefined` when absent or blank. */
 function headerValue(headers: Headers, name: string): string | undefined {
   const n = name.toLowerCase();
@@ -177,9 +214,10 @@ function headerValue(headers: Headers, name: string): string | undefined {
 /**
  * What the receiving server said about this message's authenticity.
  *
- * Reads the FIRST `Authentication-Results` header only — see the module comment for why
- * that is the security-relevant one — and the `Return-Path`. Never throws: a malformed
- * or hostile header yields fewer fields, never a wrong one.
+ * Reads the topmost `Authentication-Results` header written by Gmail only — see the
+ * module comment for why that is the security-relevant one — plus the `Return-Path` and
+ * the `From` domain for alignment. Never throws: a malformed or hostile header yields
+ * fewer fields, never a wrong one.
  */
 export function parseAuthentication(headers: Headers): Authentication {
   const out: Authentication = {};
@@ -187,15 +225,19 @@ export function parseAuthentication(headers: Headers): Authentication {
   const returnPath = addressOf(headerValue(headers, "Return-Path"));
   if (returnPath) out.returnPath = returnPath;
 
-  const reports = headers.filter((h) => (h.name ?? "").toLowerCase() === "authentication-results");
-  if (reports.length === 0) {
+  const reports = headers
+    .filter((h) => (h.name ?? "").toLowerCase() === "authentication-results")
+    .map((h) => parseResInfos(h.value ?? ""));
+  const mine = reports.findIndex((r) => isTrusted(r.authservId));
+  const notRead = mine === -1 ? reports.length : reports.length - 1;
+  if (notRead > 0) out.otherReports = notRead;
+  if (mine === -1) {
     out.unchecked = true;
     return out;
   }
-  if (reports.length > 1) out.otherReports = reports.length - 1;
 
-  const { authservId, infos } = parseResInfos(reports[0].value ?? "");
-  if (authservId) out.authservId = authservId;
+  const { authservId, infos } = reports[mine];
+  out.authservId = authservId;
 
   const disagreeing: string[] = [];
   for (const method of ["spf", "dkim", "dmarc"] as const) {
@@ -221,6 +263,11 @@ export function parseAuthentication(headers: Headers): Authentication {
 
   const unique = [...new Set(disagreeing)];
   if (unique.length > 0) out.alsoReported = unique;
+
+  const fromDomain = domainValue(addressOf(headerValue(headers, "From")));
+  if (out.dkim === "pass" && out.signedBy && fromDomain) {
+    out.dkimAligned = sameDomainTree(out.signedBy, fromDomain);
+  }
 
   // Drop the keys that came back undefined, so the object carries only what was found.
   for (const k of Object.keys(out) as (keyof Authentication)[]) {

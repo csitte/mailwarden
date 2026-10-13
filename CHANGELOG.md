@@ -46,6 +46,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   clean tag checkout through the 8.3 short path (`C:\PROGRA~1`), so they are unaffected; the fix
   is for the next machine.
 
+### Security
+- **Sender authentication reads Gmail's own report only.** `authentication` on every message now
+  comes from the topmost `Authentication-Results` header whose authserv-id is `mx.google.com`; a
+  report under any other id is counted in `otherReports` and never read. Until now the first report
+  was read whatever its id. That was right wherever Gmail had written one and wrong exactly where it
+  had not: a message with no Gmail report but a forged one of its own had the forgery reported as
+  its verdict, with only `authservId` to give it away. Such a message is now `unchecked`. Measured
+  on 13 October 2026 in two mailboxes before the change: every received message's first report came
+  from `mx.google.com`, and the only messages without one were sent mail, so no real verdict is
+  lost. Prompted by `@agentcomms/gmail-mcp`, which reads the same header under this rule.
+- **New `dkimAligned` field.** Whether a passing DKIM signature was made by the `From` domain or a
+  parent or child of it — relaxed alignment approximated by the domain tree, which is sound because
+  a signing domain has to publish its key in its own DNS. `dkim: "pass"` alone says only that
+  someone signed. Absent when DKIM did not pass or a domain is unknown.
+
 ## [0.22.1] - 2026-10-11
 
 ### Changed
