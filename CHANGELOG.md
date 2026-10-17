@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`docs/SETUP.md`: marking an existing OAuth client as an AI agent**, as the console actually
+  shows it: the checkbox is on the client's edit page, its label stays in English in a localised
+  console, and the change can take from five minutes to several hours to take effect.
+
 ## [0.23.0] - 2026-10-13
 
 ### Added

@@ -117,8 +117,10 @@ knowing before you decide:
 
 - Google's notice to Cloud customers says the setting becomes **fixed** for existing clients after
   a cut-over date; changing it later then means a new OAuth client, a new `credentials.json` and a
-  new `--auth`. For an existing client, set it under **APIs & Services → Credentials → your
-  client → edit**.
+  new `--auth`. For an existing client, open it under **APIs & Services → Credentials → your
+  client**: the edit page shows the same checkbox (the label stays in English even when the console
+  is set to another language) → **Save**. The console notes that
+  the change can take from five minutes to several hours to take effect.
 - In a Google Workspace organisation, an administrator can apply separate policies to agentic
   clients. On a personal Gmail account there is no such administrator.
 
