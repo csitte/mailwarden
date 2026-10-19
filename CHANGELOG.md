@@ -12,6 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shows it: the checkbox is on the client's edit page, its label stays in English in a localised
   console, and the change can take from five minutes to several hours to take effect.
 
+### Removed
+- **`assets/icon/favicon.ico`.** The Claude plugin directory's validator cannot inspect an ICO
+  file and held the plugin for review over it. Nothing in the plugin used it; `render.py` no
+  longer writes it, and `favicon-32.png` stays for web pages.
+
 ## [0.23.0] - 2026-10-13
 
 ### Added

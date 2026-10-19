@@ -11,7 +11,9 @@ ground, drawn on a 1000-unit grid so every size below is the same shape.
   (square PNG, 512 to 2048 px, under 2 MB; SVG is not accepted there).
 - `glyph-slate.png`, `glyph-white.png` — the strokes alone on a transparent ground, for light and
   dark surfaces.
-- `favicon.ico` (16/32/48/64), `favicon-32.png`, `apple-touch-icon.png` (180) — for a web page.
+- `favicon-32.png`, `apple-touch-icon.png` (180) — for a web page. There is deliberately no
+  `favicon.ico`: the plugin directory's validator cannot inspect an ICO file and holds the whole
+  plugin for review because of it. A site that needs one builds it from `icon.svg`.
 
 None of this ships in the npm package (`files` in `package.json` lists `dist`, `README.md`,
 `SECURITY.md`, `LICENSE`); it lives in the repository for the plugin directory and the website.

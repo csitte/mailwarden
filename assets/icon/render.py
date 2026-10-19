@@ -66,9 +66,8 @@ if __name__ == "__main__":
         render(s).save(out(f"icon-{s}.png"))
     render(1024, fg="#1E293B", ground=False).save(out("glyph-slate.png"))
     render(1024, fg="#FFFFFF", ground=False).save(out("glyph-white.png"))
-    sizes = (16, 32, 48, 64)
-    imgs = [render(s) for s in sizes]
-    imgs[-1].save(out("favicon.ico"), format="ICO", sizes=[(s, s) for s in sizes], append_images=imgs[:-1])
+    # No favicon.ico: the plugin directory's validator cannot read an ICO and holds the plugin
+    # for review over it. A page that wants one renders it from icon.svg on its own side.
     render(32).save(out("favicon-32.png"))
     render(180).save(out("apple-touch-icon.png"))
     print("rendered", file=sys.stderr)
