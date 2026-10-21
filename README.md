@@ -587,21 +587,15 @@ Or install the **MCPB bundle** (`mailwarden-<version>.mcpb`, attached to
 [GitHub releases](https://github.com/csitte/mailwarden/releases) from 0.10.0 on) as a Desktop extension — Settings →
 Extensions → *Install extension…* — the same server, self-contained at run time (no `npx`; Claude
 Desktop brings the Node runtime), with the tool tiers as a setting. The bundle is built from the packed
-npm package (same file set as published; `npm run mcpb`, verified in CI: validated, unpacked and booted)
-and is the same file set Smithery distributes. The one-time `npx -y mailwarden --auth` still applies
+npm package (same file set as published; `npm run mcpb`, verified in CI: validated, unpacked and booted).
+The one-time `npx -y mailwarden --auth` still applies
 (Node needed once for that) — the bundle reads the same `~/.mailwarden/` token.
 
-**Smithery** — listed as [`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden), which serves
-that bundle:
-```bash
-npx -y @smithery/cli install csitte/mailwarden --client claude   # local stdio entry in the client's config
-```
-Note which of Smithery's two paths you take. The install above writes a plain local server entry: the
-process, your token and your mail stay on your machine, exactly as with `npx`. Adding it to Smithery's
-**toolbox** instead (`smithery mcp add`) also runs the bundle locally, but relays the tool traffic
-through Smithery's gateway so a remote client can reach it — the mailbox content in those responses then
-passes through a third party. That is a property of the gateway, not of mailwarden; if you want the
-no-third-party guarantee, use the local install, the npm package, or the `.mcpb` from the release page.
+**Smithery** — listed in the directory as
+[`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden). Smithery shuts down its CLI,
+toolbox, gateway and accounts on 31 October 2026 and stays on only as a public directory
+([announcement](https://smithery.ai/future)), so there is no Smithery install path any more: install
+with `npx` or the `.mcpb` above. Whether the listing itself stays after that date is up to Smithery.
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
 ```bash

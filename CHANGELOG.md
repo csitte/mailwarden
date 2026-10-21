@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   console, and the change can take from five minutes to several hours to take effect.
 
 ### Removed
+- **The Smithery install instructions in the README.** Smithery shuts down its CLI, toolbox, gateway
+  and accounts on 31 October 2026 and stays on only as a public directory, so
+  `npx @smithery/cli install` and the toolbox route described there stop working. The README keeps the
+  directory link and points to `npx` and the `.mcpb` bundle instead.
 - **`assets/icon/favicon.ico`.** The Claude plugin directory's validator cannot inspect an ICO
   file and held the plugin for review over it. Nothing in the plugin used it; `render.py` no
   longer writes it, and `favicon-32.png` stays for web pages.
