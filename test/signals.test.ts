@@ -112,9 +112,9 @@ describe("deriveSignals — the edges that must NOT fire", () => {
     expect(sig({ From: "Nora <no-reply-nora@x.example>" })).toEqual([]); // not an exact spelling
   });
 
-  it("Precedence values other than bulk/list/auto_reply mean nothing here", () => {
+  it("Precedence values other than bulk/junk/list/auto_reply mean nothing here", () => {
     expect(sig({ From: "a@x.example", Precedence: "first-class" })).toEqual([]);
-    expect(sig({ From: "a@x.example", Precedence: "junk" })).toEqual([]);
+    expect(sig({ From: "a@x.example", Precedence: "special-delivery" })).toEqual([]);
   });
 
   it("a Reply-To without a From to compare against, or without an @, is not a mismatch", () => {
@@ -181,7 +181,9 @@ describe("deriveSignals corpus — Precedence", () => {
     ["bulk + comment", { ...F, Precedence: "bulk (mailer)" }, [], ["newsletter"]],
     ["auto_reply", { ...F, Precedence: "auto_reply" }, [], ["automated"]],
     ["Auto_Reply", { ...F, Precedence: "Auto_Reply" }, [], ["automated"]],
-    ["junk", { ...F, Precedence: "junk" }, [], []],
+    ["junk", { ...F, Precedence: "junk" }, [], ["newsletter"]],
+    ["JUNK + comment", { ...F, Precedence: "JUNK (cron)" }, [], ["newsletter"]],
+    ["junky (not a value)", { ...F, Precedence: "junky" }, [], []],
     ["first-class", { ...F, Precedence: "first-class" }, [], []],
     ["bulky (not a value)", { ...F, Precedence: "bulky" }, [], []],
     ["empty", { ...F, Precedence: "" }, [], []],
@@ -192,7 +194,7 @@ describe("deriveSignals corpus — Precedence", () => {
       deriveSignals({
         headers: [
           { name: "From", value: F.From },
-          { name: "Precedence", value: "junk" },
+          { name: "Precedence", value: "first-class" },
           { name: "Precedence", value: "bulk" },
         ],
         parts: [],
@@ -221,7 +223,7 @@ describe("deriveSignals corpus — List-* (RFC 2919 / 2369) and X-Auto-Response-
   });
 });
 
-describe("deriveSignals corpus — machine local-parts: exact spellings, hyphen or underscore, local-part only", () => {
+describe("deriveSignals corpus — machine local-parts: exact spellings, hyphen, underscore or dot, local-part only", () => {
   it.each<Row>([
     ["noreply", { From: "noreply@x.example" }, [], ["automated"]],
     ["no-reply", { From: "no-reply@x.example" }, [], ["automated"]],
@@ -242,7 +244,21 @@ describe("deriveSignals corpus — machine local-parts: exact spellings, hyphen 
     ["addr-spec + comment (cron style)", { From: "noreply@x.example (No Reply)" }, [], ["automated"]],
     ["folded display name", { From: "Some Long\r\n Name <noreply@x.example>" }, [], ["automated"]],
     ["RFC 2047 display name", { From: "=?UTF-8?B?Tm9yZWVu?= <noreply@x.example>" }, [], ["automated"]],
+    ["no.reply", { From: "no.reply@x.example" }, [], ["automated"]],
+    ["do.not.reply", { From: "Do.Not.Reply@x.example" }, [], ["automated"]],
+    ["noreply+tag (RFC 5233 sub-address)", { From: "noreply+abc@x.example" }, [], ["automated"]],
+    ["bounces+id (ESP return path style)", { From: "bounces+1234-ab@em.x.example" }, [], ["automated"]],
+    ["no.reply+tag", { From: "X <no.reply+n42@x.example>" }, [], ["automated"]],
+    ["quoted noreply+tag", { From: '"noreply+abc"@x.example' }, [], ["automated"]],
+    ["several + — only the first one splits", { From: "noreply+a+b@x.example" }, [], ["automated"]],
     // must NOT fire
+    ["alice+noreply (the tag is not the mailbox)", { From: "alice+noreply@x.example" }, [], []],
+    ["+noreply (leading + is not a sub-address)", { From: "+noreply@x.example" }, [], []],
+    ["noreply+ alone still matches, x+noreply does not", { From: "x+noreply@x.example" }, [], []],
+    ["noreply+ (empty detail)", { From: "noreply+@x.example" }, [], ["automated"]],
+    ["no..reply (two separators)", { From: "no..reply@x.example" }, [], []],
+    ["no.reply.nora (suffix, not exact)", { From: "no.reply.nora@x.example" }, [], []],
+    ["no-reply.x (mixed, suffix)", { From: "no-reply.x@x.example" }, [], []],
     ["Noreen Reply <noreen@…>", { From: "Noreen Reply <noreen@x.example>" }, [], []],
     ["no-reply-nora (prefix, not exact)", { From: "no-reply-nora@x.example" }, [], []],
     ["noreplyx", { From: "noreplyx@x.example" }, [], []],
@@ -336,9 +352,12 @@ describe("deriveSignals corpus — design questions, conservative reading pinned
     ["look-alike suffix without label boundary → fires", { From: "a@brand.example", "Reply-To": "b@notbrand.example" }, [], ["replyToMismatch"]],
     ["sender's domain as a prefix of a foreign one → fires", { From: "a@brand.example", "Reply-To": "b@brand.example.evil" }, [], ["replyToMismatch"]],
     ["one of several Reply-To on a subdomain, another foreign → fires", { From: "a@brand.example", "Reply-To": "b@e.brand.example, c@evil.example" }, [], ["replyToMismatch"]],
-    // Only the documented spellings; sub-addressing and affixes are not "exact".
-    ["noreply+tag (sub-addressing) → silent", { From: "noreply+abc@x.example" }, [], []],
+    // Only the documented spellings; a `+detail` sub-address is stripped first, but other
+    // affixes are not "exact".
+    ["noreply+tag (sub-addressing) → fires", { From: "noreply+abc@x.example" }, [], ["automated"]],
     ["messages-noreply (LinkedIn) → silent", { From: "messages-noreply@linkedin.com" }, [], []],
+    // Only the documented Precedence values; `junk` is one of them (bulk by its own admission).
+    ["Precedence junk → newsletter", { ...F, Precedence: "junk" }, [], ["newsletter"]],
     // Only the documented Precedence values.
     ["Precedence auto-reply (hyphen) → silent", { ...F, Precedence: "auto-reply" }, [], []],
     // X-Auto-Response-Suppress: `None` means "suppress nothing" and declares no automation;

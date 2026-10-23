@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The `newsletter` and `automated` signals recognise three more spellings of machine mail.**
+  `Precedence: junk` now counts as bulk mail (`newsletter`), as vacation responders have long
+  treated it. A `+detail` sub-address (RFC 5233) is dropped before the From local-part is
+  matched, so `noreply+abc@` and `bounces+1234@` read as `automated`; `alice+noreply@` still does
+  not. A dot is accepted as a separator next to hyphen and underscore (`no.reply@`,
+  `do.not.reply@`). Matching stays exact otherwise: `messages-noreply@` and `no.reply.nora@`
+  stay silent.
 - **`docs/SETUP.md`: marking an existing OAuth client as an AI agent**, as the console actually
   shows it: the checkbox is on the client's edit page, its label stays in English in a localised
   console, and the change can take from five minutes to several hours to take effect.

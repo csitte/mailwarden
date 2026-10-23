@@ -25,11 +25,19 @@ export interface SignalInput {
 /**
  * Local-parts that by convention mark a sender as a machine, not a person. Matched
  * on the local-part only (before `@`) and only in these spellings — a person named
- * "Noreen Reply" must not be flagged, so no substring matching. Hyphen and underscore
- * are the two separators the same words are written with (`no-reply`, `no_reply`).
+ * "Noreen Reply" must not be flagged, so no substring matching. Hyphen, underscore and
+ * dot are the separators the same words are written with (`no-reply`, `no_reply`,
+ * `no.reply`). A `+detail` sub-address (RFC 5233) is dropped before matching: senders tag
+ * the same machine mailbox per campaign or recipient (`bounces+1234@`, `noreply+abc@`).
  */
 const MACHINE_LOCAL_PARTS =
-  /^(no[-_]?reply|do[-_]?not[-_]?reply|mailer-daemon|postmaster|notifications?|alerts?|bounces?)$/i;
+  /^(no[-_.]?reply|do[-_.]?not[-_.]?reply|mailer-daemon|postmaster|notifications?|alerts?|bounces?)$/i;
+
+/** The local-part without a `+detail` sub-address (RFC 5233); a leading `+` is not one. */
+function withoutDetail(localPart: string): string {
+  const plus = localPart.indexOf("+");
+  return plus > 0 ? localPart.slice(0, plus) : localPart;
+}
 
 /**
  * A header's value, trimmed; `undefined` when the header is absent OR blank — a header
@@ -286,10 +294,11 @@ function domainKeyOf(address: string): string {
  * The signals a message declares. See the module comment for what each one means:
  *
  * - `newsletter` — mailing-list / bulk machinery: `List-Id`, `List-Unsubscribe`, or
- *   `Precedence: bulk|list`. (RFC 2919 / 2369; Precedence is the de-facto convention.)
+ *   `Precedence: bulk|junk|list`. (RFC 2919 / 2369; Precedence is the de-facto convention,
+ *   and `junk` is bulk mail by its own admission — vacation responders treat it as `bulk`.)
  * - `automated` — the sender says a machine wrote it: `Auto-Submitted` other than `no`
  *   (RFC 3834), `Precedence: auto_reply`, an `X-Auto-Response-Suppress` header, or a
- *   From local-part in the no-reply / mailer-daemon family.
+ *   From local-part in the no-reply / mailer-daemon family (a `+detail` sub-address ignored).
  * - `calendar` — a `text/calendar` MIME part or an `.ics` attachment: an invitation,
  *   update or reply the user may need to answer.
  * - `replyToMismatch` — `Reply-To` names a *different domain* than `From`. Same-domain
@@ -304,6 +313,7 @@ export function deriveSignals(input: SignalInput): Signal[] {
     header(input, "List-Id") !== undefined ||
     header(input, "List-Unsubscribe") !== undefined ||
     precedence === "bulk" ||
+    precedence === "junk" ||
     precedence === "list"
   ) {
     out.add("newsletter");
@@ -317,7 +327,7 @@ export function deriveSignals(input: SignalInput): Signal[] {
     (autoSubmitted !== "" && autoSubmitted !== "no") ||
     precedence === "auto_reply" ||
     autoResponseSuppressed(header(input, "X-Auto-Response-Suppress")) ||
-    MACHINE_LOCAL_PARTS.test(localPartOf(from))
+    MACHINE_LOCAL_PARTS.test(withoutDetail(localPartOf(from)))
   ) {
     out.add("automated");
   }
