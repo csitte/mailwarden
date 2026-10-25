@@ -213,6 +213,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 |---|---|
 | `search` | Gmail query syntax → thread summaries (from/subject/date/labels/snippet); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk, junk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same), `displayNameSpoof` (the From display name shows an address or URL on another domain than the one the mail came from — `"service@paypal.com" <x@evil.example>`), `lookalikeDomain` (a label of the From domain mixes Latin with Cyrillic, Greek or Armenian letters, as homograph domains do) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `otherReports` for reports that were not read, `dkimAligned` for whether the DKIM signer is the `From` domain, and `unchecked: true` when the message carried no report from Gmail — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked |
+| `read_attachment` | The text inside an attachment, without saving it: plain text (txt, csv, xml, json, ics, …), a gzip file, or the text entries of a ZIP archive — DMARC aggregate reports, exports, logs. The format is decided by the bytes, never by the declared name or type; binary formats are refused with a pointer to `download_attachment`. Every size is capped before it is spent (5 MiB unpacked per entry, 20 MiB per archive, 50 entries, 100,000 characters of text per entry), so a zip bomb stops at the limit; binary, encrypted, oversized and nested-archive entries are listed as `skipped`, not opened. Nothing is written to disk, and the text is fenced and stripped of hidden characters like a mail body |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting |
 | `what_changed` | Mailbox events since a `historyId` you hold — arrivals, removals, labels on and off, in one call |
@@ -266,11 +267,11 @@ not uniform — fetching a thread is the expensive part, in whatever format it i
 |---|---|
 | `search` | 10 per list page, plus 40 for every candidate thread it fetches — about 1,000 at the default size, up to about 4,000 when the query carries a read-state or category condition |
 | `get_thread` (full and metadata alike) | 40 |
-| `trash`, `download_attachment` | 20 |
+| `trash`, `download_attachment`, `read_attachment` | 20 |
 | `export_thread` | 40 |
 | `archive`, `mark_read`, `untrash` | 10 |
 | `modify_labels`, `snooze` | 10, plus 1 for each label looked up by name and 5 for each label it has to create |
-| `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches, `undo: true` 40 per thread |
+| `bulk_modify` | 5 per 500 matching messages, plus 50 per 1,000 modified; `verify: true` adds 40 per thread, `crossCheck` 5 per condition and 500 matches, `undo: true` 40 per thread; a write with `previewToken` lists once more to report `fromPreview` |
 | `undo_bulk_modify` | 50 per step, plus 40 per thread with `verify: true` |
 | `follow_ups` | 1 for the profile, 10 per list page, plus 40 per thread scanned — up to 50 threads at the defaults, about 2,000 |
 | `list_labels`, `get_profile` | 1 |
@@ -472,7 +473,7 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   without a recorded scope are advertised as before, with the runtime insufficient-scope message as the
   fallback.
 - **Read-only mode.** Set `MAILWARDEN_READONLY=1` (shorthand for `MAILWARDEN_TOOLS=read`) and only the
-  read tools (`search`, `get_thread`, `list_labels`, `list_snoozed`, `get_profile`, `what_changed`, `triage_digest`,
+  read tools (`search`, `get_thread`, `read_attachment`, `list_labels`, `list_snoozed`, `get_profile`, `what_changed`, `triage_digest`,
   `follow_ups`, `list_unsubscribe`, `list_subscriptions`)
   are registered — nothing that can change the mailbox or write
   files is even advertised to clients (the filter tools, which need the broader `gmail.settings.basic`
@@ -649,8 +650,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 10 `read` + 16 `manage` + 4 `filters`, so a
-full instance advertises 30 tools and four of them advertise 120. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 11 `read` + 16 `manage` + 4 `filters`, so a
+full instance advertises 31 tools and four of them advertise 124. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to
@@ -712,7 +713,7 @@ those rules come from).
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` and `export_thread` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
-| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/list_labels/list_snoozed/get_profile/what_changed/triage_digest/follow_ups/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
+| `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/read_attachment/list_labels/list_snoozed/get_profile/what_changed/triage_digest/follow_ups/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |
 | `PORT` | HTTP port (default 8787) |

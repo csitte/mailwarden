@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 30 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 31 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(30);
+    expect(tools).toHaveLength(31);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -59,6 +59,7 @@ describe("registerTools — tool surface", () => {
       "list_snoozed",
       "list_subscriptions",
       "list_unsubscribe",
+      "read_attachment",
       "search",
       "triage_digest",
       "what_changed",
@@ -74,7 +75,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("create_filter"); // filters tier
     expect(names).not.toContain("archive"); // manage tier excluded
     expect(names).not.toContain("snooze");
-    expect(names).toHaveLength(14); // 10 read + 4 filters
+    expect(names).toHaveLength(15); // 11 read + 4 filters
   });
 
   it("MAILWARDEN_TOOLS can register a single tier on its own", async () => {
@@ -94,7 +95,7 @@ describe("registerTools — tool surface", () => {
     expect(names).not.toContain("list_filters");
     expect(names).not.toContain("create_filter");
     expect(names).not.toContain("delete_filter");
-    expect(names).toHaveLength(26); // 29 - 3 filter tools
+    expect(names).toHaveLength(27); // 31 - 4 filter tools
   });
 });
 
@@ -1347,6 +1348,58 @@ describe("tool results — structured content + fenced text", () => {
     });
     expect(bodies[0].action).not.toHaveProperty("forward");
     expect(res.structuredContent.id).toBe("f-new");
+  });
+
+  describe("read_attachment", () => {
+    function attachment(bytes: Buffer) {
+      const writes: string[] = [];
+      (getAuth as Mock).mockResolvedValue({
+        users: {
+          messages: {
+            attachments: { get: async () => ({ data: { data: bytes.toString("base64url"), size: bytes.length } }) },
+          },
+        },
+      });
+      return writes;
+    }
+
+    it("returns a gzip report's text, fenced like every other result", async () => {
+      const { gzipSync } = await import("node:zlib");
+      attachment(gzipSync("<feedback><org_name>google.com</org_name></feedback>"));
+      const client = await connect();
+      const res: any = await client.callTool({
+        name: "read_attachment",
+        arguments: { messageId: "m1", attachmentId: "a1", filename: "report.xml.gz" },
+      });
+      expect(res.structuredContent).toMatchObject({
+        format: "gzip",
+        entries: [{ name: "report.xml", text: "<feedback><org_name>google.com</org_name></feedback>" }],
+        notListed: 0,
+      });
+      expect(res.content[0].text).toMatch(/untrusted-tool-output/);
+    });
+
+    it("strips hidden characters from the text, as from a mail body", async () => {
+      attachment(Buffer.from("pay\u200Bpal\u202Etxt.exe"));
+      const client = await connect();
+      const res: any = await client.callTool({ name: "read_attachment", arguments: { messageId: "m1", attachmentId: "a1" } });
+      expect(res.structuredContent.entries[0].text).toBe("paypaltxt.exe");
+    });
+
+    it("refuses a binary attachment with a pointer to download_attachment", async () => {
+      attachment(Buffer.from("%PDF-1.7\u0000\u0001"));
+      const client = await connect();
+      const res: any = await client.callTool({ name: "read_attachment", arguments: { messageId: "m1", attachmentId: "a1" } });
+      expect(res.isError).toBe(true);
+      expect(JSON.stringify(res.content)).toMatch(/download_attachment/);
+    });
+
+    it("is a read-tier, read-only tool", async () => {
+      vi.stubEnv("MAILWARDEN_READONLY", "1");
+      const client = await connect();
+      const tool = (await client.listTools()).tools.find((t) => t.name === "read_attachment");
+      expect(tool?.annotations?.readOnlyHint).toBe(true);
+    });
   });
 
   describe("preview_filter", () => {

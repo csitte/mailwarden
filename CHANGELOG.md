@@ -33,6 +33,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every future match. It runs the same validation as `create_filter`, which now shares it, and does not
   count a rule with no positive criterion. The overlap is literal on purpose: whether two different
   searches intersect is not guessed at. The idea is `aaronsb/google-workspace-mcp`'s `previewFilter`.
+- **`read_attachment`** (read tier): the text inside an attachment, without saving it — plain text, a gzip
+  file, or the text entries of a ZIP archive, which is how DMARC aggregate reports arrive. The format is
+  decided by the bytes, not by the declared name or MIME type; binary formats are refused with a pointer
+  to `download_attachment`. Limits are checked before they are spent and declared sizes are not
+  trusted: zlib stops at the remaining budget, so a zip bomb is reported as `too large` instead of
+  unpacked. Encrypted, nested-archive and unsupported entries are listed, not opened. The read tier
+  grows to eleven tools, thirty-one in all. `gmail-tidy-mcp` reads text, `.gz` and `.zip` attachments
+  inline too; this is our own reader, with no new dependency.
 
 ### Changed
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on

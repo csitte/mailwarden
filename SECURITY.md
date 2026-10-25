@@ -182,6 +182,13 @@ A backup, a synced folder, or another machine exposes `token.json`.
 ### 7. Path traversal via attachment download
 A crafted attachment filename tries to escape the download directory.
 
+- **Attachments read in memory, inside fixed limits.** `read_attachment` decides what it is reading from
+  the bytes (ZIP and gzip signatures, else a text check), never from the name or MIME type the sender
+  wrote. Every size is checked before it is spent, and declared sizes are not believed: decompression
+  runs with zlib's `maxOutputLength` at the remaining budget, so an entry that claims ten bytes and
+  unpacks to gigabytes stops at the cap. Archives inside archives are listed, not opened; entry names
+  are only shown, never used as paths, and nothing is written to disk. The text it returns is fenced
+  and stripped of hidden characters like any mail body — it is what a stranger put in the file.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, writes — `download_attachment` and
   `export_thread` alike, through one shared path check — are confined to that directory
   (realpath-canonicalized, symlink-aware) and never overwrite an existing file (collisions get a

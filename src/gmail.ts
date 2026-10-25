@@ -1680,6 +1680,15 @@ export class Gmail {
     await this.req(() => this.api.users.settings.filters.delete({ userId: "me", id }));
   }
 
+  /** An attachment's raw bytes, for reading in memory (read_attachment). Nothing touches the disk. */
+  async attachmentBytes(messageId: string, attachmentId: string): Promise<Buffer> {
+    const res = await this.req(() =>
+      this.api.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId }),
+    );
+    if (!res.data.data) throw new Error("Attachment has no data.");
+    return Buffer.from(res.data.data, "base64url");
+  }
+
   async downloadAttachment(messageId: string, attachmentId: string, destPath: string): Promise<string> {
     const dest = await resolveLocalDest(destPath);
     const res = await this.req(() =>
