@@ -245,7 +245,7 @@ alongside the same JSON as fenced text — clients never have to parse prose.
 
 A **failure** is structured too: `isError` plus a fenced JSON body with a `code`
 (`not_authorized`, `needs_reauth`, `insufficient_scope`, `forbidden_operation`, `not_found`,
-`rate_limited`, `upstream_unavailable`, `network_error`, `invalid_input`, `internal_error`) and a
+`rate_limited`, `upstream_unavailable`, `network_error`, `invalid_input`, `declined_by_user`, `internal_error`) and a
 `retryable` flag, alongside the sentence a human reads. So "wait and try again" versus "re-run
 `mailwarden --auth`" is something a client can decide, not something it has to infer from wording
 that may be reworded next release. (No `structuredContent` on errors: that is validated against the
@@ -713,6 +713,7 @@ those rules come from).
 | `MAILWARDEN_TOKEN_PASSPHRASE` | passphrase → encrypt `token.json` at rest (AES-256-GCM); re-run `--auth` after setting |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` and `export_thread` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
+| `MAILWARDEN_CONFIRM` | ask the person at the client before `create_filter`, `unsubscribe` and `bulk_unsubscribe` act, through an MCP elicitation dialog — the answer never passes through the model, so a prompt-injected mail cannot supply it. `ask`: ask where the client supports elicitation, go ahead where it does not. `require`: refuse where it does not. `off` (default): never ask — unattended runs would otherwise fail on a dialog nobody sees. A no is the error `declined_by_user`, and nothing was done. Dry runs are never asked about |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/read_attachment/list_labels/list_snoozed/get_profile/what_changed/triage_digest/follow_ups/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |

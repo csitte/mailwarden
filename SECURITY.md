@@ -109,6 +109,17 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   are **derived from the enabled tiers**, so the token carries only the authority the deployment uses.
 - **Bounded blast radius.** Bulk operations report per-chunk partial success rather than acting
   all-or-nothing silently.
+- **A human yes for what outlasts the conversation, if you want one.** With `MAILWARDEN_CONFIRM=ask`
+  (or `require`), `create_filter`, `unsubscribe` and `bulk_unsubscribe` first ask the person at the
+  client through MCP elicitation, with the rule or the hosts to be contacted spelled out. The answer
+  comes from the client's own dialog and never passes through the model — a "yes" typed in the chat
+  is text a prompt-injected mail can produce, an elicitation answer is not. Off by default, because
+  a client that cannot show a dialog answers with a cancel and unattended runs would fail; `require`
+  refuses instead of proceeding where no dialog is possible. A label change is not on the list: it is
+  reversible, exactly so with `undo: true`.
+- **A preview that binds the write.** A `bulk_modify` dry run returns a `previewToken`; the write that
+  carries it acts on exactly the previewed messages and refuses a reworded query or a different
+  label change, so the set a user agreed to is the set that changes.
 
 ### 3. Untrusted content confused for instructions
 Model can't tell quoted mail from a command.

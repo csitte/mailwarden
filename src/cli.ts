@@ -38,6 +38,8 @@ export type ToolErrorCode =
   | "rate_limited"
   /** Gmail answered 5xx. Retrying later is the fix. */
   | "upstream_unavailable"
+  /** MAILWARDEN_CONFIRM asked the user (or could not), and the answer was not yes. Nothing was done. */
+  | "declined_by_user"
   /** The request never got an answer (connection reset, timeout, DNS). */
   | "network_error"
   /** Anything unclassified — a bug until proven otherwise. */

@@ -20,6 +20,7 @@ import { UNDO_LIMIT } from "./undo.js";
 import { PREVIEW_TTL_MS, PreviewStore, previewDrift } from "./preview.js";
 import { compareFilters } from "./filter-preview.js";
 import { attachmentText, AttachmentTextError, DEFAULT_LIMITS } from "./attachment-text.js";
+import { CONFIRM_SCHEMA, confirmPlan, confirmed, resolveConfirmMode, type ConfirmMode } from "./confirm.js";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
@@ -122,6 +123,34 @@ async function explainScopeFailure(err: unknown): Promise<unknown> {
  * tool can forget it. Returned as the same type it wraps, which keeps every call
  * site (and its schema inference) exactly as it was.
  */
+/**
+ * Ask the person at the client — not the model — before an action that outlasts the conversation
+ * (see confirm.ts). Returns when it may go ahead; throws `declined_by_user` otherwise, before
+ * anything was done.
+ */
+async function confirmWithUser(server: McpServer, mode: ConfirmMode, message: string): Promise<void> {
+  const plan = confirmPlan(mode, server.server.getClientCapabilities()?.elicitation !== undefined);
+  if (plan === "proceed") return;
+  if (plan === "refuse") {
+    throw new ToolError(
+      "declined_by_user",
+      "MAILWARDEN_CONFIRM=require, and this client cannot show a confirmation dialog (no elicitation support). Nothing was done.",
+    );
+  }
+  let answer;
+  try {
+    answer = await server.server.elicitInput({ message, requestedSchema: CONFIRM_SCHEMA as never });
+  } catch (err) {
+    throw new ToolError(
+      "declined_by_user",
+      `The confirmation dialog could not be shown (${err instanceof Error ? err.message : String(err)}). Nothing was done.`,
+    );
+  }
+  if (!confirmed(answer)) {
+    throw new ToolError("declined_by_user", "The user did not confirm this action. Nothing was done.");
+  }
+}
+
 function guarded(server: McpServer): McpServer["registerTool"] {
   const register = server.registerTool.bind(server);
   return ((name: string, config: unknown, cb: (...args: unknown[]) => unknown) =>
@@ -276,8 +305,9 @@ const unsubscribeOptionsSchema = z.object({
 
 export function registerTools(server: McpServer): void {
   const tiers = resolveEnabledTiers(process.env);
+  const confirmMode = resolveConfirmMode(process.env);
   if (tiers.has("read")) registerReadTools(server);
-  if (tiers.has("manage")) registerManageTools(server);
+  if (tiers.has("manage")) registerManageTools(server, confirmMode);
   if (tiers.has("filters")) {
     // Scope-gate the filters tier: advertise it only when the stored token
     // actually carries gmail.settings.basic. `false` = a token known to lack it
@@ -290,7 +320,7 @@ export function registerTools(server: McpServer): void {
           "gmail.settings.basic scope — filter tools are hidden. Re-run `mailwarden --auth` to grant it.",
       );
     } else {
-      registerFilterTools(server);
+      registerFilterTools(server, confirmMode);
     }
   }
 }
@@ -711,7 +741,7 @@ function registerReadTools(server: McpServer): void {
 
 }
 
-function registerManageTools(server: McpServer): void {
+function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void {
   const registerTool = guarded(server);
   // One per server instance: a bulk_modify dry run holds its match set here until the write that
   // names its token, or until the token expires (see preview.ts).
@@ -1216,7 +1246,18 @@ function registerManageTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ threadId, force }) => ok(await unsubscribeThread(await client(), threadId, undefined, { force })),
+    async ({ threadId, force }) =>
+      ok(
+        await unsubscribeThread(await client(), threadId, undefined, {
+          force,
+          beforeRequest: (endpoint, info) =>
+            confirmWithUser(
+              server,
+              confirmMode,
+              `Unsubscribe from mail sent by ${info.from || "this sender"}? mailwarden will send one opt-out request to ${new URL(endpoint).host}.`,
+            ),
+        }),
+      ),
   );
 
   registerTool(
@@ -1272,8 +1313,22 @@ function registerManageTools(server: McpServer): void {
         openWorldHint: true,
       },
     },
-    async ({ threadIds, dryRun }) =>
-      ok(await bulkUnsubscribe(await client(), threadIds, undefined, { dryRun })),
+    async ({ threadIds, dryRun }) => {
+      const gmail = await client();
+      // One question for the whole batch, asked with the dry run's own list of who would be contacted.
+      if (!dryRun && confirmPlan(confirmMode, server.server.getClientCapabilities()?.elicitation !== undefined) !== "proceed") {
+        const rehearsal = await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun: true });
+        const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${r.from || r.threadId} → ${new URL(r.wouldCall!).host}`);
+        if (contacted.length > 0) {
+          await confirmWithUser(
+            server,
+            confirmMode,
+            `Send ${contacted.length} unsubscribe request${contacted.length === 1 ? "" : "s"}?\n` + contacted.slice(0, 20).join("\n") + (contacted.length > 20 ? `\n… and ${contacted.length - 20} more` : ""),
+          );
+        }
+      }
+      return ok(await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun }));
+    },
   );
 
   // ---- Snooze (mailwarden's differentiator) ----
@@ -1404,7 +1459,7 @@ function checkFilterCriteria(tool: string, criteria: FilterCriteriaInput): { has
   return { hasPositive };
 }
 
-function registerFilterTools(server: McpServer): void {
+function registerFilterTools(server: McpServer, confirmMode: ConfirmMode): void {
   const registerTool = guarded(server);
   // ---- Filters (server-side auto-triage rules) ----
   // Its own `filters` tier: filter management needs the broader gmail.settings.basic
@@ -1548,6 +1603,20 @@ function registerFilterTools(server: McpServer): void {
         }
       }
       const gmail = await client();
+      const rule = Object.entries(criteria)
+        .filter(([, v]) => v !== undefined && v !== "")
+        .map(([k, v]) => `${k}: ${String(v)}`)
+        .join(", ");
+      const action = [
+        ...(addLabels.length ? [`add ${addLabels.join(", ")}`] : []),
+        ...(removeLabels.length ? [`remove ${removeLabels.join(", ")}`] : []),
+      ].join("; ");
+      await confirmWithUser(
+        server,
+        confirmMode,
+        `Create a Gmail filter? Every future message matching ${rule} will get: ${action}.` +
+          (applyToExisting ? ` It will also be applied now to up to ${maxMessages} messages already in the mailbox.` : ""),
+      );
       const filter = await gmail.createFilter(criteria, { addLabels, removeLabels });
       let applied: {
         query: string;

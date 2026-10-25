@@ -606,6 +606,12 @@ export interface UnsubscribeThreadOptions {
    * was for a different list of the same sender.
    */
   force?: boolean;
+  /**
+   * Called once the endpoint is known and just before the request goes out — never for a refusal,
+   * which contacts nobody. Throwing stops the request; nothing is recorded as contacted. This is
+   * where MAILWARDEN_CONFIRM puts its question to the user.
+   */
+  beforeRequest?: (endpoint: string, info: UnsubscribeInfo) => Promise<void>;
 }
 
 /**
@@ -645,7 +651,7 @@ export async function unsubscribeThread(
     };
   }
 
-  const res = await unsubscribeFromInfo(info, deps);
+  const res = await unsubscribeFromInfo(info, deps, TIMEOUT_MS, opts.beforeRequest);
   // Recorded only once a request actually reached an endpoint: `url` is set exactly
   // then. A refusal must not block the next thread from the same sender.
   if (key && res.url) contactedSenders.set(key, { threadId, urls: info.httpsUrls });
@@ -720,9 +726,11 @@ async function unsubscribeFromInfo(
   info: UnsubscribeInfo,
   deps: UnsubscribeDeps = defaultUnsubscribeDeps,
   timeoutMs = TIMEOUT_MS,
+  beforeRequest?: UnsubscribeThreadOptions["beforeRequest"],
 ): Promise<UnsubscribeResult> {
   const plan = planUnsubscribe(info);
   if (plan.refusal) return plan.refusal;
+  if (beforeRequest) await beforeRequest(plan.endpoint!, info);
 
   const res = await oneClickUnsubscribe(plan.endpoint!, deps, timeoutMs);
   return {

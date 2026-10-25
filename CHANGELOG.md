@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unpacked. Encrypted, nested-archive and unsupported entries are listed, not opened. The read tier
   grows to eleven tools, thirty-one in all. `gmail-tidy-mcp` reads text, `.gz` and `.zip` attachments
   inline too; this is our own reader, with no new dependency.
+- **`MAILWARDEN_CONFIRM`: a human yes before a filter or an unsubscribe.** Set to `ask`, `create_filter`,
+  `unsubscribe` and `bulk_unsubscribe` first ask the person at the client through MCP elicitation —
+  the filter rule, or the senders and hosts to be contacted, spelled out; one question for a whole
+  bulk run, none for a dry run. The answer never passes through the model, so a prompt-injected mail
+  cannot give it. `require` also refuses on a client that cannot show the dialog. Off by default:
+  a client without a dialog answers with a cancel, and unattended runs would fail. A no is the new
+  error code `declined_by_user`, with nothing done. The pattern is `klodr/gmail-mcp`'s, which asks
+  through elicitation before pairing a new recipient.
 
 ### Changed
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on
