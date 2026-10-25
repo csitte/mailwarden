@@ -55,6 +55,15 @@ checks an account's access level against the *granted* scopes at call time, wher
 happened only at registration — and that has been adopted (see `CHANGELOG.md`). The next entry on
 this list is more likely to come from that kind of reading than from a feature another server ships.
 
+The October 2026 round bore that out, five times over, each a way of doing something already here
+rather than a new kind of thing: a `bulk_modify` dry run that binds the write through a one-use
+`previewToken` (from `aaronsb`), `preview_filter` before `create_filter` (likewise), `read_attachment`
+for the text inside reports and archives (from `gmail-tidy-mcp`), `MAILWARDEN_CONFIRM` asking the user
+through elicitation before a filter or an unsubscribe (from `klodr`), and two more header signals,
+`displayNameSpoof` and `lookalikeDomain`. One gap stays open and is a decision, not a task: token
+encryption by default, with the key in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it.
+Today it is opt-in through a passphrase.
+
 ## Non-goals
 
 - **Sending mail** (compose/reply/forward/send). Deliberate: a triage server that cannot send gives
