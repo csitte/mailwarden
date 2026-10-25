@@ -18,6 +18,9 @@ importantly — what it deliberately does **not** protect against.
 `mailwarden` is a stateless capability layer. It keeps **no mailbox mirror and no search index** —
 every operation hits the live Gmail API. The only local state is the OAuth token in `~/.mailwarden/`
 (`token.json`, plus one `token.<account>.json` per named account when multiple accounts are used).
+In memory, and only for as long as the process runs, it holds two short-lived lists and nothing
+else: the senders `bulk_unsubscribe` already contacted, and the message ids of a `bulk_modify` dry
+run behind its `previewToken` (at most twenty sets, each for 30 minutes — ids, never content).
 
 ## Data flow
 

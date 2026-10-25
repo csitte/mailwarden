@@ -1024,6 +1024,9 @@ describe("tool results — structured content + fenced text", () => {
       // `from:` maps to no label, so there is nothing the index could be stale about here.
       unverifiedPredicates: [],
       labelsToCreate: ["Finance/2026"], // only the genuinely new name
+      // Something matched, so the set is held for the write that follows.
+      previewToken: expect.any(String),
+      previewExpiresInSeconds: 1800,
       failed: [],
     });
   });
@@ -1051,6 +1054,114 @@ describe("tool results — structured content + fenced text", () => {
 
     expect(res.structuredContent.dryRun).toBe(true);
     expect(res.structuredContent.unverifiedPredicates).toEqual(["+CATEGORY_UPDATES", "+UNREAD"]);
+  });
+
+  describe("bulk_modify previewToken", () => {
+    // The listing changes between the preview and the write: m4 arrives, m1 stops matching.
+    function mailbox() {
+      let listing = [
+        { id: "m1", threadId: "t1" },
+        { id: "m2", threadId: "t1" },
+        { id: "m3", threadId: "t2" },
+      ];
+      const batchBodies: any[] = [];
+      (getAuth as Mock).mockResolvedValue({
+        users: {
+          messages: {
+            list: async () => ({ data: { messages: listing } }),
+            batchModify: async (req: any) => (batchBodies.push(req.requestBody), {}),
+          },
+          labels: { list: async () => ({ data: { labels: [] } }) },
+        },
+      });
+      return {
+        batchBodies,
+        move: () => {
+          listing = [{ id: "m2", threadId: "t1" }, { id: "m3", threadId: "t2" }, { id: "m4", threadId: "t3" }];
+        },
+      };
+    }
+    const change = { query: "category:promotions older_than:30d", remove: ["INBOX"] };
+
+    it("acts on exactly the previewed set, and says how the mailbox moved since", async () => {
+      const box = mailbox();
+      const client = await connect();
+      const preview: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, dryRun: true } });
+      const token = preview.structuredContent.previewToken;
+      expect(token).toEqual(expect.any(String));
+      box.move();
+      const res: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, previewToken: token } });
+      // m1 was shown and is changed; m4 was not shown and is left alone.
+      expect(box.batchBodies).toEqual([{ ids: ["m1", "m2", "m3"], addLabelIds: [], removeLabelIds: ["INBOX"] }]);
+      expect(res.structuredContent.matchedMessages).toBe(3);
+      expect(res.structuredContent.fromPreview).toEqual({
+        heldMessages: 3,
+        heldForSeconds: expect.any(Number),
+        newMatches: 1,
+        noLongerMatching: 1,
+        capped: false,
+      });
+    });
+
+    it("refuses a token for a reworded query, before anything is written", async () => {
+      const box = mailbox();
+      const client = await connect();
+      const preview: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, dryRun: true } });
+      const res: any = await client.callTool({
+        name: "bulk_modify",
+        arguments: { ...change, query: "category:promotions", previewToken: preview.structuredContent.previewToken },
+      });
+      expect(res.isError).toBe(true);
+      expect(JSON.stringify(res.content)).toMatch(/different change/);
+      expect(box.batchBodies).toHaveLength(0);
+    });
+
+    it("refuses a token for a different label change", async () => {
+      const box = mailbox();
+      const client = await connect();
+      const preview: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, dryRun: true } });
+      const res: any = await client.callTool({
+        name: "bulk_modify",
+        arguments: { query: change.query, add: ["TRASH"], previewToken: preview.structuredContent.previewToken },
+      });
+      expect(res.isError).toBe(true);
+      expect(box.batchBodies).toHaveLength(0);
+    });
+
+    it("works once — a replayed token is refused", async () => {
+      const box = mailbox();
+      const client = await connect();
+      const preview: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, dryRun: true } });
+      const token = preview.structuredContent.previewToken;
+      await client.callTool({ name: "bulk_modify", arguments: { ...change, previewToken: token } });
+      const again: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, previewToken: token } });
+      expect(again.isError).toBe(true);
+      expect(JSON.stringify(again.content)).toMatch(/unknown/);
+      expect(box.batchBodies).toHaveLength(1);
+    });
+
+    it("is refused on a dry run, which would otherwise silently ignore it", async () => {
+      mailbox();
+      const client = await connect();
+      const res: any = await client.callTool({
+        name: "bulk_modify",
+        arguments: { ...change, dryRun: true, previewToken: "x".repeat(24) },
+      });
+      expect(res.isError).toBe(true);
+    });
+
+    it("issues no token when nothing matched", async () => {
+      (getAuth as Mock).mockResolvedValue({
+        users: {
+          messages: { list: async () => ({ data: {} }) },
+          labels: { list: async () => ({ data: { labels: [] } }) },
+        },
+      });
+      const client = await connect();
+      const res: any = await client.callTool({ name: "bulk_modify", arguments: { ...change, dryRun: true } });
+      expect(res.structuredContent.matchedMessages).toBe(0);
+      expect(res.structuredContent.previewToken).toBeUndefined();
+    });
   });
 
   it("bulk_unsubscribe dryRun reaches the rehearsal path (no network: a broken wire would try DNS)", async () => {

@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`bulk_modify` previews can be confirmed exactly.** A dry run that matches anything returns a
+  `previewToken`, and the server holds the matched message set for 30 minutes. A write that passes the
+  token back with the same query, `add` and `remove` acts on exactly that set: mail that started matching
+  after the preview is left alone and counted in `fromPreview.newMatches`, messages that stopped
+  matching are changed anyway and counted in `fromPreview.noLongerMatching`, and a reworded query or a
+  different label change is refused before anything is written. A token works once, at most twenty are
+  held, and a restart forgets them all; the set lives in process memory as message ids only. Without a
+  token `bulk_modify` behaves as before. The pattern is `aaronsb/google-workspace-mcp`'s, whose v4.8.0
+  gates its query relabel the same way.
+
 ### Changed
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on
   25 October 2026: the server whose stated position is closest to this one (no send tool, no trash,

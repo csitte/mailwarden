@@ -17,6 +17,7 @@ import { fenceOutput, sanitizeStructured } from "./sanitize.js";
 import { classifyError } from "./errors.js";
 import { ToolError } from "./cli.js";
 import { UNDO_LIMIT } from "./undo.js";
+import { PREVIEW_TTL_MS, PreviewStore, previewDrift } from "./preview.js";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
@@ -656,6 +657,9 @@ function registerReadTools(server: McpServer): void {
 
 function registerManageTools(server: McpServer): void {
   const registerTool = guarded(server);
+  // One per server instance: a bulk_modify dry run holds its match set here until the write that
+  // names its token, or until the token expires (see preview.ts).
+  const previews = new PreviewStore();
   // Unlike the filters tier, manage is NOT scope-gated: gmail.modify is the default
   // grant so almost every token has it, and hasModifyScope() is `undefined` (unknown)
   // for the common encrypted/old-token case — gating here would either do nothing or
@@ -730,7 +734,8 @@ function registerManageTools(server: McpServer): void {
         "NOTE: the query hits Gmail's search index as-is, WITHOUT the live re-verification search performs. The staleness that makes search re-verify was measured on `threads.list` (132 threads returned, 114 carrying no unread message at all); the same query through the message index this tool uses returned 19 hits, none stale — same mailbox, same minute. So the known drift does not reach this path, but that is one measurement, not a guarantee: `unverifiedPredicates` in the result names the conditions taken on the index's word, and when the outcome must be read-state-precise, resolve the set with search (which verifies against live labels) and act on those thread ids instead. " +
         "Set crossCheck:true to ask Gmail the same question a second way before writing: each derived predicate is re-run as a label filter (`labelIds`) instead of a query operator, and any message the two routes disagree about is left untouched and listed in `crossChecked.dropped`. It costs one extra list per predicate — flat, not per message — so unlike `verify` it stays cheap on a large sweep. Read it as a contradiction detector: a disagreement is real, agreement proves nothing, because both routes read the same index. `unverifiedPredicates` therefore stays as it is even when this runs. A capped match set is not cross-checked at all (`crossChecked.capped`), since a message missing from a page is not a message missing the label. " +
         "Set dryRun:true to rehearse: the same query resolution, matched counts/threads and the labels that would be created — and no message or label is touched. A dry run reads the SAME unverified index, so it confirms the size of the set, never its correctness. " +
-        "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes. " +
+        `A dry run that matches anything also returns \`previewToken\`: the server keeps the exact matched message set for ${PREVIEW_TTL_MS / 60000} minutes. Pass it back with the SAME query, add and remove and the write acts on exactly that set — mail that started matching after the preview is left alone and counted in \`fromPreview.newMatches\`, and a reworded query or a different label change is refused before anything is written. A token works once; without one the call re-runs the query as before. ` +
+        "USE WHEN: mass operations — 'archive all newsletters older than 30 days' (query + remove INBOX), bulk labeling, bulk mark-read; dryRun first when the query is broad or the user should see the set before it changes, then the write with the dry run's previewToken. " +
         "DO NOT USE: for a single thread (use modify_labels or the dedicated tools), or with neither add nor remove. " +
         "Set undo:true to get `undo`, the EXACT inverse of this call: before writing, every affected thread's labels are read live, and the plan says per message what to add back and what to take off — a message that was already in the target state is left out, which a swapped add/remove would not do. Pass `undo.steps` unchanged to undo_bulk_modify to revert. It costs one extra read per affected thread. With undo:true the call writes NOTHING unless the plan can be built: more than 500 messages to change, or a prior state that could not be read, is an error before the first write — a change the caller asked to be reversible is never made irreversibly. A label the call created for a name in `add` is taken off again by the undo but stays in the mailbox, empty. " +
         "SIDE EFFECTS: modifies up to maxMessages messages in one call (none with dryRun); label changes are reversible — exactly with undo:true, approximately by the inverse call.",
@@ -750,6 +755,8 @@ function registerManageTools(server: McpServer): void {
         crossCheck: z.boolean().default(false),
         // Off by default: the prior-state read costs one threads.get per affected thread.
         undo: z.boolean().default(false),
+        // From a dry run of this exact change: act on the set it showed, not on a fresh listing.
+        previewToken: z.string().min(1).optional(),
       },
       outputSchema: {
         dryRun: z.boolean(),
@@ -783,6 +790,20 @@ function registerManageTools(server: McpServer): void {
           .optional(),
         // Dry run only: names in `add` that don't exist yet and a real run would create.
         labelsToCreate: z.array(z.string()).optional(),
+        // Dry run only, and only when something matched: pass to the write to act on exactly this set.
+        previewToken: z.string().optional(),
+        previewExpiresInSeconds: z.number().optional(),
+        // Write with a previewToken only: how the mailbox moved since the preview. The write acted on
+        // the held set; `newMatches` were left untouched, `noLongerMatching` were changed anyway.
+        fromPreview: z
+          .object({
+            heldMessages: z.number(),
+            heldForSeconds: z.number(),
+            newMatches: z.number(),
+            noLongerMatching: z.number(),
+            capped: z.boolean(),
+          })
+          .optional(),
         // Present only with undo:true and a real run: the per-message inverse. Pass `steps`
         // to undo_bulk_modify unchanged.
         undo: undoPlanSchema.optional(),
@@ -791,7 +812,7 @@ function registerManageTools(server: McpServer): void {
       // destructive: add:['TRASH'] over a broad query bulk-trashes existing mail.
       annotations: { title: "Bulk modify by query", ...write, destructiveHint: true },
     },
-    async ({ query, add, remove, maxMessages, dryRun, verify, crossCheck, undo }) => {
+    async ({ query, add, remove, maxMessages, dryRun, verify, crossCheck, undo, previewToken }) => {
       if (add.length === 0 && remove.length === 0) {
         throw new ToolError("invalid_input", "bulk_modify needs at least one label in add or remove — nothing to do.");
       }
@@ -799,12 +820,23 @@ function registerManageTools(server: McpServer): void {
       if (both.length > 0) {
         throw new ToolError("invalid_input", `A label cannot be added and removed in one call: ${both.join(", ")}.`);
       }
+      if (previewToken && dryRun) {
+        throw new ToolError("invalid_input", "previewToken belongs to the write that follows a dry run, not to another dry run.");
+      }
       const gmail = await client();
-      const matched = await gmail.listMessageRefs({ query, max: maxMessages });
+      // With a token the set is the one the preview showed, already cross-checked if the preview was;
+      // the query runs once more only to say how the mailbox moved since (`fromPreview`).
+      let held: { refs: { id: string; threadId: string }[]; heldAt: number; capped: boolean } | undefined;
+      if (previewToken) {
+        const taken = previews.take(previewToken, { query, add, remove });
+        if (!taken.ok) throw new ToolError("invalid_input", taken.message);
+        held = taken;
+      }
+      const matched = held ? held.refs : await gmail.listMessageRefs({ query, max: maxMessages });
       // The cross-check runs before anything is written, in the dry run too: a rehearsal that
       // reported the full match set while the real run acted on a smaller one would be a
-      // rehearsal of something else.
-      const cross = crossCheck
+      // rehearsal of something else. A held set was cross-checked by its preview, or not at all.
+      const cross = crossCheck && !held
         ? await gmail.crossCheckPredicates(query, matched, maxMessages)
         : undefined;
       const refs = cross?.kept ?? matched;
@@ -815,7 +847,7 @@ function registerManageTools(server: McpServer): void {
         matchedThreadCount: matchedThreads.length,
         matchedThreads: matchedThreads.slice(0, 500),
         // listMessageRefs stops at maxMessages: a full page means more may match.
-        capped: matched.length >= maxMessages,
+        capped: held ? held.capped : matched.length >= maxMessages,
         // Say which conditions rest on the index alone — in the dry run too, so a rehearsal
         // cannot be mistaken for verification (it re-reads the same index). The cross-check
         // does NOT empty this list: it compares two routes into the same index, which can
@@ -841,8 +873,24 @@ function registerManageTools(server: McpServer): void {
           submittedThreadCount: 0,
           submittedThreads: [],
           labelsToCreate: await gmail.unknownLabelNames(add),
+          // An empty set gets no token: there is nothing to confirm, and a write over nothing needs none.
+          ...(refs.length > 0
+            ? {
+                previewToken: previews.hold({ query, add, remove }, refs, shared.capped),
+                previewExpiresInSeconds: PREVIEW_TTL_MS / 1000,
+              }
+            : {}),
           failed: [],
         });
+      }
+      let fromPreview: ReturnType<typeof previewDrift> & { heldMessages: number; heldForSeconds: number } | undefined;
+      if (held) {
+        const current = await gmail.listMessageRefs({ query, max: maxMessages });
+        fromPreview = {
+          heldMessages: held.refs.length,
+          heldForSeconds: Math.round((Date.now() - held.heldAt) / 1000),
+          ...previewDrift(held.refs, current, current.length >= maxMessages),
+        };
       }
       // The plan lists every message id and has to fit the context it is returned through. Refused
       // before the first write: the caller asked for a reversible change, not for this one. A capped
@@ -857,6 +905,7 @@ function registerManageTools(server: McpServer): void {
       return ok({
         dryRun: false,
         ...shared,
+        ...(fromPreview ? { fromPreview } : {}),
         ...(res.undo ? { undo: res.undo } : {}),
         submittedMessages: res.submittedMessages,
         submittedThreadCount: res.submittedThreads.length,
