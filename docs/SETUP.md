@@ -199,6 +199,34 @@ consider `MAILWARDEN_READONLY=1` and `MAILWARDEN_DOWNLOAD_DIR`.
 **Smoke test:** ask your assistant something like *"search my inbox for unread mail from
 the last 2 days"* — you should get real thread summaries back.
 
+### A second machine
+
+Four deployments were asked in October 2026 what had gone wrong for them; every one that used a
+second machine had hit the same thing, and each time it failed *silently* — no mailwarden tools,
+or a connection that closed at once, and nothing that said why. Four facts cover all of them:
+
+- **The authorization does not travel.** `credentials.json` and `token.json` live in
+  `~/.mailwarden/` on the machine that ran `--auth`; a clone, a synced project folder or a
+  dotfiles repo does not carry them. Run `npx -y mailwarden --auth` on the new machine. If you
+  copy the directory instead (USB stick, file share), set `MAILWARDEN_TOKEN_PASSPHRASE` and
+  re-run `--auth` on the *source* first, so what leaves the machine is encrypted: a plaintext
+  `token.json` is the mailbox, for whoever holds the copy.
+- **A project-level `.mcp.json` in a synced folder must not name an absolute path.** A folder on
+  Google Drive or OneDrive is the same folder on both machines, but `D:/gitwork/mailwarden/dist/
+  index.js` exists on one of them; on the other, the server is registered and dies on start
+  (`CONNECTION_CLOSED`), which looks like a missing tool rather than a wrong path. There is no
+  one correct path to write. Use `npx -y mailwarden` in that file, or keep the registration out
+  of the synced folder and register per machine with `claude mcp add` (user scope).
+- **Running from a clone, `dist/` is yours to build** — it is not in git. `npm install && npm run
+  build` on each machine, and again after every `git pull`: a stale `dist/` runs the old version
+  without complaint, and a missing one makes the server fail to start with no mailwarden message
+  at all, because there is no mailwarden yet to print one.
+- **Ask the running server what it is.** `get_profile` returns `serverVersion`, `serverPath` (the
+  directory the code was loaded from) and `account`. When a tool documented for a version seems
+  missing, this is the call that says whether the build you think is running actually is. Before
+  that, `npx -y mailwarden --check` on the new machine tells credentials, token, scopes and a live
+  call apart.
+
 ---
 
 ## Troubleshooting
