@@ -22,6 +22,18 @@ import { compareFilters } from "./filter-preview.js";
 import { attachmentText, AttachmentTextError, DEFAULT_LIMITS } from "./attachment-text.js";
 import { CONFIRM_SCHEMA, confirmPlan, confirmed, resolveConfirmMode, type ConfirmMode } from "./confirm.js";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
+import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+
+/**
+ * Which build is answering, and from where. Reported by `get_profile` because two operators
+ * could not tell (2026-10-25): one ran a `dist/` nine days older than the source it sat next to,
+ * one did not know whether the npm install or the clone was serving. The client's config says
+ * what it was told to start; only the running process knows what actually started.
+ */
+const SERVER_VERSION: string = createRequire(import.meta.url)("../package.json").version;
+const SERVER_PATH: string = path.dirname(fileURLToPath(import.meta.url));
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -484,8 +496,8 @@ function registerReadTools(server: McpServer): void {
     "get_profile",
     {
       description:
-        "Return the authorized account: email address plus total message/thread counts. " +
-        "USE WHEN: confirming WHICH mailbox is connected before a bulk or filter action, or as a cheap liveness check. " +
+        "Return the authorized account: email address plus total message/thread counts, and WHICH SERVER is answering: `serverVersion`, `serverPath` (the directory the running code was loaded from — an npm install, an npx cache or a clone's `dist/`) and `account` (the named mailwarden account, or `(default)`). " +
+        "USE WHEN: confirming WHICH mailbox is connected before a bulk or filter action, as a cheap liveness check, or when a tool or field documented for a version seems missing — `serverVersion` says whether the running build is the one you think, and `serverPath` which install it is. " +
         "DO NOT USE: to enumerate messages — this returns only counts, not a listing (use search). " +
         "SIDE EFFECTS: none.",
       outputSchema: {
@@ -495,10 +507,19 @@ function registerReadTools(server: McpServer): void {
         // The mailbox's current position in its own event log. Keep it if you intend to ask
         // what_changed later — mailwarden stores nothing between calls.
         historyId: z.string(),
+        serverVersion: z.string(),
+        serverPath: z.string(),
+        account: z.string(),
       },
       annotations: { title: "Get profile", ...readOnly },
     },
-    async () => ok(await (await client()).getProfile()),
+    async () =>
+      ok({
+        ...(await (await client()).getProfile()),
+        serverVersion: SERVER_VERSION,
+        serverPath: SERVER_PATH,
+        account: activeAccount() ?? "(default)",
+      }),
   );
 
   registerTool(

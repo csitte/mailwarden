@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   news. `full: false` is unchanged and `bodies` has no effect on it; the description now steers to
   `bodies: "none"` when the attachment list matters, since the two cost the same. The selection and
   trimming rules are pure (`src/threadview.ts`) and held by their own tests.
+- **`get_profile` says which server is answering.** `serverVersion`, `serverPath` (the directory
+  the running code was loaded from: an npm install, an npx cache or a clone's `dist/`) and
+  `account` (the named mailwarden account or `(default)`). From the same 25 October round: one
+  operator ran a `dist/` nine days older than the source beside it after a `git pull`, another
+  could not tell whether the npm install or the clone was serving, and in both cases the symptom
+  was a documented tool that seemed not to exist. A client's config says what it was told to
+  start; only the running process knows what started, and this is the cheapest call that can say.
 - **`bulk_modify` previews can be confirmed exactly.** A dry run that matches anything returns a
   `previewToken`, and the server holds the matched message set for 30 minutes. A write that passes the
   token back with the same query, `add` and `remove` acts on exactly that set: mail that started matching

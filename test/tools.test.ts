@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
+import { readFileSync } from "node:fs";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
@@ -482,15 +483,23 @@ describe("tool results — structured content + fenced text", () => {
         }),
       },
     });
+    // An earlier test may have left the mock on a named account; this one asks about the default.
+    (activeAccount as Mock).mockReturnValue(undefined);
     const client = await connect();
     const res: any = await client.callTool({ name: "get_profile", arguments: {} });
 
-    expect(res.structuredContent).toEqual({
+    expect(res.structuredContent).toMatchObject({
       emailAddress: "me@example.com",
       historyId: "99001",
       messagesTotal: 1200,
       threadsTotal: 640,
+      account: "(default)",
     });
+    // Which build answers, and from where: the version is the package's own, the path is
+    // the directory the running code was loaded from (here the TypeScript source under test).
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    expect(res.structuredContent.serverVersion).toBe(pkg.version);
+    expect(res.structuredContent.serverPath.replace(/\\/g, "/")).toMatch(/\/src$/);
     expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
   });
 
