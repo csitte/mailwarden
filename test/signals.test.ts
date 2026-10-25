@@ -548,6 +548,8 @@ describe("buildDigest — signal counts overall and per sender", () => {
     from: "",
     subject: "",
     date: "",
+    lastMessageId: "m",
+    lastMessageDate: "",
     labelIds: [],
     snippet: "",
     hasAttachments: false,

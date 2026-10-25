@@ -15,6 +15,8 @@ function thread(p: Partial<ThreadSummary>): ThreadSummary {
     from: "",
     subject: "",
     date: "",
+    lastMessageId: "m",
+    lastMessageDate: "",
     labelIds: [],
     snippet: "",
     hasAttachments: false,

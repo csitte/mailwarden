@@ -733,6 +733,8 @@ function row(over: Partial<ThreadSummary>): ThreadSummary {
     from: "News <news@example.com>",
     subject: "s",
     date: "Mon, 10 Aug 2026 10:00:00 +0000",
+    lastMessageId: "m",
+    lastMessageDate: "Mon, 10 Aug 2026 10:00:00 +0000",
     labelIds: [],
     snippet: "",
     hasAttachments: false,

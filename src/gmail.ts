@@ -25,9 +25,20 @@ import { sanitizeStructured } from "./sanitize.js";
 export interface ThreadSummary {
   threadId: string;
   messageCount: number;
+  /** Sender, subject and date of the thread's FIRST message — its origin. */
   from: string;
   subject: string;
   date: string;
+  /**
+   * Id and `Date` header of the thread's LAST message. `date` above is the first message's,
+   * while Gmail's `snippet` is the last one's — so a thread that got a reply this morning
+   * showed yesterday's date next to this morning's words, and whether anything was new could
+   * only be read off `messageCount` against a remembered count (reported 2026-10-25). The id
+   * is what `get_thread`'s `afterMessageId` takes, so "show me what came after this" needs no
+   * second lookup. Equal to the first message's on a single-message thread.
+   */
+  lastMessageId: string;
+  lastMessageDate: string;
   labelIds: string[];
   snippet: string;
   hasAttachments: boolean;
@@ -977,12 +988,16 @@ export class Gmail {
         const headers = msgs[0]?.payload?.headers ?? [];
         const raw = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
         const h = (n: string) => decodeRfc2047(raw(n));
+        const last = msgs[msgs.length - 1];
+        const lastDate = last?.payload?.headers?.find((x) => x.name?.toLowerCase() === "date")?.value ?? "";
         out.push({
           threadId: t.id!,
           messageCount: msgs.length,
           from: decodeAddressHeader(raw("From")),
           subject: h("Subject"),
           date: h("Date"),
+          lastMessageId: last?.id ?? "",
+          lastMessageDate: decodeRfc2047(lastDate),
           labelIds,
           snippet: t.snippet ?? msgs[0]?.snippet ?? "",
           hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),

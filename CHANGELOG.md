@@ -26,6 +26,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   news. `full: false` is unchanged and `bodies` has no effect on it; the description now steers to
   `bodies: "none"` when the attachment list matters, since the two cost the same. The selection and
   trimming rules are pure (`src/threadview.ts`) and held by their own tests.
+- **`search` names the last message of each thread, not only the first.** `date`, `from` and
+  `subject` were always the first message's — the thread's origin — while Gmail's `snippet` is the
+  last one's, so a thread that got a reply this morning showed yesterday's date beside this morning's
+  words, and whether anything was new could only be read off `messageCount` against a count
+  remembered from the last run (reported 2026-10-25 from a live mailbox). Each summary now also
+  carries `lastMessageDate` and `lastMessageId`; on a single-message thread they name the same
+  message as `date`. The id is what `get_thread`'s new `afterMessageId` takes, so "what came after the
+  one I saw" is one call. The first-message fields keep their meaning: a newsletter stays a newsletter
+  after the user replies to it, and `signals` still read the origin.
 - **`get_profile` says which server is answering.** `serverVersion`, `serverPath` (the directory
   the running code was loaded from: an npm install, an npx cache or a clone's `dist/`) and
   `account` (the named mailwarden account or `(default)`). From the same 25 October round: one

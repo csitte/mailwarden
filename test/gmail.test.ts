@@ -380,6 +380,64 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     expect(res.threads.map((r) => r.threadId)).toEqual(["a", "c"]);
   });
 
+  it("reports the LAST message's id and date beside the first's — the snippet is the last one's", async () => {
+    // Reported 2026-10-25: a thread that got a reply at 11:41 showed its 05:01 origin date next
+    // to the reply's snippet, and "is there anything new?" had to be read off messageCount.
+    const api: any = {
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: [{ id: "t1", snippet: "the reply" }] } }),
+          get: async () => ({
+            data: {
+              messages: [
+                {
+                  id: "m-first",
+                  labelIds: ["INBOX"],
+                  payload: {
+                    headers: [
+                      { name: "From", value: "ads@example.com" },
+                      { name: "Subject", value: "Your account" },
+                      { name: "Date", value: "Sat, 25 Oct 2026 05:01:00 +0200" },
+                    ],
+                  },
+                },
+                {
+                  id: "m-last",
+                  labelIds: ["INBOX"],
+                  payload: {
+                    headers: [
+                      { name: "From", value: "me@example.com" },
+                      { name: "Subject", value: "Re: Your account" },
+                      { name: "Date", value: "=?utf-8?q?Sat=2C_25_Oct_2026_11=3A41=3A00_+0200?=" },
+                    ],
+                  },
+                },
+              ],
+            },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const [row] = (await gmail.search("from:ads@example.com", 25)).threads;
+    expect(row).toMatchObject({
+      messageCount: 2,
+      from: "ads@example.com",
+      date: "Sat, 25 Oct 2026 05:01:00 +0200",
+      lastMessageId: "m-last",
+      lastMessageDate: "Sat, 25 Oct 2026 11:41:00 +0200", // RFC 2047-decoded like `date`
+      snippet: "the reply",
+    });
+  });
+
+  it("a single-message thread has the same message as first and last", async () => {
+    const { api } = fakeSearchApi({ a: ["UNREAD"] });
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    const [row] = (await gmail.search("is:unread", 25)).threads;
+    expect(row.lastMessageId).toBe("m-a");
+    expect(row.lastMessageDate).toBe(row.date);
+  });
+
   it("over-scans candidates (full page) when filtering so maxResults stays meaningful", async () => {
     const { api, stats } = fakeSearchApi({ a: ["UNREAD"] });
     const gmail = new Gmail(api as gmail_v1.Gmail);
