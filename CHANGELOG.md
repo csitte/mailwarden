@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on
+  25 October 2026: the server whose stated position is closest to this one (no send tool, no trash,
+  filters that cannot forward), but draft-only rather than without compose, and ahead of `mailwarden`
+  on token encryption, which it does by default with the key in the OS keystore. The same round
+  re-read the four columns that had moved. `aaronsb` (v4.8.0) moves on two rows: since 16 October
+  2026 it relabels everything a query matches behind a one-use preview token, and it manages filters
+  behind the same kind of preview, forwarding included unless its draft-only policy is set.
+  `taylorwilsdon` (v2.2.0) gains a `+`-union form of `--permissions`, named in its least-privilege
+  cell; `klodr` (3.0.0) now refuses a forwarding filter outright; `agentcomms` (0.28.0) moves on no row.
 - **The `newsletter` and `automated` signals recognise three more spellings of machine mail.**
   `Precedence: junk` now counts as bulk mail (`newsletter`), as vacation responders have long
   treated it. A `+detail` sub-address (RFC 5233) is dropped before the From local-part is
