@@ -49,7 +49,18 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    as the explicit choice for headless hosts. Plaintext tokens keep loading and are encrypted at the
    next `--auth`, never rewritten silently. What it does not defend against goes into `SECURITY.md`
    as plainly: malware running as the same user can query the keystore too.
-2. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
+2. **Drafts, never sending** — decided 25 October 2026, for the release after the keystore one. A
+   separate `drafts` tier, off by default, so a deployment that does not enable it still has no
+   compose tool at all, and the `read` tier keeps Google's own enforcement. It writes drafts — replies
+   to an existing thread with the recipients derived from that thread, and new messages with
+   recipients the caller names — and can change only drafts it created. A new message to a freely
+   chosen address is where an injected instruction could aim mail at a stranger, so that path always
+   asks the person at the client first, through the same elicitation as `MAILWARDEN_CONFIRM`, and is
+   refused on a client that cannot ask. No attachments from local disk. Sending stays a non-goal:
+   `messages.send` and `drafts.send` stay on the egress denylist, and only a person pressing Send in
+   Gmail sends anything. What remains is stated plainly: a draft can carry what an injected mail asked
+   for, and the protection is the human reading it before Send.
+3. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
    `server/discover`, Zod 4). Not urgent: current clients negotiate down to the 1.x protocol and
    the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
    Planned for late 2026.
@@ -75,8 +86,9 @@ in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it; it is item 1 und
 
 ## Non-goals
 
-- **Sending mail** (compose/reply/forward/send). Deliberate: a triage server that cannot send gives
-  prompt-injected mail no exfiltration path. This will not change. Note the exact claim: Google
+- **Sending mail** (send, and forward or reply as an action that sends). Deliberate: a triage server
+  that cannot send gives prompt-injected mail no exfiltration path. This will not change. Writing a
+  *draft* that a person then sends is planned as an opt-in tier (see Next, item 2); it is not sending. Note the exact claim: Google
   enforces it only in the `read` tier (`gmail.readonly`); in `manage`/`filters` the guarantee is
   the tool surface, since `gmail.modify` would permit `messages.send` — see
   [`SECURITY.md`](../SECURITY.md).
