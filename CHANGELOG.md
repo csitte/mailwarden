@@ -124,6 +124,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and closes the four dev-only `vite`/`@vitest/mocker` alerts. The lockfile was resolved with
   `--before=2026-10-16`, so nothing in it is younger than nine days. Not closed: `node-forge` (dev
   only, no fix published).
+- **`zod` 3.25.76 to 4.6.7 (high, GHSA-mrhx-c7xc-m3w5).** Validating an oversized collection
+  against a length constraint could exhaust memory. The fix exists only in zod 4, a new major
+  version. mailwarden uses zod for every tool's input and output schema, but only its basic
+  building blocks, none of which changed between 3 and 4: no code change was needed, and the MCP
+  SDK accepts both majors. The tool schemas a client sees were compared under both versions via
+  `tools/list`. The differences are cosmetic: top-level `inputSchema`s no longer carry
+  `additionalProperties: false` (unknown arguments are stripped at runtime exactly as before),
+  integers without explicit bounds now state the safe-integer range, and `preview_filter`
+  inlines a nested schema instead of a `$ref`. Exposure here was low: tool arguments come from
+  the MCP client, not from the network.
+- **Three advisories in the SDK's HTTP transport, all reachable only with `--http`:** `body-parser`
+  2.3.0 to 2.4.0 (high, GHSA-27r3-jxmh-p828, denial of service through trailing bytes after a
+  compressed body), `fast-uri` 3.1.8 to 3.1.9 (moderate, four advisories on URI parsing, through
+  `ajv`), `ip-address` 10.7.3 to 10.7.4 (moderate, GHSA-rxp7-6hxx-x8q5, quadratic-time zone
+  parsing, through `express-rate-limit`). The lockfile was resolved with `--before=2026-10-23`:
+  `body-parser` 2.4.0 is the only fix for its advisory and three days old, everything else is
+  older, and `ip-address` deliberately stays on 10.7.4 rather than the 10.7.5 published the same
+  day. `npm audit --omit=dev` now reports nothing. Not closed, dev only: `node-forge` (no fix) and
+  a nested zod 3 that `@anthropic-ai/mcpb` still pins.
 
 ## [0.23.0] - 2026-10-13
 
