@@ -80,6 +80,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file and held the plugin for review over it. Nothing in the plugin used it; `render.py` no
   longer writes it, and `favicon-32.png` stays for web pages.
 
+### Security
+- **`hono` 4.13.7 to 4.13.13 (moderate, GHSA-5r4p-p66f-jhc7).** Dependabot flagged it on the
+  25 October push. `serveStatic` decoded the request path a second time, so middleware mounted on a
+  static prefix could be skipped. `hono` arrives through the SDK's HTTP transport and mailwarden never
+  calls `serveStatic`, so there was no path here. The `overrides` floor moves from `^4.12.34` to
+  `^4.13.11` so a later lockfile cannot fall back below the fix. In the same step the dev tree moves
+  `vitest` and `@vitest/coverage-v8` to 4.1.12, which brings `@vitest/mocker` 4.1.12 and `vite` 8.3.4
+  and closes the four dev-only `vite`/`@vitest/mocker` alerts. The lockfile was resolved with
+  `--before=2026-10-16`, so nothing in it is younger than nine days. Not closed: `node-forge` (dev
+  only, no fix published).
+
 ## [0.23.0] - 2026-10-13
 
 ### Added
