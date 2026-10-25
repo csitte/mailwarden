@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`get_thread` can return part of a thread, and bodies without their HTML.** Four deployments
+  were asked on 25 October what gets in their way, and three named the same tool: a seven-message
+  GitHub thread came back as 67,376 characters, most of it HTML and quoted history, to read two new
+  comments; weekly report mails had to be read in slices by a helper agent; and the only way to see
+  the attachment list without the bodies was not to see it at all (`full: false` omits it, because
+  Gmail's metadata format never carries it). Gmail has no partial fetch and bills `threads.get` the
+  same whatever is kept, so the shaping happens after the call: `bodies: "text"` drops `htmlBody`
+  and keeps `plaintextBody` (an HTML-only message is reduced to text and marked `bodyFromHtml: true`,
+  so a rendering is never mistaken for what the sender typed); `bodies: "none"` drops both and keeps
+  headers, `authentication` and the measured attachment list; `lastN` keeps the newest N messages and
+  `afterMessageId` those after one already read, and the two compose. Every answer now carries
+  `messageCount` (the whole thread) and `omittedMessages`, so a partial view cannot pass for the
+  whole, and `bodies` is echoed when it is not `full`, as `metadataOnly` already was. An
+  `afterMessageId` the thread does not contain is `invalid_input` naming the ids it has: a silent
+  "all" would hand back the history the caller asked to skip, a silent "nothing" would read as no
+  news. `full: false` is unchanged and `bodies` has no effect on it; the description now steers to
+  `bodies: "none"` when the attachment list matters, since the two cost the same. The selection and
+  trimming rules are pure (`src/threadview.ts`) and held by their own tests.
 - **`bulk_modify` previews can be confirmed exactly.** A dry run that matches anything returns a
   `previewToken`, and the server holds the matched message set for 30 minutes. A write that passes the
   token back with the same query, `add` and `remove` acts on exactly that set: mail that started matching

@@ -1191,7 +1191,84 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
     const gmail = new Gmail(api as gmail_v1.Gmail);
     const res = await gmail.getThread("th-1", true);
     expect(res.metadataOnly).toBeUndefined();
+    expect(res.bodies).toBeUndefined();
+    expect(res).toMatchObject({ messageCount: 1, omittedMessages: 0 });
     expect(res.messages[0]).toMatchObject({ plaintextBody: "body", attachments: [] });
+  });
+
+  it("getThread options: lastN trims the answer, not the request — the fetch is still the whole thread", async () => {
+    // Reported 2026-10-25 from three deployments: a seven-message thread came back as 67 k
+    // characters of mostly HTML and quotes to read two new comments. Gmail has no partial
+    // fetch, so the selection happens after the call and the counts say what was left out.
+    const getCalls: any[] = [];
+    const message = (id: string, text: string, html = "") => ({
+      id,
+      threadId: "th-1",
+      payload: {
+        mimeType: "multipart/alternative",
+        headers: [{ name: "Subject", value: id }],
+        parts: [
+          { mimeType: "text/plain", body: { data: b64url(text) } },
+          { mimeType: "text/html", body: { data: b64url(html) } },
+        ],
+      },
+    });
+    const api: any = {
+      users: {
+        threads: {
+          get: async (req: any) => {
+            getCalls.push(req);
+            return {
+              data: {
+                messages: [message("m1", "one", "<p>one</p>"), message("m2", "two", "<p>two</p>"), message("m3", "", "<p>three</p>")],
+              },
+            };
+          },
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+
+    const last = await gmail.getThread("th-1", { lastN: 2, bodies: "text" });
+    expect(getCalls[0]).toMatchObject({ format: "full", id: "th-1" });
+    expect(last).toMatchObject({ messageCount: 3, omittedMessages: 1, bodies: "text" });
+    expect(last.messages.map((m) => m.id)).toEqual(["m2", "m3"]);
+    const m2 = last.messages[0] as Record<string, unknown>;
+    expect(m2.plaintextBody).toBe("two");
+    expect("htmlBody" in m2).toBe(false);
+    // m3 is HTML-only: text is derived and flagged.
+    expect(last.messages[1]).toMatchObject({ plaintextBody: "three", bodyFromHtml: true });
+
+    const after = await gmail.getThread("th-1", { afterMessageId: "m2", bodies: "none" });
+    expect(after).toMatchObject({ messageCount: 3, omittedMessages: 2, bodies: "none" });
+    const m3 = after.messages[0] as Record<string, unknown>;
+    expect(m3.id).toBe("m3");
+    expect("plaintextBody" in m3).toBe(false);
+    expect("htmlBody" in m3).toBe(false);
+    expect(m3.attachments).toEqual([]); // measured on a full fetch, so it may be stated
+
+    // full:false ignores `bodies` — nothing was fetched to trim — but still selects.
+    const meta = await gmail.getThread("th-1", { full: false, bodies: "text", lastN: 1 });
+    expect(getCalls[2].format).toBe("metadata");
+    expect(meta).toMatchObject({ metadataOnly: true, messageCount: 3, omittedMessages: 2 });
+    expect(meta.bodies).toBeUndefined();
+    expect(meta.messages.map((m) => m.id)).toEqual(["m3"]);
+  });
+
+  it("getThread rejects an afterMessageId that is not in the thread as invalid_input", async () => {
+    const api: any = {
+      users: {
+        threads: {
+          get: async () => ({
+            data: { messages: [{ id: "m1", threadId: "th-1", payload: { headers: [] } }] },
+          }),
+        },
+      },
+    };
+    const gmail = new Gmail(api as gmail_v1.Gmail);
+    await expect(gmail.getThread("th-1", { afterMessageId: "nope" })).rejects.toMatchObject({
+      code: "invalid_input",
+    });
   });
 
   it("getThreadSubject uses a metadata-only fetch and defaults to empty", async () => {

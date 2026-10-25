@@ -361,27 +361,41 @@ function registerReadTools(server: McpServer): void {
     {
       description:
         "Fetch a thread by ID: headers, plaintext + HTML bodies, and attachment metadata. " +
-        "`full` defaults to true and should stay true whenever content matters. `full: false` is a headers-and-labels fetch for when a thread is too large to read or only its metadata is of interest — it does NOT fetch bodies or attachment metadata, and the result then omits `plaintextBody`, `htmlBody` and `attachments` entirely and sets `metadataOnly: true`. " +
-        "The fields are omitted rather than empty on purpose: an empty attachment list from a request that never looked is indistinguishable from a message that truly has none, and treating it as 'no attachment' has already nearly caused an invoice to be archived as attachment-less. If `search` reported `hasAttachments: true`, or the sender matters, use full: true. " +
+        "WHEN A THREAD IS LONG OR HTML-HEAVY, shrink the answer instead of skipping content: `bodies: \"text\"` drops `htmlBody` and keeps `plaintextBody` (an HTML-only mail is reduced to text and marked `bodyFromHtml: true`); `bodies: \"none\"` drops both bodies and keeps everything else, INCLUDING the real attachment list; `lastN: 2` returns only the newest two messages, `afterMessageId` only the messages after one you have already read (both compose: after X, then the last N). The quota cost is the same whatever you keep — Gmail hands over the whole thread, these options only decide how much of it you read. `messageCount` is always the whole thread and `omittedMessages` how many the selection left out, so a partial view never passes for the whole; `bodies` is echoed when it is not `full`. " +
+        "`full` defaults to true and should stay true whenever content matters. `full: false` is a headers-and-labels fetch that does NOT fetch bodies or attachment metadata — the result then omits `plaintextBody`, `htmlBody` and `attachments` entirely and sets `metadataOnly: true`; `bodies` has no effect on it. Prefer `bodies: \"none\"` over `full: false` when the attachment list matters, since the two cost the same. " +
+        "The fields are omitted rather than empty on purpose: an empty attachment list from a request that never looked is indistinguishable from a message that truly has none, and treating it as 'no attachment' has already nearly caused an invoice to be archived as attachment-less. If `search` reported `hasAttachments: true`, or the sender matters, use full: true (any `bodies`). " +
         "EVERY MESSAGE CARRIES `authentication` — SPF/DKIM/DMARC as the RECEIVING server reported them, for answering 'is this mail really from who it says?'. That holds on a `full: false` fetch too — the metadata request asks for `Authentication-Results` by name, so checking whether a mail is really from who it says never costs a body. Read `dmarc` first: it is the only one of the three that ties a passing check to the visible `From` domain, so `spf: pass` alone proves nothing about the sender the user sees (a lookalike domain gets that trivially). `signedBy`/`mailedBy`/`headerFrom` name the domains each check actually validated. They do NOT have to match each other or the `From` address, and a mismatch is not by itself suspicious: a forwarded message legitimately shows the forwarder in `mailedBy` (the envelope sender is rewritten in transit) and in `signedBy` (the forwarder signs with its own key), while only `headerFrom` still names the original sender — which is exactly why `dmarc` is the result that carries meaning. Read those three as the explanation of a result, not as a test of their own. `dkimAligned` says whether a passing DKIM signature belongs to the `From` domain or a parent or child of it; it is absent when that cannot be told without a public-suffix list (two sibling subdomains), so a missing field is not a mismatch. `authservId` says WHO asserts all this: a message can carry forged Authentication-Results headers of its own, and only Gmail's own report (`mx.google.com`) is ever read; `otherReports` counts the reports that were NOT read, and `alsoReported` lists results that disagree with the ones above. `unchecked: true` means the message carried no report from Gmail — that is 'nobody looked', NOT 'nothing wrong'; unauthenticated does not imply forged, and authenticated does not imply honest (a phisher can hold a passing DMARC on his own lookalike domain). " +
         "USE WHEN: reading a thread's content after finding it via search. " +
         "DO NOT USE: with a message ID — this takes thread IDs. " +
         "SIDE EFFECTS: none (does not mark as read).",
-      inputSchema: { threadId: z.string(), full: z.boolean().default(true) },
+      inputSchema: {
+        threadId: z.string(),
+        full: z.boolean().default(true),
+        bodies: z.enum(["full", "text", "none"]).default("full"),
+        lastN: z.number().int().positive().optional(),
+        afterMessageId: z.string().optional(),
+      },
       outputSchema: {
         threadId: z.string(),
-        // Content fields are optional because `full: false` genuinely has no answer for
-        // them — see the description; do not "fix" this by defaulting them to ""/[].
+        messageCount: z.number().int(),
+        omittedMessages: z.number().int(),
+        // Content fields are optional because `full: false` and `bodies` genuinely have no
+        // answer for them — see the description; do not "fix" this by defaulting them to ""/[].
         messages: z.array(
-          parsedMessageSchema.partial({ plaintextBody: true, htmlBody: true, attachments: true }),
+          parsedMessageSchema
+            .partial({ plaintextBody: true, htmlBody: true, attachments: true })
+            .extend({ bodyFromHtml: z.literal(true).optional() }),
         ),
         // Present only on a full:false fetch, so the caller never has to infer which
         // shape it got from a field that happens to be missing.
         metadataOnly: z.literal(true).optional(),
+        // Likewise present only when bodies were trimmed.
+        bodies: z.enum(["text", "none"]).optional(),
       },
       annotations: { title: "Get thread", ...readOnly },
     },
-    async ({ threadId, full }) => ok(await (await client()).getThread(threadId, full)),
+    async ({ threadId, full, bodies, lastN, afterMessageId }) =>
+      ok(await (await client()).getThread(threadId, { full, bodies, lastN, afterMessageId })),
   );
 
   registerTool(

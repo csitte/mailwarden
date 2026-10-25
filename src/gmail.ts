@@ -13,6 +13,13 @@ import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./
 import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
 import { renderThread, type ExportFormat } from "./export.js";
+import {
+  selectMessages,
+  trimBodies,
+  type BodyMode,
+  type MessageSelection,
+  type TrimmedMessage,
+} from "./threadview.js";
 import { sanitizeStructured } from "./sanitize.js";
 
 export interface ThreadSummary {
@@ -63,15 +70,29 @@ export interface ParsedMessage {
 /** A message as Gmail's `metadata` format can answer for it: headers and labels, no content. */
 export type MessageHeaders = Omit<ParsedMessage, "plaintextBody" | "htmlBody" | "attachments">;
 
+/** What `getThread` may be asked for beyond the thread id. */
+export interface GetThreadOptions extends MessageSelection {
+  /** `false` = Gmail's `metadata` format: headers and labels, no payload at all. */
+  full?: boolean;
+  /** How much body to keep on a full fetch; ignored when `full` is false (nothing was fetched). */
+  bodies?: BodyMode;
+}
+
 /**
- * `getThread`'s answer. The two shapes are deliberately not interchangeable: the
+ * `getThread`'s answer. The three shapes are deliberately not interchangeable: the
  * metadata one has no content fields at all rather than empty ones, so "no
- * attachments" cannot be read off a request that never asked for them. `metadataOnly`
- * names which shape came back without the caller having to probe for a missing field.
+ * attachments" cannot be read off a request that never asked for them, and the trimmed
+ * one names its `bodies` mode so a missing `htmlBody` reads as "not asked for", never as
+ * "the mail had none". `metadataOnly` and `bodies` say which shape came back without
+ * the caller having to probe for a missing field. `messageCount` is the whole thread,
+ * `omittedMessages` how many of it the selection left out — so "the last two" never
+ * passes for "all there is".
  */
-export type GetThreadResult =
-  | { threadId: string; messages: ParsedMessage[]; metadataOnly?: undefined }
-  | { threadId: string; messages: MessageHeaders[]; metadataOnly: true };
+export type GetThreadResult = { threadId: string; messageCount: number; omittedMessages: number } & (
+  | { messages: ParsedMessage[]; metadataOnly?: undefined; bodies?: undefined }
+  | { messages: TrimmedMessage[]; metadataOnly?: undefined; bodies: "text" | "none" }
+  | { messages: MessageHeaders[]; metadataOnly: true; bodies?: undefined }
+);
 
 export interface LabelInfo {
   id: string;
@@ -1156,7 +1177,28 @@ export class Gmail {
     return collectBodies(message?.payload ?? undefined);
   }
 
-  async getThread(threadId: string, full = true): Promise<GetThreadResult> {
+  async getThread(threadId: string, options: boolean | GetThreadOptions = true): Promise<GetThreadResult> {
+    const opts: GetThreadOptions = typeof options === "boolean" ? { full: options } : options;
+    const full = opts.full ?? true;
+    const bodies: BodyMode = opts.bodies ?? "full";
+    const parsed = await this.fetchThread(threadId, full);
+    // Selection happens here, after the fetch: Gmail hands over the whole thread whatever is
+    // asked, so `lastN` changes the size of the answer, never the cost of the call.
+    const { messages, omitted } = selectMessages(parsed, opts);
+    const counts = { threadId, messageCount: parsed.length, omittedMessages: omitted };
+    if (!full) {
+      return {
+        ...counts,
+        metadataOnly: true,
+        messages: messages.map(({ plaintextBody, htmlBody, attachments, ...header }) => header),
+      };
+    }
+    if (bodies === "full") return { ...counts, messages };
+    return { ...counts, bodies, messages: messages.map((m) => trimBodies(m, bodies)) };
+  }
+
+  /** The parsed messages of a thread, oldest first, in the format `full` selects. */
+  private async fetchThread(threadId: string, full: boolean): Promise<ParsedMessage[]> {
     const res = await this.req(() =>
       this.api.users.threads.get({
         userId: "me",
@@ -1167,13 +1209,7 @@ export class Gmail {
         ...(full ? {} : { metadataHeaders: [...PARSED_HEADERS] }),
       }),
     );
-    const messages = (res.data.messages ?? []).map((m) => parseMessage(m));
-    if (full) return { threadId, messages };
-    return {
-      threadId,
-      metadataOnly: true,
-      messages: messages.map(({ plaintextBody, htmlBody, attachments, ...header }) => header),
-    };
+    return (res.data.messages ?? []).map((m) => parseMessage(m));
   }
 
   /**
@@ -1705,10 +1741,10 @@ export class Gmail {
     bytes: number;
   }> {
     // Fetch first: a thread that does not exist must not leave empty directories behind.
-    const thread = await this.getThread(threadId, true);
+    const fetched = await this.fetchThread(threadId, true);
     // The same hidden-character stripping every tool result gets: zero-width and bidi
     // controls the sender put in a header or body must not survive into a file either.
-    const messages = sanitizeStructured(thread.messages as ParsedMessage[]);
+    const messages = sanitizeStructured(fetched);
     const dest = await resolveLocalDest(destPath);
     const buf = Buffer.from(renderThread(threadId, messages, format, new Date()), "utf8");
     return { saved: await writeUnique(dest, buf), messageCount: messages.length, bytes: buf.length };

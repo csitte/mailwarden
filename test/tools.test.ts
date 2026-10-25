@@ -233,10 +233,62 @@ describe("tool results — structured content + fenced text", () => {
 
     expect(res.isError).toBeFalsy();
     expect(res.structuredContent.metadataOnly).toBe(true);
+    expect(res.structuredContent).toMatchObject({ messageCount: 1, omittedMessages: 0 });
     const msg = res.structuredContent.messages[0];
     expect(msg.subject).toBe("Invoice");
     expect("attachments" in msg).toBe(false);
     expect("plaintextBody" in msg).toBe(false);
+  });
+
+  it("get_thread bodies:none + lastN validates against the schema and keeps the attachment list", async () => {
+    const b64url = (s: string) => Buffer.from(s, "utf8").toString("base64url");
+    const message = (id: string) => ({
+      id,
+      threadId: "t1",
+      labelIds: ["INBOX"],
+      payload: {
+        mimeType: "multipart/mixed",
+        headers: [{ name: "Subject", value: id }],
+        parts: [
+          { mimeType: "text/html", body: { data: b64url("<p>hi</p>") } },
+          { filename: "report.pdf", mimeType: "application/pdf", body: { attachmentId: "att-1", size: 12 } },
+        ],
+      },
+    });
+    (getAuth as Mock).mockResolvedValue({
+      users: { threads: { get: async () => ({ data: { messages: [message("m1"), message("m2"), message("m3")] } }) } },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "get_thread",
+      arguments: { threadId: "t1", bodies: "none", lastN: 1 },
+    });
+
+    expect(res.isError).toBeFalsy();
+    expect(res.structuredContent).toMatchObject({ bodies: "none", messageCount: 3, omittedMessages: 2 });
+    expect(res.structuredContent.metadataOnly).toBeUndefined();
+    const msg = res.structuredContent.messages[0];
+    expect(msg.id).toBe("m3");
+    expect("plaintextBody" in msg).toBe(false);
+    expect("htmlBody" in msg).toBe(false);
+    expect(msg.attachments).toEqual([
+      { messageId: "m3", attachmentId: "att-1", filename: "report.pdf", mimeType: "application/pdf", size: 12 },
+    ]);
+
+    const text: any = await client.callTool({
+      name: "get_thread",
+      arguments: { threadId: "t1", bodies: "text", afterMessageId: "m2" },
+    });
+    expect(text.isError).toBeFalsy();
+    expect(text.structuredContent.messages).toHaveLength(1);
+    expect(text.structuredContent.messages[0]).toMatchObject({ id: "m3", plaintextBody: "hi", bodyFromHtml: true });
+
+    const bad: any = await client.callTool({
+      name: "get_thread",
+      arguments: { threadId: "t1", afterMessageId: "m9" },
+    });
+    expect(bad.isError).toBe(true);
+    expect(bad.structuredContent?.code ?? bad.content[0].text).toContain("invalid_input");
   });
 
   it("answers a failure with a code and a retry verdict, not just a sentence", async () => {
