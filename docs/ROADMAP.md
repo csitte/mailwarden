@@ -30,7 +30,7 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
   stopped before the first write or outbound request (0.10.0).
 - **Claude Code plugin** — repo root as plugin (`.claude-plugin/plugin.json` → `npx -y mailwarden`) with a
   `/mailwarden:setup` skill; submitted to the community marketplace (0.10.0).
-- **Triage `signals`** on search hits (newsletter / automated / calendar / replyToMismatch), header-derived,
+- **Triage `signals`** on search hits (newsletter / automated / calendar / replyToMismatch, later displayNameSpoof / lookalikeDomain), header-derived,
   aggregated in `triage_digest` (0.10.0).
 - **MCPB bundle** (`npm run mcpb` → `dist-mcpb/mailwarden-<version>.mcpb`) as a release artifact — the
   format Smithery (`smithery mcp publish`) and the Claude Desktop extension directory accept for a

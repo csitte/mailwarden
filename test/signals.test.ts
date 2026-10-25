@@ -128,7 +128,7 @@ describe("deriveSignals — the edges that must NOT fire", () => {
 
   it("returns signals in the fixed ALL_SIGNALS order regardless of which header came first", () => {
     const s = sig(
-      { "Reply-To": "z@other.example", From: "no-reply@x.example", "List-Id": "<l>" },
+      { "Reply-To": "z@other.example", From: '"www.other.example" <no-reply@xn--pypal-4ve.example>', "List-Id": "<l>" },
       [{ mimeType: "text/calendar" }],
     );
     expect(s).toEqual([...ALL_SIGNALS]);
@@ -303,8 +303,10 @@ describe("deriveSignals corpus — replyToMismatch: RFC 5322 address syntax, eve
     ["name-addr vs addr-spec", { From: "A <a@x.example>", "Reply-To": "b@x.example" }, [], []],
     ["quoted display name with a comma", { From: "A <a@x.example>", "Reply-To": '"Support, Team" <b@x.example>' }, [], []],
     ["quoted display name containing a literal <addr>", { From: "A <a@x.example>", "Reply-To": '"<evil@y.example>" <b@x.example>' }, [], []],
-    ["From's quoted name mimics its own address (evasion, no mismatch)", { From: '"<a@x.example>" <a@evil.example>', "Reply-To": "b@evil.example" }, [], []],
-    ["From's quoted name mimics a foreign address (evasion, real mismatch)", { From: '"<a@evil.example>" <a@x.example>', "Reply-To": "b@evil.example" }, [], ["replyToMismatch"]],
+    // The quoted name is not the address for the Reply-To comparison. It IS what a reader sees,
+    // and it names another domain than the one that sent the mail: that is displayNameSpoof.
+    ["From's quoted name mimics its own address (evasion, no mismatch)", { From: '"<a@x.example>" <a@evil.example>', "Reply-To": "b@evil.example" }, [], ["displayNameSpoof"]],
+    ["From's quoted name mimics a foreign address (evasion, real mismatch)", { From: '"<a@evil.example>" <a@x.example>', "Reply-To": "b@evil.example" }, [], ["replyToMismatch", "displayNameSpoof"]],
     ["addr-spec + trailing comment", { ...F, "Reply-To": "b@x.example (Support)" }, [], []],
     ["comment + addr-spec", { ...F, "Reply-To": "(Support) b@x.example" }, [], []],
     ["From with comment", { From: "a@x.example (Alice)", "Reply-To": "b@x.example" }, [], []],
@@ -338,6 +340,60 @@ describe("deriveSignals corpus — replyToMismatch: RFC 5322 address syntax, eve
     ["From is a bare display name", { From: "Alice", "Reply-To": "b@y.example" }, [], []],
     ["Reply-To entirely RFC 2047-encoded (broken sender)", { ...F, "Reply-To": "=?utf-8?B?YkB5LmV4YW1wbGU=?=" }, [], []],
     ["RFC 2047 display name with an encoded @", { ...F, "Reply-To": "=?UTF-8?Q?Sup=40y.example?= <b@x.example>" }, [], []],
+  ])("%s", (_n, h, p, exp) => expect(sig(h, p)).toEqual(exp));
+});
+
+describe("deriveSignals corpus — displayNameSpoof: what the reader is shown against where the mail came from", () => {
+  const P = "a@paypal.example";
+  it.each<Row>([
+    ["plain brand name, no domain in it", { From: `PayPal <${P}>` }, [], []],
+    ["brand name that is itself a domain, no scheme → silent (Booking.com, Node.js)", { From: "Booking.com <x@evil.example>" }, [], []],
+    ["name shows the sender's own address", { From: `"${P}" <${P}>` }, [], []],
+    ["name shows an address on a subdomain of the sender", { From: '"service@mail.paypal.example" <a@paypal.example>' }, [], []],
+    ["name shows the sender's apex while mail comes from a subdomain", { From: '"service@paypal.example" <a@e.paypal.example>' }, [], []],
+    ["name shows another domain's address", { From: '"service@paypal.example" <x@evil.example>' }, [], ["displayNameSpoof"]],
+    ["unquoted name with an address in it", { From: "service@paypal.example <x@evil.example>" }, [], ["displayNameSpoof"]],
+    ["name shows a URL on another domain", { From: '"https://paypal.example/login" <x@evil.example>' }, [], ["displayNameSpoof"]],
+    ["name shows www. on another domain", { From: "www.paypal.example Support <x@evil.example>" }, [], ["displayNameSpoof"]],
+    ["name shows www. of the sender's own domain", { From: "www.paypal.example <a@paypal.example>" }, [], []],
+    ["address token with trailing punctuation", { From: '"Mail from service@paypal.example." <x@evil.example>' }, [], ["displayNameSpoof"]],
+    ["RFC 2047-encoded name hiding the address", { From: "=?UTF-8?B?c2VydmljZUBwYXlwYWwuZXhhbXBsZQ==?= <x@evil.example>" }, [], ["displayNameSpoof"]],
+    ["Q-encoded @ in the name", { From: "=?UTF-8?Q?service=40paypal.example?= <x@evil.example>" }, [], ["displayNameSpoof"]],
+    ["IDN in the name vs its Punycode as sender → same domain", { From: '"info@münchen.example" <a@xn--mnchen-3ya.example>' }, [], []],
+    ["@ without a domain is not an address", { From: '"@paypal" <x@evil.example>' }, [], []],
+    ["host without a dot is not a domain", { From: '"admin@localhost" <x@evil.example>' }, [], []],
+    ["version-like token is not a domain", { From: '"Release v1.2 from build@ci" <x@evil.example>' }, [], []],
+    ["no address in From at all", { From: '"service@paypal.example"' }, [], []],
+    ["no display name", { From: "x@evil.example" }, [], []],
+    ["comment, not name, carrying an address", { From: "x@evil.example (service@paypal.example)" }, [], []],
+  ])("%s", (_n, h, p, exp) => expect(sig(h, p)).toEqual(exp));
+
+  it("is linear in the display name", () => {
+    const name = (n: number) => `"${"a.".repeat(n)}@ www.${"b".repeat(n)}" <x@evil.example>`;
+    const time = (n: number) => {
+      const t = performance.now();
+      for (let i = 0; i < 20; i++) sig({ From: name(n) });
+      return performance.now() - t;
+    };
+    time(2000);
+    expect(time(40000) / Math.max(time(4000), 0.5)).toBeLessThan(30);
+  });
+});
+
+describe("deriveSignals corpus — lookalikeDomain: mixed confusable scripts inside one label of the From domain", () => {
+  it.each<Row>([
+    ["ASCII domain", { From: "a@paypal.example" }, [], []],
+    ["Latin with diacritics only", { From: "a@münchen.example" }, [], []],
+    ["wholly Cyrillic domain", { From: "a@почта.рф" }, [], []],
+    ["wholly Greek label", { From: "a@ελλάδα.example" }, [], []],
+    ["Cyrillic а inside a Latin label", { From: "a@pаypal.example" }, [], ["lookalikeDomain"]],
+    ["the same, as Punycode on the wire", { From: "a@xn--pypal-4ve.example" }, [], ["lookalikeDomain"]],
+    ["Greek ο inside a Latin label", { From: "a@gοogle.example" }, [], ["lookalikeDomain"]],
+    ["Armenian օ inside a Latin label", { From: "a@yօutube.example" }, [], ["lookalikeDomain"]],
+    ["scripts mixed across labels, each label pure → silent", { From: "a@почта.example" }, [], []],
+    ["digits and hyphen are no script", { From: "a@pay-pal1.example" }, [], []],
+    ["malformed Punycode label", { From: "a@xn--.example" }, [], []],
+    ["no From", {}, [], []],
   ])("%s", (_n, h, p, exp) => expect(sig(h, p)).toEqual(exp));
 });
 
@@ -510,13 +566,27 @@ describe("buildDigest — signal counts overall and per sender", () => {
       (id) => id,
       new Date(),
     );
-    expect(d.signals).toEqual({ newsletter: 2, automated: 0, calendar: 1, replyToMismatch: 1 });
+    expect(d.signals).toEqual({
+      newsletter: 2,
+      automated: 0,
+      calendar: 1,
+      replyToMismatch: 1,
+      displayNameSpoof: 0,
+      lookalikeDomain: 0,
+    });
     expect(d.topSenders[0]).toMatchObject({ sender: "news@x.com", count: 2, signals: ["newsletter", "replyToMismatch"] });
     expect(d.topSenders.find((s) => s.sender === "friend@z.com")?.signals).toEqual([]);
   });
 
-  it("reports all four keys with zero when nothing fires", () => {
+  it("reports every key with zero when nothing fires", () => {
     const d = buildDigest([thread({ from: "a@x.com" })], (id) => id, new Date());
-    expect(d.signals).toEqual({ newsletter: 0, automated: 0, calendar: 0, replyToMismatch: 0 });
+    expect(d.signals).toEqual({
+      newsletter: 0,
+      automated: 0,
+      calendar: 0,
+      replyToMismatch: 0,
+      displayNameSpoof: 0,
+      lookalikeDomain: 0,
+    });
   });
 });

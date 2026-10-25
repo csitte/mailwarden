@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   held, and a restart forgets them all; the set lives in process memory as message ids only. Without a
   token `bulk_modify` behaves as before. The pattern is `aaronsb/google-workspace-mcp`'s, whose v4.8.0
   gates its query relabel the same way.
+- **Two phishing signals, read off the From header like the others.** `displayNameSpoof` fires when the
+  display name shows an address or a URL on another domain than the one the mail came from
+  (`"service@paypal.com" <x@evil.example>`), decided after RFC 2047 decoding because that is the name a
+  reader sees; a brand name that merely is a domain (`Booking.com`) does not count. `lookalikeDomain`
+  fires when one label of the From domain mixes Latin with Cyrillic, Greek or Armenian letters, Punycode
+  read as what it displays; a domain wholly in one script does not. Both are counted in `triage_digest`.
+  `gmail-tidy-mcp` raises similar warnings. A link-text-versus-target check was left out on purpose: it
+  needs the HTML body, which `triage_digest` never fetches, and tracking redirects make nearly every
+  newsletter look like a mismatch.
 
 ### Changed
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on

@@ -8,12 +8,26 @@
  * declared", not "definitely personal mail". Pure, so a header corpus can hold it.
  */
 
-import { domainToASCII } from "node:url";
+import { domainToASCII, domainToUnicode } from "node:url";
+import { decodeRfc2047 } from "./rfc2047.js";
 
-export type Signal = "newsletter" | "automated" | "calendar" | "replyToMismatch";
+export type Signal =
+  | "newsletter"
+  | "automated"
+  | "calendar"
+  | "replyToMismatch"
+  | "displayNameSpoof"
+  | "lookalikeDomain";
 
 /** Fixed order for stable output — a thread's signals are always listed in this order. */
-export const ALL_SIGNALS: readonly Signal[] = ["newsletter", "automated", "calendar", "replyToMismatch"];
+export const ALL_SIGNALS: readonly Signal[] = [
+  "newsletter",
+  "automated",
+  "calendar",
+  "replyToMismatch",
+  "displayNameSpoof",
+  "lookalikeDomain",
+];
 
 export interface SignalInput {
   /** Raw headers of the message (name/value, any casing, as Gmail returns them). */
@@ -291,6 +305,49 @@ function domainKeyOf(address: string): string {
 }
 
 /**
+ * Domains a From display name presents as the sender's: the domain of every address-shaped
+ * token (`service@paypal.example`) and the host of every URL-shaped one (`https://…`,
+ * `www.…`). A bare word with a dot is NOT one — `Node.js` or `Booking.com` would read as
+ * domains, and a brand name that happens to be a domain is how legitimate senders write
+ * their name. Tokenised in one pass, so the cost stays linear in the name.
+ */
+function domainsNamedIn(name: string): string[] {
+  const out: string[] = [];
+  for (const raw of name.split(/[\s<>"'(),;\[\]]+/)) {
+    const token = raw.replace(/[.:]+$/, "");
+    let host = "";
+    const at = token.lastIndexOf("@");
+    if (at > 0) host = token.slice(at + 1);
+    else {
+      const m = /^(?:https?:\/\/)?(www\.[^/?#:]+)|^https?:\/\/([^/?#:@]+)/i.exec(token);
+      if (m) host = m[1] ?? m[2] ?? "";
+    }
+    // A domain needs a dot and a final label of letters: `a@localhost` or `v1.2` are not one.
+    if (/^[^.]+(\.[^.]+)+$/.test(host) && /\.\p{L}{2,}$/u.test(host)) out.push(host);
+  }
+  return out;
+}
+
+/** The scripts that matter for confusables — Latin, and the three whose letters copy it. */
+const CONFUSABLE_SCRIPTS: readonly RegExp[] = [
+  /\p{Script=Latin}/u,
+  /\p{Script=Cyrillic}/u,
+  /\p{Script=Greek}/u,
+  /\p{Script=Armenian}/u,
+];
+
+/**
+ * True when one label of the domain mixes two of the confusable scripts — `pаypal` with a
+ * Cyrillic `а`. A label wholly in one script is not flagged: `почта.рф` and `münchen` are
+ * how people write their own languages. Decided on the Unicode form, so a Punycode `xn--`
+ * label is read for what it displays as.
+ */
+function mixedScriptLabel(domainKey: string): boolean {
+  const shown = domainToUnicode(domainKey) || domainKey;
+  return shown.split(".").some((label) => CONFUSABLE_SCRIPTS.filter((re) => re.test(label)).length > 1);
+}
+
+/**
  * The signals a message declares. See the module comment for what each one means:
  *
  * - `newsletter` — mailing-list / bulk machinery: `List-Id`, `List-Unsubscribe`, or
@@ -304,6 +361,14 @@ function domainKeyOf(address: string): string {
  * - `replyToMismatch` — `Reply-To` names a *different domain* than `From`. Same-domain
  *   differences (`hello@` vs `support@`) are routine and not flagged. Common in phishing
  *   and in some legitimate marketing; a reason to look, not a verdict.
+ * - `displayNameSpoof` — the From display name shows an address or a URL on a *different
+ *   domain* than the address the mail actually came from: `"service@paypal.example"
+ *   <x@evil.example>`. The mail client shows the name; the domain is the one that sent it.
+ *   Decided after RFC 2047 decoding, since that is the name a reader sees. Some relays write
+ *   the original sender into the name; a reason to look, not a verdict.
+ * - `lookalikeDomain` — a label of the From domain mixes Latin with Cyrillic, Greek or
+ *   Armenian letters, the way homograph domains are built. A domain wholly in one script is
+ *   not flagged.
  */
 export function deriveSignals(input: SignalInput): Signal[] {
   const out = new Set<Signal>();
@@ -353,6 +418,14 @@ export function deriveSignals(input: SignalInput): Signal[] {
       .map(domainKeyOf)
       .some((d) => d !== "" && !sameOrSubdomain(d, fromDomain));
     if (foreign) out.add("replyToMismatch");
+
+    const shownName = decodeRfc2047(mailboxOf(header(input, "From")).name);
+    const spoofed = domainsNamedIn(shownName)
+      .map((d) => domainKeyOf("x@" + d))
+      .some((d) => d !== "" && !sameOrSubdomain(d, fromDomain));
+    if (spoofed) out.add("displayNameSpoof");
+
+    if (mixedScriptLabel(fromDomain)) out.add("lookalikeDomain");
   }
 
   return ALL_SIGNALS.filter((s) => out.has(s));

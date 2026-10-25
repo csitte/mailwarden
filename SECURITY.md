@@ -130,7 +130,9 @@ Model can't tell quoted mail from a command.
   the `Reply-To` domains behind `replyToMismatch` — it is read off the raw wire form with a scanner
   that knows RFC 5322 quoting, comments and groups; RFC 2047 encoded-words are decoded only into the
   display name, and re-quoted if the decoded text contains address syntax. A display name cannot pose
-  as another sender's address, encoded or not (0.10.0).
+  as another sender's address, encoded or not (0.10.0). Where one tries to look like another domain's
+  address to a human reader — the decoded name showing `service@paypal.com` over a different sending
+  domain — the message carries `displayNameSpoof`; that is a warning for the reader, not a parse.
 
 - **Authentication results are quoted, not asserted.** `get_thread`'s `authentication` field is what
   the *receiving* server wrote into `Authentication-Results` — a header an attacker can also put in
