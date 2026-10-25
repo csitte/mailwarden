@@ -37,10 +37,10 @@ afterEach(() => {
 });
 
 describe("registerTools — tool surface", () => {
-  it("registers all 29 tools by default, each with annotations and an outputSchema", async () => {
+  it("registers all 30 tools by default, each with annotations and an outputSchema", async () => {
     const client = await connect();
     const { tools } = await client.listTools();
-    expect(tools).toHaveLength(29);
+    expect(tools).toHaveLength(30);
     for (const t of tools) {
       expect(t.annotations?.readOnlyHint, t.name).toBeDefined();
       expect(t.outputSchema, t.name).toBeDefined();
@@ -74,7 +74,7 @@ describe("registerTools — tool surface", () => {
     expect(names).toContain("create_filter"); // filters tier
     expect(names).not.toContain("archive"); // manage tier excluded
     expect(names).not.toContain("snooze");
-    expect(names).toHaveLength(13); // 10 read + 3 filters
+    expect(names).toHaveLength(14); // 10 read + 4 filters
   });
 
   it("MAILWARDEN_TOOLS can register a single tier on its own", async () => {
@@ -1347,6 +1347,108 @@ describe("tool results — structured content + fenced text", () => {
     });
     expect(bodies[0].action).not.toHaveProperty("forward");
     expect(res.structuredContent.id).toBe("f-new");
+  });
+
+  describe("preview_filter", () => {
+    const existing = [
+      { id: "f1", criteria: { from: "News@X.com" }, action: { addLabelIds: ["Label_5"], removeLabelIds: ["INBOX"] } },
+      { id: "f2", criteria: { from: "news@x.com", subject: "weekly" }, action: { removeLabelIds: ["UNREAD"] } },
+      { id: "f3", criteria: { to: "me@y.com" }, action: { forward: "out@evil.example" } },
+    ];
+    function mailbox(listed = [{ id: "m1", threadId: "t1" }, { id: "m2", threadId: "t1" }, { id: "m3", threadId: "t2" }]) {
+      const writes: string[] = [];
+      let listQuery: string | undefined;
+      (getAuth as Mock).mockResolvedValue({
+        users: {
+          labels: {
+            list: async () => ({ data: { labels: [{ id: "Label_5", name: "Newsletters", type: "user" }] } }),
+            create: async () => (writes.push("labels.create"), { data: { id: "x" } }),
+          },
+          settings: {
+            filters: {
+              list: async () => ({ data: { filter: existing } }),
+              create: async () => (writes.push("filters.create"), { data: {} }),
+            },
+          },
+          messages: {
+            list: async (req: any) => ((listQuery = req.q), { data: { messages: listed } }),
+            batchModify: async () => (writes.push("batchModify"), {}),
+          },
+        },
+      });
+      return { writes, query: () => listQuery };
+    }
+
+    it("counts today's matches, finds the duplicate and the overlap — and writes nothing", async () => {
+      const box = mailbox();
+      const client = await connect();
+      const res: any = await client.callTool({
+        name: "preview_filter",
+        arguments: { from: "news@x.com", addLabels: ["Newsletters", "Reading/Later"], removeLabels: ["INBOX"] },
+      });
+      expect(box.writes).toEqual([]);
+      expect(box.query()).toBe('from:"news@x.com"');
+      const sc = res.structuredContent;
+      expect(sc).toMatchObject({
+        query: 'from:"news@x.com"',
+        currentMatches: 3,
+        currentThreadCount: 2,
+        capped: false,
+        labelsToCreate: ["Reading/Later"],
+        trashesMatches: false,
+      });
+      // Same criteria regardless of case; the second shares `from` but adds a subject.
+      expect(sc.sameCriteria.map((r: any) => r.filter.id)).toEqual(["f1"]);
+      expect(sc.overlapping).toEqual([{ filter: expect.objectContaining({ id: "f2" }), shared: ["from"] }]);
+    });
+
+    it("surfaces an existing forwarding filter it overlaps with, for auditing", async () => {
+      mailbox();
+      const client = await connect();
+      const res: any = await client.callTool({
+        name: "preview_filter",
+        arguments: { to: "ME@y.com", subject: "invoice", removeLabels: ["INBOX"] },
+      });
+      expect(res.structuredContent.overlapping[0]).toMatchObject({ filter: { id: "f3", forward: "out@evil.example" }, shared: ["to"] });
+    });
+
+    it("does not count a rule with no positive criterion — it would match almost everything", async () => {
+      const box = mailbox();
+      const client = await connect();
+      const res: any = await client.callTool({
+        name: "preview_filter",
+        arguments: { negatedQuery: "from:boss@x.com", removeLabels: ["INBOX"] },
+      });
+      expect(box.query()).toBeUndefined();
+      expect(res.structuredContent).toMatchObject({ query: null, currentMatches: null, currentThreadCount: null, capped: false });
+    });
+
+    it("says when the action trashes every future match", async () => {
+      mailbox();
+      const client = await connect();
+      const res: any = await client.callTool({ name: "preview_filter", arguments: { from: "spam@x.com", addLabels: ["trash"] } });
+      expect(res.structuredContent.trashesMatches).toBe(true);
+    });
+
+    it("refuses what create_filter refuses: no criterion, no action, a lone size", async () => {
+      const box = mailbox();
+      const client = await connect();
+      for (const args of [{ addLabels: ["X"] }, { from: "a@x.com" }, { from: "a@x.com", size: 10, addLabels: ["X"] }]) {
+        const res: any = await client.callTool({ name: "preview_filter", arguments: args });
+        expect(res.isError, JSON.stringify(args)).toBe(true);
+      }
+      expect(box.writes).toEqual([]);
+    });
+
+    it("reports capped when the count hit maxMessages", async () => {
+      mailbox();
+      const client = await connect();
+      const res: any = await client.callTool({
+        name: "preview_filter",
+        arguments: { from: "news@x.com", removeLabels: ["INBOX"], maxMessages: 3 },
+      });
+      expect(res.structuredContent.capped).toBe(true);
+    });
   });
 
   it("create_filter applyToExisting also bulk-modifies matching existing mail and reports it", async () => {

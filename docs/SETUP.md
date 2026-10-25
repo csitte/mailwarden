@@ -270,7 +270,7 @@ account JSON won't work.
 
 ### The filter tools are missing, or a call fails with "missing a Gmail scope this operation needs"
 
-Scopes are tied to tool tiers. Filter management (`list_filters`/`create_filter`/`delete_filter`)
+Scopes are tied to tool tiers. Filter management (`list_filters`/`preview_filter`/`create_filter`/`delete_filter`)
 needs `gmail.settings.basic`; write actions (label/archive/trash/snooze, and the snooze sweep) need
 `gmail.modify`. If your stored token was granted before you needed a scope — or you authorized with a
 narrower `MAILWARDEN_TOOLS` (e.g. `read` or `read,manage`) than you now run with — mailwarden tells

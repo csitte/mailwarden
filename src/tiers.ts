@@ -115,7 +115,7 @@ export const scopeShort = (s: string): string => s.replace("https://www.googleap
 const SCOPE_COVERS: Record<string, string> = {
   [GMAIL_READONLY]: "reading anything at all (search, get_thread, …)",
   [GMAIL_MODIFY]: "every write (label, archive, trash, snooze, sweep, bulk_modify)",
-  [GMAIL_SETTINGS_BASIC]: "filter management (list_filters, create_filter, delete_filter)",
+  [GMAIL_SETTINGS_BASIC]: "filter management (list_filters, preview_filter, create_filter, delete_filter)",
 };
 
 /**

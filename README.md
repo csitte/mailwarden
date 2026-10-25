@@ -235,6 +235,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | **`list_snoozed`** | All snoozed threads + due dates |
 | **`sweep_snoozed`** | Resurface threads whose snooze is due (run on demand, via cron, or the daemon); batched, with partial-failure reporting. `dryRun: true` answers "what is due right now?" (`dueLabels`/`dueThreads`) without waking anything |
 | `list_filters` | All Gmail filters (criteria + label actions); surfaces any `forward` address on existing filters for auditing |
+| `preview_filter` | Check a filter before creating it: how many messages its criteria match today (`currentMatches`, from the same index an `applyToExisting` sweep would use), which existing filters have exactly the same criteria (`sameCriteria`) and which share a `from`/`to`/`subject`/`query` value with it (`overlapping`, with the shared fields named), which `addLabels` names would be created, and whether the action trashes every future match. Read-only; same validation as `create_filter` |
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
 
@@ -648,8 +649,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 10 `read` + 16 `manage` + 3 `filters`, so a
-full instance advertises 29 tools and four of them advertise 116. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 10 `read` + 16 `manage` + 4 `filters`, so a
+full instance advertises 30 tools and four of them advertise 120. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to

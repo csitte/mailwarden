@@ -26,6 +26,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gmail-tidy-mcp` raises similar warnings. A link-text-versus-target check was left out on purpose: it
   needs the HTML body, which `triage_digest` never fetches, and tracking redirects make nearly every
   newsletter look like a mismatch.
+- **`preview_filter`** (filters tier, read-only): checks a filter before `create_filter` makes it — how
+  many messages its criteria match today, which existing filters carry exactly the same criteria, which
+  share a `from`/`to`/`subject`/`query` value with it (named per field, so a forwarding filter it
+  overlaps with shows up too), which label names would be created, and whether the action trashes
+  every future match. It runs the same validation as `create_filter`, which now shares it, and does not
+  count a rule with no positive criterion. The overlap is literal on purpose: whether two different
+  searches intersect is not guessed at. The idea is `aaronsb/google-workspace-mcp`'s `previewFilter`.
 
 ### Changed
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on

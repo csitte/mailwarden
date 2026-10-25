@@ -18,6 +18,7 @@ import { classifyError } from "./errors.js";
 import { ToolError } from "./cli.js";
 import { UNDO_LIMIT } from "./undo.js";
 import { PREVIEW_TTL_MS, PreviewStore, previewDrift } from "./preview.js";
+import { compareFilters } from "./filter-preview.js";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
@@ -1285,6 +1286,71 @@ function registerManageTools(server: McpServer): void {
 
 }
 
+// The match criteria create_filter and preview_filter both take. Text criteria are trimmed and must
+// be non-empty — an empty/whitespace value would otherwise be dropped when building the request and
+// leave Gmail with empty criteria (a cryptic 400).
+const filterCriteriaInput = {
+  from: z.string().trim().min(1).optional(),
+  to: z.string().trim().min(1).optional(),
+  subject: z.string().trim().min(1).optional(),
+  query: z.string().trim().min(1).optional(),
+  negatedQuery: z.string().trim().min(1).optional(),
+  hasAttachment: z.boolean().optional(),
+  excludeChats: z.boolean().optional(),
+  size: z.number().int().positive().optional(),
+  sizeComparison: z.enum(["smaller", "larger"]).optional(),
+};
+
+type FilterCriteriaInput = {
+  from?: string;
+  to?: string;
+  subject?: string;
+  query?: string;
+  negatedQuery?: string;
+  hasAttachment?: boolean;
+  excludeChats?: boolean;
+  size?: number;
+  sizeComparison?: "smaller" | "larger";
+};
+
+/**
+ * The checks every filter must pass before anything is asked of Gmail, shared by create_filter and
+ * preview_filter so a preview cannot accept what the create would refuse. Returns whether the
+ * criteria carry a POSITIVE condition — the one thing that makes a backlog query safe to run.
+ */
+function checkFilterCriteria(tool: string, criteria: FilterCriteriaInput): { hasPositive: boolean } {
+  // `sizeComparison` and `excludeChats` only MODIFY an otherwise-matching
+  // filter, and `negatedQuery` only EXCLUDES — none is a positive match
+  // condition on its own. Split them out so each guard can reason precisely.
+  const { size, sizeComparison, excludeChats: _excludeChats, hasAttachment, negatedQuery, ...positiveText } =
+    criteria;
+  // size and its comparison are meaningful only as a pair — check first so a
+  // lone `size` or lone `sizeComparison` gets this precise message.
+  if ((size === undefined) !== (sizeComparison === undefined)) {
+    throw new ToolError(
+      "invalid_input",
+      `${tool}: 'size' and 'sizeComparison' (smaller|larger) must be given together.`,
+    );
+  }
+  const hasPositive =
+    size !== undefined ||
+    hasAttachment === true ||
+    Object.values(positiveText).some((v) => typeof v === "string" && v !== "");
+  // A filter itself may match "everything except X" (negatedQuery / hasAttachment:false
+  // only), so creation just needs *some* condition.
+  const hasMatch =
+    hasPositive ||
+    hasAttachment === false ||
+    (typeof negatedQuery === "string" && negatedQuery !== "");
+  if (!hasMatch) {
+    throw new ToolError(
+      "invalid_input",
+      `${tool} needs at least one match criterion (from/to/subject/query/negatedQuery/hasAttachment/size).`,
+    );
+  }
+  return { hasPositive };
+}
+
 function registerFilterTools(server: McpServer): void {
   const registerTool = guarded(server);
   // ---- Filters (server-side auto-triage rules) ----
@@ -1305,6 +1371,63 @@ function registerFilterTools(server: McpServer): void {
   );
 
   registerTool(
+    "preview_filter",
+    {
+      description:
+        "Check a filter BEFORE create_filter makes it: how much mail its criteria match today, which existing filters have exactly the same criteria, which share a from/to/subject/query value with it, and which label names in addLabels do not exist yet. Creates nothing and changes nothing. " +
+        "Takes the same criteria as create_filter and checks them the same way, so a preview cannot accept what the create would refuse. `currentMatches` counts what Gmail's search returns for the derived query — the same unverified index create_filter's applyToExisting sweep would act on; it is a size, not a promise that the filter engine agrees on every message. A rule with no positive criterion (only negatedQuery or hasAttachment:false) is not counted at all: it would match nearly the whole mailbox. " +
+        "`overlapping` is literal: two filters overlap here when they carry the same value in the same field. Whether two different searches intersect is the search engine's question, and is not guessed at. " +
+        "USE WHEN: before create_filter, to show the user what the rule would catch and avoid a duplicate. " +
+        "SIDE EFFECTS: none. Requires gmail.settings.basic (it lists the existing filters).",
+      inputSchema: {
+        ...filterCriteriaInput,
+        addLabels: z.array(z.string()).default([]),
+        removeLabels: z.array(z.string()).default([]),
+        // Counting pages messages.list; this bounds it the same way applyToExisting is bounded.
+        maxMessages: z.number().int().min(1).max(10000).default(1000),
+      },
+      outputSchema: {
+        // The search the backlog sweep would run; null when the criteria carry no positive condition.
+        query: z.string().nullable(),
+        currentMatches: z.number().nullable(),
+        currentThreadCount: z.number().nullable(),
+        capped: z.boolean(),
+        sameCriteria: z.array(z.object({ filter: filterSummarySchema })),
+        overlapping: z.array(
+          z.object({ filter: filterSummarySchema, shared: z.array(z.enum(["from", "to", "subject", "query"])) }),
+        ),
+        labelsToCreate: z.array(z.string()),
+        // True when the action would send every future match to the trash.
+        trashesMatches: z.boolean(),
+      },
+      annotations: { title: "Preview filter", ...readOnly },
+    },
+    async ({ addLabels, removeLabels, maxMessages, ...criteria }) => {
+      const { hasPositive } = checkFilterCriteria("preview_filter", criteria);
+      if (addLabels.length === 0 && removeLabels.length === 0) {
+        throw new ToolError(
+          "invalid_input",
+          "preview_filter needs at least one label action in addLabels or removeLabels, as create_filter does.",
+        );
+      }
+      const gmail = await client();
+      const query = hasPositive ? filterCriteriaToQuery(criteria) || null : null;
+      const refs = query ? await gmail.listMessageRefs({ query, max: maxMessages }) : null;
+      const { sameCriteria, overlapping } = compareFilters(criteria, await gmail.listFilters());
+      return ok({
+        query,
+        currentMatches: refs ? refs.length : null,
+        currentThreadCount: refs ? new Set(refs.map((r) => r.threadId)).size : null,
+        capped: refs ? refs.length >= maxMessages : false,
+        sameCriteria: sameCriteria.map((r) => ({ filter: r.filter })),
+        overlapping,
+        labelsToCreate: await gmail.unknownLabelNames(addLabels),
+        trashesMatches: addLabels.some((l) => l.trim().toUpperCase() === "TRASH"),
+      });
+    },
+  );
+
+  registerTool(
     "create_filter",
     {
       description:
@@ -1319,22 +1442,11 @@ function registerFilterTools(server: McpServer): void {
         "The sweep's `applied.submittedMessages` is how many ids were handed to the API, NOT how many messages changed; " +
         "set verify:true alongside applyToExisting to read the labels back afterwards and get `applied.verified` {applied, notApplied[], unverifiable[]}. " +
         "It costs one extra read per affected thread, so it is off by default; a read-back that fails lands in `unverifiable` and never fails the call — the filter stands either way. " +
-        "USE WHEN: setting up a persistent auto-triage rule (e.g. 'always archive + label newsletters from x'), optionally cleaning up the existing backlog too. " +
+        "USE WHEN: setting up a persistent auto-triage rule (e.g. 'always archive + label newsletters from x'), optionally cleaning up the existing backlog too — preview_filter first to see how much mail it would catch today and whether an existing filter already covers it. " +
         "NOTE: forwarding filters are intentionally not supported — mailwarden creates no send/exfiltration path. " +
         "SIDE EFFECTS: adds a server-side rule affecting future mail (reversible via delete_filter); with applyToExisting also modifies existing messages. Requires gmail.settings.basic.",
       inputSchema: {
-        // Text criteria are trimmed and must be non-empty — an empty/whitespace
-        // value would otherwise be dropped when building the request and leave
-        // Gmail with empty criteria (a cryptic 400).
-        from: z.string().trim().min(1).optional(),
-        to: z.string().trim().min(1).optional(),
-        subject: z.string().trim().min(1).optional(),
-        query: z.string().trim().min(1).optional(),
-        negatedQuery: z.string().trim().min(1).optional(),
-        hasAttachment: z.boolean().optional(),
-        excludeChats: z.boolean().optional(),
-        size: z.number().int().positive().optional(),
-        sizeComparison: z.enum(["smaller", "larger"]).optional(),
+        ...filterCriteriaInput,
         addLabels: z.array(z.string()).default([]),
         removeLabels: z.array(z.string()).default([]),
         // Also apply the actions once to mail that already matches (default: future mail only).
@@ -1350,35 +1462,7 @@ function registerFilterTools(server: McpServer): void {
       annotations: { title: "Create filter", ...write, destructiveHint: true, idempotentHint: false },
     },
     async ({ addLabels, removeLabels, applyToExisting, maxMessages, verify, ...criteria }) => {
-      // `sizeComparison` and `excludeChats` only MODIFY an otherwise-matching
-      // filter, and `negatedQuery` only EXCLUDES — none is a positive match
-      // condition on its own. Split them out so each guard can reason precisely.
-      const { size, sizeComparison, excludeChats, hasAttachment, negatedQuery, ...positiveText } =
-        criteria;
-      // size and its comparison are meaningful only as a pair — check first so a
-      // lone `size` or lone `sizeComparison` gets this precise message.
-      if ((size === undefined) !== (sizeComparison === undefined)) {
-        throw new ToolError(
-          "invalid_input",
-          "create_filter: 'size' and 'sizeComparison' (smaller|larger) must be given together.",
-        );
-      }
-      const hasPositive =
-        size !== undefined ||
-        hasAttachment === true ||
-        Object.values(positiveText).some((v) => typeof v === "string" && v !== "");
-      // A filter itself may match "everything except X" (negatedQuery / hasAttachment:false
-      // only), so creation just needs *some* condition.
-      const hasMatch =
-        hasPositive ||
-        hasAttachment === false ||
-        (typeof negatedQuery === "string" && negatedQuery !== "");
-      if (!hasMatch) {
-        throw new ToolError(
-          "invalid_input",
-          "create_filter needs at least one match criterion (from/to/subject/query/negatedQuery/hasAttachment/size).",
-        );
-      }
+      const { hasPositive } = checkFilterCriteria("create_filter", criteria);
       if (addLabels.length === 0 && removeLabels.length === 0) {
         throw new ToolError(
           "invalid_input",

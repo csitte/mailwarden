@@ -29,6 +29,10 @@ So:
   easily undo — resolve the set with `search` first and act on the thread ids it returns.
 - `dryRun: true` does **not** close this gap. It re-reads the same index, so it confirms how big
   the set is, never whether it is right. Use it for size, not for correctness.
+- What a dry run **does** give you is a `previewToken`. After the user has seen the set and said yes,
+  call `bulk_modify` again with the same query, `add` and `remove` plus that token: the write then
+  acts on exactly the messages the user was shown, not on whatever matches a few minutes later. Tell
+  the user about `fromPreview.newMatches` if it is not zero — that mail was left alone.
 - `crossCheck: true` is the cheap middle option: it re-asks each predicate as a label filter and
   drops messages the two routes disagree about, for one extra list call per predicate. Read a
   disagreement as real and agreement as nothing — both routes read the same index.
@@ -39,6 +43,9 @@ So:
   the criteria do rest on read state. Treat a sweep as acting on the index's answer, always. When
   the *set* has to be right before anything is written, resolve it with `search` and use
   `bulk_modify` on those thread ids instead — then create the filter for future mail.
+- Before `create_filter`, call `preview_filter` with the same criteria and actions. Show the user
+  `currentMatches`, and stop to ask if `sameCriteria` is not empty (the rule already exists) or if
+  `overlapping` lists a filter with a `forward` address or a conflicting action.
 
 ## Reporting what actually happened
 

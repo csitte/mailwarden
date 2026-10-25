@@ -885,7 +885,7 @@ export class Gmail {
         throw new ToolError(
           "insufficient_scope",
           "mailwarden's saved authorization is missing a Gmail scope this operation needs. " +
-            "Filter management (list_filters/create_filter/delete_filter) needs 'gmail.settings.basic'; " +
+            "Filter management (list_filters/preview_filter/create_filter/delete_filter) needs 'gmail.settings.basic'; " +
             "a write action (label/archive/trash/snooze/sweep) needs 'gmail.modify', which a read-only grant lacks. " +
             "Re-run `mailwarden --auth` with the tiers you need enabled (MAILWARDEN_TOOLS), then retry.",
         );
