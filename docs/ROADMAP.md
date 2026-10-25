@@ -39,7 +39,17 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 
 ## Next
 
-1. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
+1. **Token encryption by default, with the key in the OS keystore** — decided 25 October 2026, for
+   the release after 0.24.0. A native keyring binding (`@napi-rs/keyring`, as `agentcomms` uses), not a
+   shell-out to `security`/`secret-tool`/PowerShell: the one server we read that does the latter had
+   exactly that file locked and then removed from our disk right after cloning — presumably by a
+   virus scanner, which we could not confirm, and a risk we will not ship. Same AES-256-GCM as today, the key from
+   the keystore instead of a passphrase; where no keystore is reachable (a headless Linux host, a
+   platform whose binary is missing) it behaves as today and `--check` says so. The passphrase stays
+   as the explicit choice for headless hosts. Plaintext tokens keep loading and are encrypted at the
+   next `--auth`, never rewritten silently. What it does not defend against goes into `SECURITY.md`
+   as plainly: malware running as the same user can query the keystore too.
+2. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
    `server/discover`, Zod 4). Not urgent: current clients negotiate down to the 1.x protocol and
    the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
    Planned for late 2026.
@@ -60,9 +70,8 @@ rather than a new kind of thing: a `bulk_modify` dry run that binds the write th
 `previewToken` (from `aaronsb`), `preview_filter` before `create_filter` (likewise), `read_attachment`
 for the text inside reports and archives (from `gmail-tidy-mcp`), `MAILWARDEN_CONFIRM` asking the user
 through elicitation before a filter or an unsubscribe (from `klodr`), and two more header signals,
-`displayNameSpoof` and `lookalikeDomain`. One gap stays open and is a decision, not a task: token
-encryption by default, with the key in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it.
-Today it is opt-in through a passphrase.
+`displayNameSpoof` and `lookalikeDomain`. One gap remained, token encryption by default with the key
+in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it; it is item 1 under Next.
 
 ## Non-goals
 
