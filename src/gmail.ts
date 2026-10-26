@@ -14,6 +14,7 @@ import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
 import { renderThread, type ExportFormat } from "./export.js";
 import {
+  checkThreadOptions,
   selectMessages,
   trimBodies,
   type BodyMode,
@@ -1194,6 +1195,7 @@ export class Gmail {
 
   async getThread(threadId: string, options: boolean | GetThreadOptions = true): Promise<GetThreadResult> {
     const opts: GetThreadOptions = typeof options === "boolean" ? { full: options } : options;
+    checkThreadOptions(opts);
     const full = opts.full ?? true;
     const bodies: BodyMode = opts.bodies ?? "full";
     const parsed = await this.fetchThread(threadId, full);

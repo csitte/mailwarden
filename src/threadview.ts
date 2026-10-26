@@ -38,6 +38,28 @@ export type TrimmedMessage = Omit<ParsedMessage, "plaintextBody" | "htmlBody"> &
 };
 
 /**
+ * Reject option combinations that cannot all be honoured, before anything is fetched.
+ *
+ * `full: false` is Gmail's metadata format: no payload parts, so there is no body to trim and no
+ * attachment list to keep. Any `bodies` value next to it asks for something that request cannot
+ * deliver. It used to be ignored silently, and a caller who asked for `bodies: "text"` got
+ * `metadataOnly: true` and no text (reported 2026-10-26). An error is the only answer that cannot
+ * be mistaken for the content.
+ *
+ * @throws ToolError `invalid_input` for `full: false` together with any `bodies`.
+ */
+export function checkThreadOptions(o: { full?: boolean; bodies?: BodyMode }): void {
+  if (o.full === false && o.bodies !== undefined) {
+    throw new ToolError(
+      "invalid_input",
+      `full: false fetches headers and labels only, so bodies: "${o.bodies}" cannot be honoured. ` +
+        `Drop full: false (use bodies: "none" for headers plus the real attachment list, at the same quota cost), ` +
+        `or drop bodies.`,
+    );
+  }
+}
+
+/**
  * Pick the messages to return. Thread order is Gmail's: oldest first. `afterMessageId` applies
  * first, `lastN` to what remains, so "the last two since the one I already read" composes.
  *

@@ -1305,8 +1305,18 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
     expect("htmlBody" in m3).toBe(false);
     expect(m3.attachments).toEqual([]); // measured on a full fetch, so it may be stated
 
-    // full:false ignores `bodies` — nothing was fetched to trim — but still selects.
-    const meta = await gmail.getThread("th-1", { full: false, bodies: "text", lastN: 1 });
+    // full:false with a `bodies` value is a contradiction: rejected BEFORE any fetch, so the
+    // caller never gets `metadataOnly` where they asked for text (reported 2026-10-26).
+    await expect(gmail.getThread("th-1", { full: false, bodies: "text", lastN: 1 })).rejects.toMatchObject({
+      code: "invalid_input",
+    });
+    for (const bodies of ["full", "none"] as const) {
+      await expect(gmail.getThread("th-1", { full: false, bodies })).rejects.toMatchObject({ code: "invalid_input" });
+    }
+    expect(getCalls).toHaveLength(2); // none of the rejected calls reached Gmail
+
+    // full:false WITHOUT bodies still works, and still selects.
+    const meta = await gmail.getThread("th-1", { full: false, lastN: 1 });
     expect(getCalls[2].format).toBe("metadata");
     expect(meta).toMatchObject({ metadataOnly: true, messageCount: 3, omittedMessages: 2 });
     expect(meta.bodies).toBeUndefined();

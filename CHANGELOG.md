@@ -95,6 +95,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   through elicitation before pairing a new recipient.
 
 ### Changed
+- **`get_thread` rejects `full: false` together with `bodies`, and `full: false` is deprecated.**
+  `full: false` is Gmail's metadata format and has no body to trim, so a `bodies` value next to it
+  was silently ignored: a caller asking for `{ full: false, bodies: "text" }` got `metadataOnly`
+  and no text, with nothing saying why (reported 26 October). Any such combination is now
+  `invalid_input` before a request is made, and the message names both ways out. `bodies` lost its
+  schema default so the server can tell an explicit value from an absent one. `full: false` keeps
+  working on its own, but the description now marks it deprecated: `bodies: "none"` costs the same
+  quota and keeps the real attachment list, which `full: false` cannot.
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on
   25 October 2026: the server whose stated position is closest to this one (no send tool, no trash,
   filters that cannot forward), but draft-only rather than without compose, and ahead of `mailwarden`

@@ -1,9 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { selectMessages, trimBodies } from "../src/threadview.js";
+import { checkThreadOptions, selectMessages, trimBodies } from "../src/threadview.js";
 import type { ParsedMessage } from "../src/gmail.js";
 import { ToolError } from "../src/cli.js";
 
 const ids = (...xs: string[]) => xs.map((id) => ({ id }));
+
+describe("checkThreadOptions", () => {
+  it("accepts every combination that can be honoured", () => {
+    for (const o of [
+      {},
+      { full: true },
+      { full: false },
+      { bodies: "text" as const },
+      { full: true, bodies: "none" as const },
+      { full: true, bodies: "full" as const },
+    ]) {
+      expect(() => checkThreadOptions(o), JSON.stringify(o)).not.toThrow();
+    }
+  });
+
+  it("rejects full:false with ANY bodies value, naming both ways out", () => {
+    for (const bodies of ["full", "text", "none"] as const) {
+      let err: unknown;
+      try {
+        checkThreadOptions({ full: false, bodies });
+      } catch (e) {
+        err = e;
+      }
+      expect(err).toBeInstanceOf(ToolError);
+      expect((err as ToolError).code).toBe("invalid_input");
+      expect((err as ToolError).message).toContain(`bodies: "${bodies}"`);
+      expect((err as ToolError).message).toMatch(/Drop full: false .* or drop bodies/);
+    }
+  });
+});
 
 function msg(over: Partial<ParsedMessage> = {}): ParsedMessage {
   return {

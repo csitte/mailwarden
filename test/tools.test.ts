@@ -292,6 +292,29 @@ describe("tool results — structured content + fenced text", () => {
     expect(bad.structuredContent?.code ?? bad.content[0].text).toContain("invalid_input");
   });
 
+  it("get_thread rejects full:false together with bodies instead of silently dropping the text", async () => {
+    const get = vi.fn();
+    (getAuth as Mock).mockResolvedValue({ users: { threads: { get } } });
+    const client = await connect();
+    for (const bodies of ["text", "none", "full"]) {
+      const res: any = await client.callTool({ name: "get_thread", arguments: { threadId: "t1", full: false, bodies } });
+      expect(res.isError, bodies).toBe(true);
+      const body = JSON.parse(res.content[0].text.replace(/<\/?untrusted-tool-output>/g, "").trim());
+      expect(body.error.code).toBe("invalid_input");
+      expect(body.error.retryable).toBe(false);
+      expect(body.error.message).toMatch(/bodies: "none"/); // names the way out
+    }
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("get_thread marks full:false as deprecated in favour of bodies:none", async () => {
+    const client = await connect();
+    const tool = (await client.listTools()).tools.find((t) => t.name === "get_thread")!;
+    expect(tool.description).toMatch(/DEPRECATED: use `bodies: "none"`/);
+    // No schema default for bodies: otherwise every full:false call would carry one.
+    expect((tool.inputSchema.properties as any).bodies.default).toBeUndefined();
+  });
+
   it("answers a failure with a code and a retry verdict, not just a sentence", async () => {
     (getAuth as Mock).mockResolvedValue({
       users: {
