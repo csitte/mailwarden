@@ -462,7 +462,7 @@ function registerReadTools(server: McpServer): void {
     {
       description:
         "Read the TEXT inside an attachment without saving it: a text file (txt, csv, xml, json, ics, log, …), a gzip file, or the text entries of a ZIP archive — DMARC aggregate reports, exported CSVs, logs. " +
-        "What it reads is decided by the bytes, not by the filename or MIME type the sender declared. Binary formats (PDF, images, Office files) are refused — use download_attachment for those. " +
+        "What it reads is decided by the bytes, not by the filename or MIME type the sender declared; text that is not UTF-8 is read as windows-1252 and marked `guessedCharset`. Binary formats (PDF, images, Office files) are refused — use download_attachment for those. " +
         `Limits, checked before they are spent: ${DEFAULT_LIMITS.maxEntryBytes / 1048576} MiB unpacked per entry, ${DEFAULT_LIMITS.maxTotalBytes / 1048576} MiB per archive, ${DEFAULT_LIMITS.maxEntries} entries. Entries that are binary, encrypted, too large or archives themselves are listed with \`skipped\` and not opened. ` +
         `ONE ANSWER CARRIES AT MOST \`maxChars\` CHARACTERS OF TEXT across all entries (default ${DEFAULT_LIMITS.maxChars}, at most ${MAX_CHARS_CEILING}); an entry cut by it has \`truncated: true\` and \`nextOffset\`, and \`chars\` always gives an entry's full text length. ` +
         "FOR AN ARCHIVE, LOOK BEFORE YOU READ: `list: true` returns every entry's name, size and text length without any text. Then `entry` reads only the entries you need — an exact name or a pattern with `*` and `?` (`*.csv`), matched case-insensitively against the path and the bare file name; the others are counted in `notSelected`, named in `notSelectedNames`, and never unpacked. " +
@@ -493,6 +493,7 @@ function registerReadTools(server: McpServer): void {
             text: z.string().optional(),
             truncated: z.boolean().optional(),
             nextOffset: z.number().optional(),
+            guessedCharset: z.literal("windows-1252").optional(),
             nameTruncated: z.literal(true).optional(),
             nameLength: z.number().optional(),
             skipped: z

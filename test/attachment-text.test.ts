@@ -4,6 +4,7 @@ import { fenceOutput, sanitizeStructured } from "../src/sanitize.js";
 import {
   attachmentText,
   decodeText,
+  guessesWindows1252,
   entryMatcher,
   AttachmentTextError,
   MAX_NAME_CHARS,
@@ -82,6 +83,25 @@ describe("decodeText — text or not, by the bytes", () => {
     ["a PDF header is binary", Buffer.from("%PDF-1.7\n\x01\x02\x03\x04\x05binary"), undefined],
     ["PNG signature", Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]), undefined],
   ])("%s", (_n, b, exp) => expect(decodeText(b)).toBe(exp));
+
+  // Review grok-mailwarden, 26 Oct (N1): an Excel CSV exported on Windows is windows-1252.
+  it("reads bytes that are not UTF-8 as windows-1252, and says it guessed", () => {
+    const cp1252 = Buffer.from([0x4d, 0xfc, 0x6c, 0x6c, 0x65, 0x72, 0x3b, 0x38, 0x30, 0x20, 0x80]); // "Müller;80 €"
+    expect(decodeText(cp1252)).toBe("Müller;80 €");
+    expect(guessesWindows1252(cp1252)).toBe(true);
+    const r = attachmentText(cp1252, "export.csv");
+    expect(r.entries[0]).toMatchObject({ text: "Müller;80 €", guessedCharset: "windows-1252" });
+    // UTF-8, with or without a BOM, and UTF-16 with its mark are no guess.
+    for (const b of [Buffer.from("Müller"), Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from("Müller")]), Buffer.concat([Buffer.from([0xff, 0xfe]), Buffer.from("Müller", "utf16le")])]) {
+      expect(guessesWindows1252(b)).toBe(false);
+      expect(attachmentText(b, "x.csv").entries[0]).not.toHaveProperty("guessedCharset");
+    }
+  });
+
+  it("a windows-1252 entry inside a ZIP is guessed the same way", () => {
+    const r = attachmentText(zip([{ name: "a.csv", data: Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65]) }]), "a.zip");
+    expect(r.entries[0]).toMatchObject({ text: "Grüße", guessedCharset: "windows-1252" });
+  });
 
   it("lets an odd control character through in a long text, but not many", () => {
     expect(decodeText(Buffer.from("x".repeat(200) + "\x07"))).toBeDefined();

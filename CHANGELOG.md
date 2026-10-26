@@ -150,7 +150,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hundred long names made an answer of millions of characters. Central headers that point at a
   local header already read are `corrupt` rather than inflated again, an inflate stopped at the
   entry cap counts against the archive budget, and a "directory" that carries data is listed as
-  `corrupt` instead of being hidden from `list`.
+  `corrupt` instead of being hidden from `list`. Text that is not valid UTF-8, typically a CSV that
+  Excel exports on Windows, is read as windows-1252 and marked `guessedCharset`; before, every
+  umlaut in it turned into a replacement character without a word.
 - **`MAILWARDEN_CONFIRM`: a human yes before a filter or an unsubscribe.** Set to `ask`, `create_filter`,
   `unsubscribe` and `bulk_unsubscribe` first ask the person at the client through MCP elicitation —
   the filter rule, or the senders and hosts to be contacted, spelled out; one question for a whole

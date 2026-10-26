@@ -1,4 +1,6 @@
+import { isUtf8 } from "node:buffer";
 import { gunzipSync, inflateRawSync } from "node:zlib";
+import { decodeCharset } from "./charset.js";
 
 /**
  * The text inside an attachment, for reading it without saving it — pure, so a corpus of crafted
@@ -85,6 +87,8 @@ export interface TextEntry {
   chars?: number;
   text?: string;
   truncated?: boolean;
+  /** Set when the bytes were not UTF-8 and were read as windows-1252 instead (a guess). */
+  guessedCharset?: "windows-1252";
   /** Set when `name` was cut to MAX_NAME_CHARS; `nameLength` is the whole name's length. */
   nameTruncated?: true;
   nameLength?: number;
@@ -107,7 +111,7 @@ export interface AttachmentText {
 }
 
 /** An entry as read, before the answer is cut to its budget. */
-type RawEntry = { name: string; bytes: number; text?: string; skipped?: SkipReason };
+type RawEntry = { name: string; bytes: number; text?: string; skipped?: SkipReason; guessedCharset?: "windows-1252" };
 
 /**
  * Compile an `entry` selector. Exact names compare case-insensitively; `*` matches any run of
@@ -177,7 +181,9 @@ function isGzip(b: Buffer): boolean {
 
 /**
  * Decode bytes as text, or return undefined for binary. UTF-16 is recognised by its byte-order
- * mark only; everything else is read as UTF-8 (invalid sequences become U+FFFD). Binary is a NUL
+ * mark only; everything else is read as UTF-8, and bytes that are not valid UTF-8 as windows-1252
+ * (see `guessesWindows1252`): a CSV that Excel exports on Windows is the common case, and read as
+ * UTF-8 every umlaut in it became U+FFFD without a word (review grok-mailwarden, 26 Oct). Binary is a NUL
  * byte, or more than one control character in a hundred outside tab, newline, CR, form feed and
  * escape — PDFs, images and Office files all fail this within their first bytes.
  */
@@ -191,14 +197,21 @@ export function decodeText(b: Buffer): string | undefined {
     if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d && byte !== 0x0c && byte !== 0x1b) control++;
   }
   if (body.length > 0 && control * 100 > body.length) return undefined;
-  return new TextDecoder("utf-8").decode(body);
+  return isUtf8(body) ? new TextDecoder("utf-8").decode(body) : decodeCharset(body, "windows-1252");
+}
+
+/** Would `decodeText` read these bytes as windows-1252: no UTF-16 byte-order mark, not valid UTF-8? */
+export function guessesWindows1252(b: Buffer): boolean {
+  if (b.length >= 2 && ((b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff))) return false;
+  const body = b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? b.subarray(3) : b;
+  return !isUtf8(body);
 }
 
 function textEntry(name: string, data: Buffer): RawEntry {
   if (isZip(data) || isGzip(data)) return { name, bytes: data.length, skipped: "nested archive" };
   const text = decodeText(data);
   if (text === undefined) return { name, bytes: data.length, skipped: "binary" };
-  return { name, bytes: data.length, text };
+  return guessesWindows1252(data) ? { name, bytes: data.length, text, guessedCharset: "windows-1252" } : { name, bytes: data.length, text };
 }
 
 /** Inflate with zlib stopping at `max` — a RangeError from zlib means the entry is larger than allowed. */
@@ -331,7 +344,7 @@ function shape(entries: RawEntry[], opts: ReadOptions, budget: number): TextEntr
   const offset = opts.offset ?? 0;
   let left = budget;
   return entries.map((e) => {
-    const named = { ...shownName(e.name), bytes: e.bytes };
+    const named = { ...shownName(e.name), bytes: e.bytes, ...(e.guessedCharset ? { guessedCharset: e.guessedCharset } : {}) };
     if (e.text === undefined) return { ...named, skipped: e.skipped };
     const chars = e.text.length;
     if (opts.list) return { ...named, chars };
