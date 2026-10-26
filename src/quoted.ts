@@ -16,6 +16,10 @@
  *     after an underscore rule) is cut from there, but only when something was written above it.
  *   - A FORWARDED message is content, not history: nothing is cut at or after a "Forwarded
  *     message" marker, in plain text or HTML, even though forwards use the same header blocks.
+ *     Outlook writes no such marker, so `trimBodies` also skips the cut for a forward by its
+ *     subject (`isForwardSubject`).
+ *   - In HTML only a TRAILING quote goes: text after a closed quote, or between its parts, keeps
+ *     the whole message.
  *
  * For HTML-only mail the quote is found by the markers the common clients put around it
  * (Gmail's `gmail_quote`, Apple's and Thunderbird's `blockquote type="cite"`, Outlook's
@@ -35,7 +39,30 @@ export interface Stripped {
 const FORWARD_MARKER =
   /forwarded message|weitergeleitete nachricht|begin forwarded message|nachricht weitergeleitet|message transf[ée]r[ée]|mensaje reenviado|messaggio inoltrato|doorgestuurd bericht/i;
 
-/** Attribution lines, matched against up to three lines joined with a space. */
+/**
+ * Prefixes that make a subject a forward, by language: Fwd/Fw, WG (German), TR (French), RV
+ * (Spanish), ENC (Portuguese), I (Italian), VS/VL (Nordic), Doorst (Dutch), VB.
+ */
+const FORWARD_PREFIX = /^(fwd?|wg|tr|rv|enc|i|vs|vl|vb|doorst)\s*:/i;
+
+/**
+ * Is this message a forward, by the OUTERMOST prefix of its subject? Outlook writes the header of
+ * a forward exactly like the header of a reply (an underscore rule and From/Sent/To/Subject, or
+ * "Original Message", or `divRplyFwdMsg` in HTML), with no "Forwarded message" line, so the body
+ * cannot tell them apart; the subject can (review grok-mailwarden, 26 Oct). "WG: AW: x" forwards a
+ * reply and is a forward; "AW: WG: x" answers a forward, whose content is already in the thread.
+ * Leading tags such as "[EXT]" are skipped.
+ */
+export function isForwardSubject(subject: string): boolean {
+  return FORWARD_PREFIX.test(subject.replace(/^\s*(\[[^\]]*\]\s*)*/, ""));
+}
+
+/**
+ * Attribution lines, matched against up to three lines joined with a space. A real one names a
+ * date, a time or an address; a sentence of one's own that happens to start with "Am" and end in
+ * "schrieb ...:" usually names neither, and it must not go with the quote below it.
+ */
+const ATTRIBUTION_FACT = /\d|@/;
 const ATTRIBUTION = [
   /^On\b.{4,300}\bwrote:$/i, // English (Gmail, Apple Mail, Thunderbird)
   /^Am\b.{4,300}\bschrieb\b.{0,300}:$/i, // German
@@ -103,7 +130,7 @@ function trailingQuoteCut(lines: string[]): number {
       .slice(above - n + 1, above + 1)
       .map((l) => l.trim())
       .join(" ");
-    if (ATTRIBUTION.some((re) => re.test(joined))) {
+    if (ATTRIBUTION_FACT.test(joined) && ATTRIBUTION.some((re) => re.test(joined))) {
       start = above - n + 1;
       break;
     }
@@ -126,26 +153,70 @@ export function stripQuotedText(text: string): Stripped {
   return { text: lines.slice(0, cut).join("\n").trimEnd(), stripped: true };
 }
 
-/** Opening tags the common clients put around quoted history in HTML mail. */
-const HTML_QUOTE_START = [
-  /<div\b[^>]*\bclass\s*=\s*["'][^"']*\bgmail_quote\b[^"']*["'][^>]*>/i,
-  /<blockquote\b[^>]*\btype\s*=\s*["']?cite\b[^>]*>/i,
-  /<div\b[^>]*\bid\s*=\s*["']?(divRplyFwdMsg|appendonsend)\b[^>]*>/i,
-  /<div\b[^>]*\bclass\s*=\s*["'][^"']*\b(yahoo_quoted|moz-cite-prefix)\b[^"']*["'][^>]*>/i,
+/**
+ * Opening tags the common clients put around quoted history in HTML mail. `delimited` says the
+ * client closes the quote, so text after it can be told apart from it; Outlook does not: after
+ * its header block the old message simply follows, to the end.
+ */
+const HTML_QUOTE_START: { re: RegExp; delimited: boolean }[] = [
+  { re: /<div\b[^>]*\bclass\s*=\s*["'][^"']*\bgmail_quote\b[^"']*["'][^>]*>/i, delimited: true },
+  { re: /<blockquote\b[^>]*\btype\s*=\s*["']?cite\b[^>]*>/i, delimited: true },
+  { re: /<div\b[^>]*\bid\s*=\s*["']?(divRplyFwdMsg|appendonsend)\b[^>]*>/i, delimited: false },
+  { re: /<div\b[^>]*\bclass\s*=\s*["'][^"']*\b(yahoo_quoted|moz-cite-prefix)\b[^"']*["'][^>]*>/i, delimited: true },
 ];
 
+/** Index just past the element whose opening tag starts at `start`, or the end if never closed. */
+function elementEnd(html: string, start: number, tag: string): number {
+  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
+  re.lastIndex = start;
+  let depth = 0;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    depth += m[1] ? -1 : 1;
+    if (depth === 0) return m.index + m[0].length;
+  }
+  return html.length;
+}
+
+/** Remove every element whose opening tag `open` matches, with all it contains. */
+function removeElements(html: string, open: RegExp, tag: string): string {
+  const re = new RegExp(open.source, "i");
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    html = html.slice(0, m.index) + html.slice(elementEnd(html, m.index, tag));
+  }
+  return html;
+}
+
 /**
- * Cut the quoted history off an HTML reply, before it is rendered to text. Everything from the
- * first quote marker on is removed — clients put the history at the end — unless a forward marker
- * follows it closely, in which case the "quote" is the forwarded message and stays.
+ * What of `tail` (the HTML from the quote marker on) is not quote: cited blocks, Gmail's and
+ * Thunderbird's attribution lines and a Yahoo quote taken out. Text left over was written after
+ * or between the quoted parts.
+ */
+function textOutsideQuotes(tail: string): string {
+  let rest = removeElements(tail, /<blockquote\b[^>]*>/, "blockquote");
+  rest = removeElements(rest, /<div\b[^>]*\bclass\s*=\s*["'][^"']*\b(gmail_attr|moz-cite-prefix|yahoo_quoted)\b[^"']*["'][^>]*>/, "div");
+  return htmlToText(rest);
+}
+
+/**
+ * Cut the quoted history off an HTML reply, before it is rendered to text. Only a TRAILING quote
+ * goes, as in plain text: where the client closes its quote and something visible follows it or
+ * sits between its parts (a bottom post, an answer inside Gmail's opened quote, Apple Mail with
+ * answers between cited blocks), nothing is cut (review grok-mailwarden, 26 Oct). Outlook does
+ * not close its history, so there everything from the marker on goes. A forward marker close
+ * behind the quote marker keeps the whole message too.
  */
 export function stripQuotedHtml(html: string): { html: string; stripped: boolean } {
   let at = -1;
-  for (const re of HTML_QUOTE_START) {
-    const m = re.exec(html);
-    if (m && (at < 0 || m.index < at)) at = m.index;
+  let delimited = true;
+  for (const q of HTML_QUOTE_START) {
+    const m = q.re.exec(html);
+    if (m && (at < 0 || m.index < at)) {
+      at = m.index;
+      delimited = q.delimited;
+    }
   }
   if (at < 0) return { html, stripped: false };
+  if (delimited && textOutsideQuotes(html.slice(at)) !== "") return { html, stripped: false };
   // Gmail wraps a forward in gmail_quote too; its "---------- Forwarded message ---------" line
   // follows within the first few hundred characters, and above it there is often nothing at all.
   const ahead = html.slice(at, at + 800).replace(/<[^>]*>/g, " ");

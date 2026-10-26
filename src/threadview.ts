@@ -15,7 +15,7 @@
 import { ToolError } from "./cli.js";
 import { htmlToText } from "./export.js";
 import type { ParsedMessage } from "./gmail.js";
-import { stripQuotedHtml, stripQuotedText } from "./quoted.js";
+import { isForwardSubject, stripQuotedHtml, stripQuotedText } from "./quoted.js";
 
 /**
  * How much of each message body to return. `new` is `text` without the quoted history at the
@@ -106,7 +106,9 @@ export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessag
   if (mode === "full") return message;
   const { plaintextBody, htmlBody, ...rest } = message;
   if (mode === "none") return rest;
-  const fresh = mode === "new";
+  // A forward is content, not history, and Outlook marks it exactly like a reply: by its subject
+  // a forward is returned as `text` would return it.
+  const fresh = mode === "new" && !isForwardSubject(message.subject ?? "");
   if (plaintextBody.trim() !== "") {
     if (!fresh) return { ...rest, plaintextBody };
     const s = stripQuotedText(plaintextBody);

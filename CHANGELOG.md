@@ -57,6 +57,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   whole. HTML-only mail is cut where the clients mark the quote (`gmail_quote`, `blockquote
   type="cite"`, Outlook's `divRplyFwdMsg`, `yahoo_quoted`, `moz-cite-prefix`) before it is rendered.
   A corpus of reply shapes from Gmail, Outlook, Apple Mail, Thunderbird and Yahoo holds the rules.
+  **Three wrong cuts found by `grok-mailwarden` (review, 26 October) were reproduced and fixed
+  before release.** Outlook writes a forward exactly like a reply, with the same header block and
+  no "Forwarded message" line, so "FYI" above a forwarded statement came back as the whole message;
+  a message whose subject starts with a forward prefix (Fwd, FW, WG, TR, RV, ENC and others, after
+  tags like "[EXT]"; the outermost prefix counts, so "AW: WG:" is still a reply) is now never cut.
+  HTML-only mail was cut at the first quote marker, which dropped a bottom post, answers inside
+  Gmail's opened quote and Apple Mail answers between cited blocks; now it is cut only when nothing
+  visible follows the quote or sits between its parts (Outlook HTML, which does not close its
+  history, is cut from the marker as before). And a sentence of one's own ending in "schrieb ...:"
+  went with a quote below it; an attribution must now name a date, a time or an address.
+  Known limit: an answer written BELOW an Outlook plain-text header block is cut with it, because
+  nothing marks where the old message ends.
 - **`archive`, `mark_read`, `mark_unread` and `modify_labels` take a list of threads.** Pass
   `threadIds` (up to 100) instead of `threadId`. `bulk_modify` works from a query, but what a triage
   run holds after the user's approval is a list, and archiving seven approved threads took seven
