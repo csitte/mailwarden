@@ -58,6 +58,17 @@ export interface ThreadSummary {
   snippet: string;
   hasAttachments: boolean;
   /**
+   * What the attachments ARE, not only that there are some: name, declared type and size, in
+   * thread order, at most `SEARCH_ATTACHMENT_CAP` of them, with `attachmentCount` the full
+   * number. `hasAttachments` could not tell a PDF invoice from two HTML copies of the terms of
+   * service, so every "is there something to keep before I archive?" took a `get_thread`
+   * (reported 2026-10-26). `search` already fetches each hit in `full` format, so this costs no
+   * call. No ids: an attachment id is a few hundred characters, and `get_thread` with
+   * `bodies: "none"` hands them over when one is to be read.
+   */
+  attachments: AttachmentSummary[];
+  attachmentCount: number;
+  /**
    * Header/MIME-derived triage flags of the thread's FIRST message (its origin — a
    * newsletter stays a newsletter after the user replies to it). Empty = nothing declared.
    */
@@ -70,6 +81,28 @@ export interface Attachment {
   filename: string;
   mimeType: string;
   size: number;
+}
+
+/** An attachment as `search` lists it: enough to judge it, not enough to fetch it. */
+export interface AttachmentSummary {
+  filename: string;
+  mimeType: string;
+  size: number;
+}
+
+/** How many attachments a search hit lists by name; `attachmentCount` always has the total. */
+export const SEARCH_ATTACHMENT_CAP = 10;
+
+/** The attachment fields of a search hit. Pure. */
+export function summarizeAttachments(
+  all: Attachment[],
+  cap = SEARCH_ATTACHMENT_CAP,
+): { hasAttachments: boolean; attachments: AttachmentSummary[]; attachmentCount: number } {
+  return {
+    hasAttachments: all.length > 0,
+    attachments: all.slice(0, cap).map(({ filename, mimeType, size }) => ({ filename, mimeType, size })),
+    attachmentCount: all.length,
+  };
 }
 
 export interface ParsedMessage {
@@ -1020,7 +1053,7 @@ export class Gmail {
           unread: labelIds.includes("UNREAD"),
           labelIds,
           snippet: t.snippet ?? msgs[0]?.snippet ?? "",
-          hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),
+          ...summarizeAttachments(msgs.flatMap((m) => collectAttachments(m))),
           signals: messageSignals(msgs[0]),
         });
       }

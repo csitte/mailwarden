@@ -40,6 +40,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which `lastMessageDate` could not, because it also counts the user's own replies. `unread` states
   as a boolean what callers read off `UNREAD` in `labelIds`; the read gate is their most frequent
   decision, and it comes from the live labels `search` already re-verifies against.
+  And `attachments`: name, declared type and size of what is attached, at most ten per thread with
+  `attachmentCount` the total. `hasAttachments` could not tell a PDF invoice from two HTML copies
+  of the terms of service, so every check before archiving took a `get_thread`. `search` already
+  fetches each hit in `full` format, so the list costs no call; attachment ids stay out because
+  they run to a few hundred characters each, and `get_thread` with `bodies: "none"` has them.
 - **`get_profile` says which server is answering.** `serverVersion`, `serverPath` (the directory
   the running code was loaded from: an npm install, an npx cache or a clone's `dist/`) and
   `account` (the named mailwarden account or `(default)`). From the same 25 October round: one

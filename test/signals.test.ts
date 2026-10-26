@@ -556,6 +556,8 @@ describe("buildDigest — signal counts overall and per sender", () => {
     labelIds: [],
     snippet: "",
     hasAttachments: false,
+    attachments: [],
+    attachmentCount: 0,
     signals: [],
     ...p,
   });

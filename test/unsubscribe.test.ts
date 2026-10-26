@@ -741,6 +741,8 @@ function row(over: Partial<ThreadSummary>): ThreadSummary {
     labelIds: [],
     snippet: "",
     hasAttachments: false,
+    attachments: [],
+    attachmentCount: 0,
     signals: [],
     ...over,
   };

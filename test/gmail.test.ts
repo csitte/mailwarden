@@ -26,6 +26,8 @@ import {
   filterCriteriaToQuery,
   Gmail,
   PARSED_HEADERS,
+  summarizeAttachments,
+  SEARCH_ATTACHMENT_CAP,
 } from "../src/gmail.js";
 
 // node Buffer base64url helper for building test fixtures
@@ -427,6 +429,107 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
       lastMessageId: "m-last",
       lastMessageDate: "Sat, 25 Oct 2026 11:41:00 +0200", // RFC 2047-decoded like `date`
       snippet: "the reply",
+    });
+  });
+
+  describe("what is attached, without a get_thread", () => {
+    const part = (filename: string, mimeType: string, size: number, headers: { name: string; value: string }[] = []) => ({
+      filename,
+      mimeType,
+      headers,
+      body: { attachmentId: `att-${filename}`, size },
+    });
+    const api = (messages: unknown[]): any => ({
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: [{ id: "t1", snippet: "x" }] } }),
+          get: async (req: any) => {
+            expect(req.format).toBe("full"); // the parts are only there in full format
+            return { data: { messages } };
+          },
+        },
+      },
+    });
+    const search = async (messages: unknown[]) =>
+      (await new Gmail(api(messages) as gmail_v1.Gmail).search("in:inbox", 25)).threads[0];
+
+    it("tells two HTML terms-of-service copies apart from a PDF invoice (the 2026-10-26 case)", async () => {
+      const tos = await search([
+        {
+          id: "m1",
+          labelIds: ["INBOX"],
+          payload: {
+            mimeType: "multipart/mixed",
+            headers: [{ name: "Subject", value: "Your receipt" }],
+            parts: [
+              { mimeType: "text/plain", body: { data: b64url("thanks") } },
+              part("Terms_of_Service_de_at.html", "text/html", 21000, [
+                { name: "Content-Disposition", value: "attachment" },
+              ]),
+              part("Terms_of_Service_de_at.html", "text/html", 21000, [
+                { name: "Content-Disposition", value: "attachment" },
+              ]),
+            ],
+          },
+        },
+      ]);
+      expect(tos.hasAttachments).toBe(true);
+      expect(tos.attachmentCount).toBe(2);
+      expect(tos.attachments.map((a) => a.mimeType)).toEqual(["text/html", "text/html"]);
+
+      const invoice = await search([
+        {
+          id: "m1",
+          labelIds: ["INBOX"],
+          payload: {
+            mimeType: "multipart/mixed",
+            headers: [],
+            parts: [part("Invoice-0056.pdf", "application/pdf", 34111)],
+          },
+        },
+      ]);
+      expect(invoice.attachments).toEqual([{ filename: "Invoice-0056.pdf", mimeType: "application/pdf", size: 34111 }]);
+    });
+
+    it("lists every message's attachments in thread order and leaves inline images out", async () => {
+      const html = '<p>hi</p><img src="cid:logo1">';
+      const row = await search([
+        {
+          id: "m1",
+          labelIds: ["INBOX"],
+          payload: {
+            mimeType: "multipart/related",
+            headers: [],
+            parts: [
+              { mimeType: "text/html", body: { data: b64url(html) } },
+              part("logo.png", "image/png", 900, [{ name: "Content-ID", value: "<logo1>" }]),
+              part("first.pdf", "application/pdf", 10),
+            ],
+          },
+        },
+        { id: "m2", labelIds: ["INBOX"], payload: { mimeType: "multipart/mixed", headers: [], parts: [part("second.csv", "text/csv", 20)] } },
+      ]);
+      expect(row.attachments.map((a) => a.filename)).toEqual(["first.pdf", "second.csv"]);
+      expect(row.attachmentCount).toBe(2);
+    });
+
+    it("names at most ten, and attachmentCount keeps the total", async () => {
+      const parts = Array.from({ length: 13 }, (_, i) => part(`scan-${i}.pdf`, "application/pdf", i));
+      const row = await search([{ id: "m1", labelIds: ["INBOX"], payload: { mimeType: "multipart/mixed", headers: [], parts } }]);
+      expect(row.attachments).toHaveLength(10);
+      expect(row.attachments[9].filename).toBe("scan-9.pdf");
+      expect(row.attachmentCount).toBe(13);
+      expect(row.hasAttachments).toBe(true);
+    });
+
+    it("no attachments: an empty list, a zero count, and hasAttachments false — all three agree", async () => {
+      const row = await search([{ id: "m1", labelIds: ["INBOX"], payload: { mimeType: "text/plain", headers: [], body: { data: b64url("x") } } }]);
+      expect(row).toMatchObject({ hasAttachments: false, attachments: [], attachmentCount: 0 });
+    });
+
+    it("carries no attachment ids — they are long, and get_thread hands them over", async () => {
+      const row = await search([{ id: "m1", labelIds: ["INBOX"], payload: { mimeType: "multipart/mixed", headers: [], parts: [part("a.pdf", "application/pdf", 1)] } }]);
+      expect(Object.keys(row.attachments[0]).sort()).toEqual(["filename", "mimeType", "size"]);
     });
   });
 
@@ -2542,5 +2645,31 @@ describe("quota failures inside the multi-fetch loops", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("summarizeAttachments", () => {
+  const att = (i: number) => ({ messageId: "m", attachmentId: `a${i}`, filename: `f${i}`, mimeType: "x/y", size: i });
+
+  it("keeps filename, mimeType and size, in order, up to the cap", () => {
+    expect(summarizeAttachments([att(1), att(2), att(3)], 2)).toEqual({
+      hasAttachments: true,
+      attachments: [
+        { filename: "f1", mimeType: "x/y", size: 1 },
+        { filename: "f2", mimeType: "x/y", size: 2 },
+      ],
+      attachmentCount: 3,
+    });
+  });
+
+  it("an empty input is consistent across all three fields", () => {
+    expect(summarizeAttachments([])).toEqual({ hasAttachments: false, attachments: [], attachmentCount: 0 });
+  });
+
+  it("the default cap is SEARCH_ATTACHMENT_CAP", () => {
+    const many = Array.from({ length: SEARCH_ATTACHMENT_CAP + 5 }, (_, i) => att(i));
+    const s = summarizeAttachments(many);
+    expect(s.attachments).toHaveLength(SEARCH_ATTACHMENT_CAP);
+    expect(s.attachmentCount).toBe(SEARCH_ATTACHMENT_CAP + 5);
   });
 });

@@ -23,6 +23,8 @@ function thread(p: Partial<ThreadSummary>): ThreadSummary {
     labelIds: [],
     snippet: "",
     hasAttachments: false,
+    attachments: [],
+    attachmentCount: 0,
     signals: [],
     ...p,
   };

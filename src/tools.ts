@@ -212,6 +212,8 @@ const threadSummarySchema = z.object({
   labelIds: z.array(z.string()),
   snippet: z.string(),
   hasAttachments: z.boolean(),
+  attachments: z.array(z.object({ filename: z.string(), mimeType: z.string(), size: z.number() })),
+  attachmentCount: z.number(),
   signals: z.array(signalSchema),
 });
 
@@ -353,7 +355,7 @@ function registerReadTools(server: McpServer): void {
     {
       description:
         "Search Gmail with native query syntax (e.g. 'in:inbox from:foo@bar.com newer_than:7d'). Returns thread summaries; read-state/category predicates are re-verified against each hit's live labels. " +
-        "`from`, `subject` and `date` are the thread's FIRST message (its origin); `snippet` is Gmail's and comes from the LAST. `lastMessageDate` and `lastMessageId` name that last message, so 'did anything new arrive?' is a comparison of `lastMessageId` against the one you saw, not of `messageCount` against a remembered count — and `get_thread` with `afterMessageId: <the id you saw>` then returns only what is new. `lastMessageFrom` names who wrote that last message and `lastMessageSent` is true when it was this mailbox, so 'has the other side answered?' is `lastMessageSent: false`. `unread` is true when any message of the thread is unread, read off the live labels rather than the search index. " +
+        "`from`, `subject` and `date` are the thread's FIRST message (its origin); `snippet` is Gmail's and comes from the LAST. `lastMessageDate` and `lastMessageId` name that last message, so 'did anything new arrive?' is a comparison of `lastMessageId` against the one you saw, not of `messageCount` against a remembered count — and `get_thread` with `afterMessageId: <the id you saw>` then returns only what is new. `lastMessageFrom` names who wrote that last message and `lastMessageSent` is true when it was this mailbox, so 'has the other side answered?' is `lastMessageSent: false`. `unread` is true when any message of the thread is unread, read off the live labels rather than the search index. `attachments` lists what is attached (filename, declared mimeType, size; at most 10, `attachmentCount` is the total), so 'is there a PDF to keep before archiving?' needs no get_thread — the mimeType is what the sender declared, so check the filename too when it says application/octet-stream. " +
         "Each summary carries `signals` derived from the thread's first message headers/MIME — newsletter (List-Id/List-Unsubscribe/Precedence bulk, junk or list), automated (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), calendar (text/calendar or .ics part), replyToMismatch (a Reply-To on another domain than From — a subdomain of the same domain counts as the same), displayNameSpoof (the From display name shows an address or URL on another domain than the one the mail came from), lookalikeDomain (a From domain label mixing Latin with Cyrillic, Greek or Armenian letters); empty when nothing is declared. " +
         "Paginated: when more results exist, the response carries a nextPageToken — pass it back via pageToken to fetch the next page. " +
         "A page can come back with FEWER threads than maxResults and still have a nextPageToken: false positives from the index consume the scan window, and on a mailbox whose read state the index has fallen behind on, most candidates for an is:unread query can be already-read mail. A short page is therefore not evidence that the result set is exhausted — only an absent nextPageToken is. " +
