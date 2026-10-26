@@ -1,4 +1,5 @@
 import { CliError } from "./cli.js";
+import { stripHiddenChars } from "./sanitize.js";
 
 /**
  * A human's yes before the actions that outlast the conversation, asked through MCP elicitation —
@@ -64,3 +65,17 @@ export const CONFIRM_SCHEMA = {
   },
   required: ["confirm"],
 } as const;
+
+/**
+ * Sender-chosen text as the dialog may show it: hidden characters stripped, every run of white
+ * space or control characters (line breaks included) folded to one space, at most `max`
+ * characters. The dialog is the one channel that does not pass through the model, and a display
+ * name decoded from RFC 2047 can carry paragraphs and BiDi overrides of the sender's own, such as
+ * a made-up "mailwarden checked this unsubscribe" (review grok-mailwarden, 26 Oct).
+ */
+export function dialogText(s: string, max = 80): string {
+  const flat = stripHiddenChars(s)
+    .replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, " ")
+    .trim();
+  return flat.length <= max ? flat : flat.slice(0, max - 1) + "\u2026";
+}

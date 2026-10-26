@@ -20,7 +20,7 @@ import { UNDO_LIMIT } from "./undo.js";
 import { PREVIEW_TTL_MS, PreviewStore, previewDrift } from "./preview.js";
 import { compareFilters } from "./filter-preview.js";
 import { attachmentText, AttachmentTextError, DEFAULT_LIMITS, MAX_CHARS_CEILING, MAX_NAME_CHARS } from "./attachment-text.js";
-import { CONFIRM_SCHEMA, confirmPlan, confirmed, resolveConfirmMode, type ConfirmMode } from "./confirm.js";
+import { CONFIRM_SCHEMA, confirmPlan, confirmed, dialogText, resolveConfirmMode, type ConfirmMode } from "./confirm.js";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -1347,7 +1347,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
             confirmWithUser(
               server,
               confirmMode,
-              `Unsubscribe from mail sent by ${info.from || "this sender"}? mailwarden will send one opt-out request to ${new URL(endpoint).host}.`,
+              `Unsubscribe from mail sent by ${dialogText(info.from) || "this sender"}? mailwarden will send one opt-out request to ${new URL(endpoint).host}.`,
             ),
         }),
       ),
@@ -1411,7 +1411,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
       // One question for the whole batch, asked with the dry run's own list of who would be contacted.
       if (!dryRun && confirmPlan(confirmMode, server.server.getClientCapabilities()?.elicitation !== undefined) !== "proceed") {
         const rehearsal = await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun: true });
-        const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${r.from || r.threadId} → ${new URL(r.wouldCall!).host}`);
+        const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${dialogText(r.from ?? "") || r.threadId} → ${new URL(r.wouldCall!).host}`);
         if (contacted.length > 0) {
           await confirmWithUser(
             server,

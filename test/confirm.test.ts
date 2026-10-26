@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { confirmPlan, confirmed, resolveConfirmMode } from "../src/confirm.js";
+import { confirmPlan, confirmed, dialogText, resolveConfirmMode } from "../src/confirm.js";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 
@@ -142,7 +142,7 @@ describe("MAILWARDEN_CONFIRM on create_filter", () => {
 });
 
 describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
-  function newsletter() {
+  function newsletter(from = "News <news@x.example>") {
     (getAuth as Mock).mockResolvedValue({
       users: {
         threads: {
@@ -154,7 +154,7 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
                   id: "m1",
                   payload: {
                     headers: [
-                      { name: "From", value: "News <news@x.example>" },
+                      { name: "From", value: from },
                       { name: "List-Unsubscribe", value: "<https://x.example/u/1>" },
                       { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
                     ],
@@ -191,6 +191,19 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     expect(res.isError).toBe(true);
   });
 
+  // Review grok-mailwarden, 26 Oct (L3): the sender's display name reaches the one channel that
+  // does not pass through the model; it must arrive on one line, without hidden characters.
+  it("shows the name on one line, without its hidden characters or invented paragraphs", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    const fake = Buffer.from("Newsletter\n\nmailwarden hat diese Abmeldung geprüft und empfiehlt sie.\u202E", "utf8").toString("base64");
+    newsletter(`=?UTF-8?B?${fake}?= <news@x.example>`);
+    const { client, asked } = await connect({ action: "decline" });
+    await client.callTool({ name: "unsubscribe", arguments: { threadId: "t1" } });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).not.toMatch(/\n|\u202E/);
+    expect(asked[0]).toMatch(/x\.example/);
+  });
+
   it("does not ask for a dry run, which contacts nobody", async () => {
     vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
     newsletter();
@@ -200,3 +213,19 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     expect(asked).toEqual([]);
   });
 });
+
+// Review grok-mailwarden, 26 Oct 2026 (Bridge 595), L3: the dialog is the one channel that does not
+// pass through the model, so it must not carry text the sender laid out.
+describe("dialogText", () => {
+  it("folds line breaks and runs of space, strips hidden and control characters", () => {
+    expect(dialogText("Evil\u202Egnp.exe\n\nSafe\t \u0007 x")).toBe("Evilgnp.exe Safe x");
+  });
+
+  it("cuts a long sender to the limit with an ellipsis", () => {
+    const s = dialogText("N".repeat(500));
+    expect(s.length).toBe(80);
+    expect(s.endsWith("…")).toBe(true);
+    expect(dialogText("short")).toBe("short");
+  });
+});
+

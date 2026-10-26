@@ -159,6 +159,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a client without a dialog answers with a cancel, and unattended runs would fail. A no is the new
   error code `declined_by_user`, with nothing done. The pattern is `klodr/gmail-mcp`'s, which asks
   through elicitation before pairing a new recipient.
+  The sender name shown in an unsubscribe question is folded to one line of at most 80 characters
+  and stripped of hidden characters: the dialog is the one channel the model does not pass, and a
+  display name decoded from RFC 2047 could carry paragraphs of its own (review `grok-mailwarden`,
+  26 October).
 
 ### Changed
 - **`get_thread` rejects `full: false` together with `bodies`, and `full: false` is deprecated.**
