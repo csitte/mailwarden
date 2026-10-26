@@ -212,7 +212,7 @@ describe("attachmentText — ZIP", () => {
   });
 
   it("uses the documented defaults", () => {
-    expect(DEFAULT_LIMITS).toEqual({ maxEntryBytes: 5242880, maxTotalBytes: 20971520, maxChars: 50000, maxEntries: 50 });
+    expect(DEFAULT_LIMITS).toEqual({ maxEntryBytes: 5242880, maxTotalBytes: 20971520, maxChars: 30000, maxEntries: 50 });
   });
 });
 
@@ -264,8 +264,16 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
     const r = attachmentText(triplog(), "export.zip", DEFAULT_LIMITS, { entry: "*.csv" });
     expect(r.entries).toEqual([{ name: "TripLog/trips.csv", bytes: Buffer.byteLength(csv), chars: csv.length, text: csv }]);
     expect(r.notSelected).toBe(2);
+    expect(r.notSelectedNames).toEqual(["TripLog/report.html", "TripLog/logo.png"]);
     expect(JSON.stringify(r).length).toBeLessThan(csv.length + 500); // the answer is the CSV, not the report
     expect(r.entries[0].text).toContain("4,96 €"); // UTF-8 intact
+  });
+
+  it("notSelectedNames is absent without entry, and when every entry matched", () => {
+    expect(attachmentText(triplog(), "export.zip")).not.toHaveProperty("notSelectedNames");
+    const all = attachmentText(triplog(), "export.zip", DEFAULT_LIMITS, { entry: "TripLog/*" });
+    expect(all.notSelected).toBe(0);
+    expect(all).not.toHaveProperty("notSelectedNames");
   });
 
   it("entry by exact bare name works too", () => {
@@ -296,7 +304,7 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
   });
 
   it("by default one answer stays within the default budget even with two large entries", () => {
-    const big = "x".repeat(40_000);
+    const big = "x".repeat(20_000);
     const r = attachmentText(
       zip([
         { name: "a.txt", data: Buffer.from(big) },
@@ -305,7 +313,7 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
       "two.zip",
     );
     expect(r.entries.reduce((n, e) => n + (e.text?.length ?? 0), 0)).toBe(DEFAULT_LIMITS.maxChars);
-    expect(r.entries[1]).toMatchObject({ truncated: true, nextOffset: 10_000, chars: 40_000 });
+    expect(r.entries[1]).toMatchObject({ truncated: true, nextOffset: 10_000, chars: 20_000 });
   });
 
   it("an entry the budget has run out on still says how long it is and where to start", () => {
@@ -350,6 +358,17 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
     expect(attachmentText(Buffer.from("abc"), "n.txt", DEFAULT_LIMITS, { offset: 3 }).entries[0]).toMatchObject({ text: "" });
   });
 
+  it("a default answer of HTML with umlauts stays below the 50.6 KB that Claude Code moved to a file", () => {
+    // The measured point (xorino-product, 26 Oct): 50,000 characters of an HTML report were
+    // 50.6 KB as JSON and did not reach the conversation. Quotes, newlines and multi-byte
+    // letters all make the JSON larger than the text; the default has to leave room for that.
+    const row = '<tr class="r"><td>Gewerbestraße</td><td>4,96 €</td></tr>\n';
+    const report = row.repeat(Math.ceil(100_000 / row.length));
+    const r = attachmentText(zip([{ name: "report.html", data: Buffer.from(report) }]), "x.zip");
+    expect(r.entries[0]).toMatchObject({ truncated: true, nextOffset: DEFAULT_LIMITS.maxChars });
+    expect(Buffer.byteLength(JSON.stringify(r))).toBeLessThan(50_000);
+  });
+
   it("maxChars is capped at the ceiling, whatever is asked", () => {
     const big = "y".repeat(MAX_CHARS_CEILING + 5000);
     const r = attachmentText(Buffer.from(big), "big.txt", DEFAULT_LIMITS, { maxChars: 10 ** 9 });
@@ -363,6 +382,9 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
     });
     expect(r.entries).toEqual([{ name: "wanted.csv", bytes: 3, chars: 3, text: "a;b" }]);
     expect(r.notSelected).toBe(60);
+    // names are capped like entries: the count stays exact, the list stops at maxEntries
+    expect(r.notSelectedNames).toHaveLength(DEFAULT_LIMITS.maxEntries);
+    expect(r.notSelectedNames?.[0]).toBe("noise-0.txt");
     expect(r.notListed).toBe(0);
   });
 

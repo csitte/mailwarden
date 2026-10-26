@@ -25,7 +25,10 @@ export interface AttachmentTextLimits {
    * Characters of text returned in ONE answer, across all entries; the rest is cut, `truncated`
    * set and `nextOffset` named. A whole-answer budget, not a per-entry one: a per-entry cap of
    * 100,000 let a single entry overflow the client (2026-10-26, a 96 KB HTML report beside the
-   * 3 KB CSV that was wanted), and two entries at the cap doubled it.
+   * 3 KB CSV that was wanted), and two entries at the cap doubled it. The default is 30,000, not
+   * 50,000: a 50,000-character answer of HTML came to 50.6 KB as JSON and Claude Code put it in a
+   * file instead of the conversation (xorino-product, 26 Oct). Only that one point is measured, and
+   * escapes and multi-byte letters make the JSON larger than the text, hence the margin.
    */
   maxChars: number;
   /** ZIP entries looked at; the rest are counted, not read. */
@@ -35,7 +38,7 @@ export interface AttachmentTextLimits {
 export const DEFAULT_LIMITS: AttachmentTextLimits = {
   maxEntryBytes: 5 * 1024 * 1024,
   maxTotalBytes: 20 * 1024 * 1024,
-  maxChars: 50_000,
+  maxChars: 30_000,
   maxEntries: 50,
 };
 
@@ -86,6 +89,8 @@ export interface AttachmentText {
   notListed: number;
   /** Entries that did not match `entry`; present only when `entry` was given. */
   notSelected?: number;
+  /** Their names, the first `maxEntries` of them; present when `notSelected` is above zero. */
+  notSelectedNames?: string[];
   /** Present when the answer is a listing without text. */
   list?: true;
 }
@@ -165,7 +170,7 @@ function readZip(
   b: Buffer,
   limits: AttachmentTextLimits,
   selected: (name: string) => boolean,
-): { entries: RawEntry[]; notListed: number; notSelected: number } {
+): { entries: RawEntry[]; notListed: number; notSelected: number; notSelectedNames: string[] } {
   // The end-of-central-directory record sits in the last 22 bytes plus a comment of up to 64 KiB.
   let eocd = -1;
   for (let i = b.length - 22; i >= Math.max(0, b.length - 22 - 0xffff); i--) {
@@ -180,6 +185,7 @@ function readZip(
   const entries: RawEntry[] = [];
   let spent = 0;
   let notSelected = 0;
+  const notSelectedNames: string[] = [];
   for (let n = 0; n < total; n++) {
     if (p + 46 > b.length || b.readUInt32LE(p) !== ZIP_CENTRAL) {
       throw new AttachmentTextError("The ZIP archive's central directory is damaged.");
@@ -197,10 +203,11 @@ function readZip(
     if (name.endsWith("/")) continue; // a directory
     if (!selected(name)) {
       notSelected++; // not inflated, not counted against any budget
+      if (notSelectedNames.length < limits.maxEntries) notSelectedNames.push(name);
       continue;
     }
     if (entries.length >= limits.maxEntries) {
-      return { entries, notListed: total - n, notSelected };
+      return { entries, notListed: total - n, notSelected, notSelectedNames };
     }
     const skip = (skipped: SkipReason) => entries.push({ name, bytes: size, skipped });
     if (flags & 0x1) {
@@ -243,7 +250,7 @@ function readZip(
     spent += data.length;
     entries.push(textEntry(name, data));
   }
-  return { entries, notListed: 0, notSelected };
+  return { entries, notListed: 0, notSelected, notSelectedNames };
 }
 
 /**
@@ -298,6 +305,7 @@ export function attachmentText(
     entries: shape(raw.entries, opts, budget),
     notListed: raw.notListed,
     ...(opts.entry !== undefined ? { notSelected: raw.notSelected } : {}),
+    ...(opts.entry !== undefined && raw.notSelected > 0 ? { notSelectedNames: raw.notSelectedNames } : {}),
     ...(opts.list ? { list: true as const } : {}),
   };
 }
@@ -307,7 +315,13 @@ function readRaw(
   name: string,
   limits: AttachmentTextLimits,
   opts: ReadOptions,
-): { format: AttachmentText["format"]; entries: RawEntry[]; notListed: number; notSelected: number } {
+): {
+  format: AttachmentText["format"];
+  entries: RawEntry[];
+  notListed: number;
+  notSelected: number;
+  notSelectedNames: string[];
+} {
   if (isZip(bytes)) {
     const sel = opts.entry !== undefined ? entryMatcher(opts.entry) : () => true;
     return { format: "zip", ...readZip(bytes, limits, sel) };
@@ -326,7 +340,7 @@ function readRaw(
     }
     if (data === "corrupt") throw new AttachmentTextError("The attachment starts like gzip but does not decompress.");
     const inner = name.replace(/\.gz$/i, "") || name;
-    return { format: "gzip", entries: [textEntry(inner, data)], notListed: 0, notSelected: 0 };
+    return { format: "gzip", entries: [textEntry(inner, data)], notListed: 0, notSelected: 0, notSelectedNames: [] };
   }
   const entry = textEntry(name, bytes);
   if (entry.skipped) {
@@ -334,5 +348,5 @@ function readRaw(
       "This attachment is not text (a PDF, image, Office file or other binary format); save it with download_attachment instead.",
     );
   }
-  return { format: "text", entries: [entry], notListed: 0, notSelected: 0 };
+  return { format: "text", entries: [entry], notListed: 0, notSelected: 0, notSelectedNames: [] };
 }

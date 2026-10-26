@@ -1565,7 +1565,7 @@ describe("tool results — structured content + fenced text", () => {
       expect(listed.structuredContent.entries.every((e: any) => e.text === undefined)).toBe(true);
 
       const csv = await call({ entry: "*.csv" });
-      expect(csv.structuredContent).toMatchObject({ notSelected: 1, entries: [{ name: "t/trips.csv", text: "date;km\n2026-10-20;12\n" }] });
+      expect(csv.structuredContent).toMatchObject({ notSelected: 1, notSelectedNames: ["t/report.html"], entries: [{ name: "t/trips.csv", text: "date;km\n2026-10-20;12\n" }] });
 
       const part = await call({ entry: "report.html", maxChars: 1000 });
       expect(part.structuredContent.entries[0]).toMatchObject({ truncated: true, nextOffset: 1000, chars: 5000 });

@@ -120,9 +120,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   characters, the client moved it to a file, and the session unpacked the archive by hand after all.
   Now `list: true` returns each entry's name, size and text length without any text; `entry` reads
   only the matching entries (an exact name or a pattern with `*` and `?`, matched against the path
-  and the bare file name), and the rest are counted in `notSelected` and never unpacked. The
-  character limit is now a budget for the WHOLE answer, `maxChars`, default 50,000 and at most
-  100,000, where it used to be 100,000 per entry; an entry it cuts reports `truncated`, its full
+  and the bare file name), and the rest are counted in `notSelected`, named in `notSelectedNames`
+  (asked for in the second trial, so that a skipped entry needs no second call) and never unpacked.
+  The character limit is now a budget for the WHOLE answer, `maxChars`, default 30,000 and at most
+  100,000, where it used to be 100,000 per entry. The default was 50,000 for a few hours: in the
+  second trial such an answer of HTML came to 50.6 KB as JSON and Claude Code moved it to a file
+  again, so the default leaves room for escapes and multi-byte letters; an entry it cuts reports `truncated`, its full
   length in `chars` and a `nextOffset`, and `offset` with that entry selected continues it. `entry`
   on an attachment that is not an archive, a pattern that matches nothing, and an `offset` that is
   past the end or not aimed at exactly one entry are `invalid_input` rather than empty answers.
