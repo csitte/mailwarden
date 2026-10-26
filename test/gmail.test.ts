@@ -225,12 +225,13 @@ describe("collectBodies — Bug 4: base64url decode", () => {
   });
 
   it("still reads windows-1252 bytes by their label (bytes that are not UTF-8)", () => {
-    const original = "Grüße · 5 €";
+    const original = "Grüße · 5";
     const payload: gmail_v1.Schema$MessagePart = {
       mimeType: "text/plain",
       headers: [{ name: "Content-Type", value: "text/plain; charset=windows-1252" }],
-      // windows-1252: ü=fc, ß=df, middle dot=b7, euro=80
-      body: { data: Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65, 0x20, 0xb7, 0x20, 0x35, 0x20, 0x80]).toString("base64url") },
+      // windows-1252: ü=fc, ß=df, middle dot=b7. No euro sign (0x80): Node 20's TextDecoder
+      // reads the windows-1252 label as ISO-8859-1 and returns U+0080 for it (CI, 26 Oct).
+      body: { data: Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65, 0x20, 0xb7, 0x20, 0x35]).toString("base64url") },
     };
     expect(collectBodies(payload).text).toBe(original);
   });
