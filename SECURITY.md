@@ -36,6 +36,11 @@ One exception, and only when the `unsubscribe` or `bulk_unsubscribe` tool is cal
 (threat 9 below). Otherwise nothing else is contacted — no telemetry, no analytics, no crash
 reporting, no third-party host.
 
+What goes to the AI client goes to whoever runs its model. Besides mail content that includes one
+fact about the machine: `get_profile` reports `serverPath`, the directory the server runs from,
+which usually contains the local user name (`/Users/<name>/...`, `C:\Users\<name>\...`). It is
+there so a session can tell which installation answers; it is not sent anywhere else.
+
 ## Threats considered & mitigations
 
 ### 1. Prompt injection → data exfiltration
@@ -114,8 +119,11 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   client through MCP elicitation, with the rule or the hosts to be contacted spelled out. The answer
   comes from the client's own dialog and never passes through the model — a "yes" typed in the chat
   is text a prompt-injected mail can produce, an elicitation answer is not. Off by default, because
-  a client that cannot show a dialog answers with a cancel and unattended runs would fail; `require`
-  refuses instead of proceeding where no dialog is possible. A label change is not on the list: it is
+  a client that cannot show a dialog answers with a cancel and unattended runs would fail. Note what
+  `ask` means on such a client: it proceeds WITHOUT asking, so `ask` is a convenience, not a
+  guarantee; `require` is the setting that guarantees the question, and it refuses instead of
+  proceeding where no dialog is possible. The sender name a dialog shows is folded to one short line
+  without hidden characters, so a display name cannot lay out text of its own in it. A label change is not on the list: it is
   reversible, exactly so with `undo: true`.
 - **A preview that binds the write.** A `bulk_modify` dry run returns a `previewToken`; the write that
   carries it acts on exactly the previewed messages and refuses a reworded query or a different
