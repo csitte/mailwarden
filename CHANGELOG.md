@@ -103,6 +103,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   schema default so the server can tell an explicit value from an absent one. `full: false` keeps
   working on its own, but the description now marks it deprecated: `bodies: "none"` costs the same
   quota and keeps the real attachment list, which `full: false` cannot.
+- **Text reduced from HTML no longer carries the mail's layout whitespace.** A report mail built
+  from nested tables came back from `get_thread` with `bodies: "text"` as mostly tab runs and
+  empty lines around two dozen lines of content (reported 26 October). The old cleanup matched
+  `[ \t]+\n` and `\n{3,}`, and neither sees a line that ends in `\r\n`, which is how such mails are
+  saved. Each rendered line is now trimmed, runs of spaces, tabs and no-break spaces inside it
+  collapse to one, invisible preheader padding is dropped, and at most one blank line is kept. A
+  browser collapses that whitespace too, so nothing a reader would have seen is lost. It applies
+  only to text reduced from HTML (`bodyFromHtml: true`, and the HTML fallback of `export_thread`);
+  a real text/plain part keeps its spacing, because an aligned table there is what the sender typed.
 - **The comparison table has a column for `gmail-tidy`** (`gmail-tidy-mcp`), read at `6df48c69` on
   25 October 2026: the server whose stated position is closest to this one (no send tool, no trash,
   filters that cannot forward), but draft-only rather than without compose, and ahead of `mailwarden`

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { codeSpan, fenceFor, htmlToText, renderThread } from "../src/export.js";
+import { codeSpan, fenceFor, htmlToText, renderThread, tidyRenderedText } from "../src/export.js";
 import { Gmail, type ParsedMessage } from "../src/gmail.js";
 
 const AT = new Date("2026-10-13T12:00:00Z");
@@ -49,6 +49,59 @@ describe("htmlToText", () => {
 
   it("leaves an unknown or out-of-range entity as written", () => {
     expect(htmlToText("&bogus; &#99999999;")).toBe("&bogus; &#99999999;");
+  });
+
+  it("collapses the layout whitespace of a table-built report mail (CRLF, tabs, nbsp)", () => {
+    // Shaped like the TripLog weekly report that came back as mostly tab runs (2026-10-26):
+    // nested tables, tab indentation, CRLF line endings, &nbsp; spacer cells.
+    const html = [
+      "<html><body>",
+      "\t<table>",
+      "\t\t<tr>",
+      "\t\t\t<td>\t\t</td>",
+      "\t\t\t<td>Weekly report</td>",
+      "\t\t</tr>",
+      "\t\t<tr><td>&nbsp;</td></tr>",
+      "\t\t<tr><td>",
+      "\t\t\t\tDistance:\t\t 412&nbsp;km",
+      "\t\t</td></tr>",
+      "\t\t<tr><td>&nbsp;&nbsp;</td></tr>",
+      "\t\t<tr><td>",
+      "\t\t\t\tTrips:   17",
+      "\t\t</td></tr>",
+      "\t</table>",
+      "</body></html>",
+    ].join("\r\n");
+    const out = htmlToText(html);
+    expect(out).toBe("Weekly report\n\nDistance: 412 km\n\nTrips: 17");
+    expect(out).not.toMatch(/\t|\r|  |\n{3,}/);
+  });
+
+  it("drops invisible preheader padding instead of leaving lines of it", () => {
+    // Marketing mails pad the inbox preview with zero-width and joiner characters.
+    const pad = "͏‌ ͏‌ ­​﻿ ".repeat(20);
+    const html = `<div style="display:none">${pad}</div><p>Sale ends Friday</p><div>${pad}</div>`;
+    expect(htmlToText(html)).toBe("Sale ends Friday");
+  });
+});
+
+describe("tidyRenderedText", () => {
+  it("trims each line, collapses inner runs and keeps at most one blank line", () => {
+    expect(tidyRenderedText("  a \t b  \n\n\n\n  c  d \r\n\r\n\r\n e\rf")).toBe("a b\n\nc d\n\ne\nf");
+  });
+
+  it("keeps words, punctuation and single blank lines exactly", () => {
+    const s = "Dear team,\n\nthe invoice (no. 4711) is attached.\n\nRegards";
+    expect(tidyRenderedText(s)).toBe(s);
+  });
+
+  it("is idempotent", () => {
+    const once = tidyRenderedText("\t x \r\n\r\n\r\n\ty z ");
+    expect(tidyRenderedText(once)).toBe(once);
+  });
+
+  it("an all-whitespace rendering becomes empty", () => {
+    expect(tidyRenderedText(" \t\r\n \n​\n")).toBe("");
   });
 });
 

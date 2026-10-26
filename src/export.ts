@@ -17,6 +17,7 @@
  */
 
 import type { ParsedMessage } from "./gmail.js";
+import { stripHiddenChars } from "./sanitize.js";
 
 export type ExportFormat = "markdown" | "json";
 
@@ -31,7 +32,7 @@ export function htmlToText(html: string): string {
     prev = s;
     s = s.replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, "");
   }
-  return s
+  const text = s
     .replace(/<!--[\s\S]*?-->/g, "")
     .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
     .replace(/<br\b[^>]*>/gi, "\n")
@@ -45,8 +46,28 @@ export function htmlToText(html: string): string {
         return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
       }
       return named[e.toLowerCase()] ?? m;
-    })
-    .replace(/[ \t]+\n/g, "\n")
+    });
+  return tidyRenderedText(text);
+}
+
+/**
+ * Collapse the layout whitespace a rendering inherits from its HTML source. Newsletters and
+ * report mails are nested tables indented with tabs, saved with CRLF and padded with invisible
+ * characters; reduced to text, a report of two dozen lines arrived as mostly tab runs and empty
+ * lines (reported 2026-10-26 for a TripLog weekly mail: the old cleanup matched `[ \t]+\n` and
+ * `\n{3,}`, neither of which sees a line ending in `\r\n`). A browser collapses that whitespace
+ * when it displays the mail, so collapsing it here loses nothing a reader would have seen.
+ *
+ * Applied ONLY to text reduced from HTML. A real text/plain part is what the sender typed, and
+ * its spacing — an aligned table, an indented quote — is content.
+ */
+export function tidyRenderedText(s: string): string {
+  return stripHiddenChars(s)
+    .replace(/͏/g, "") // combining grapheme joiner: preheader padding, invisible on its own
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((line) => line.replace(/[ \t\f\v  -   　]+/g, " ").trim())
+    .join("\n")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
 }

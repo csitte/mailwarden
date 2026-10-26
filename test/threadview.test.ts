@@ -129,6 +129,18 @@ describe("trimBodies", () => {
     expect(out.bodyFromHtml).toBe(true);
   });
 
+  it("text tidies the layout whitespace of a rendered HTML body, and ONLY of a rendered one", () => {
+    const layout = "<table>\r\n\t<tr><td>\t\t</td></tr>\r\n\t<tr><td>\r\n\t\t\tTotal:\t\t 12,50&nbsp;EUR\r\n\t</td></tr>\r\n</table>";
+    const rendered = trimBodies(msg({ plaintextBody: "", htmlBody: layout }), "text");
+    expect(rendered).toMatchObject({ plaintextBody: "Total: 12,50 EUR", bodyFromHtml: true });
+
+    // A real text/plain part keeps its spacing: an aligned table is what the sender typed.
+    const typed = "Item      Price\n\tBook    12,50\n\n\n\nThanks  ";
+    const kept = trimBodies(msg({ plaintextBody: typed, htmlBody: layout }), "text");
+    expect(kept.plaintextBody).toBe(typed);
+    expect("bodyFromHtml" in kept).toBe(false);
+  });
+
   it("text treats a whitespace-only plaintext part as absent", () => {
     const out = trimBodies(msg({ plaintextBody: " \n ", htmlBody: "<div>real</div>" }), "text");
     expect(out.plaintextBody).toBe("real");
