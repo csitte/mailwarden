@@ -69,6 +69,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   went with a quote below it; an attribution must now name a date, a time or an address.
   Known limit: an answer written BELOW an Outlook plain-text header block is cut with it, because
   nothing marks where the old message ends.
+  **A second round of the same review found the HTML fix itself expensive:** removing the quoted
+  parts searched from the start again after every removal, so one Gmail quote of twenty thousand
+  attribution and blockquote pairs (1.8 MB) held `get_thread` for 19 seconds. The HTML is now read
+  in one forward walk over its tags that skips comments and CDATA; a quote that is never closed,
+  or a `<blockquote>` hidden in a comment, no longer makes the answer below it disappear, and a
+  body over 512 KiB is not cut at all. Known limit: an answer written inside Yahoo's
+  `yahoo_quoted` cannot be told from the quote and goes with it.
 - **`archive`, `mark_read`, `mark_unread` and `modify_labels` take a list of threads.** Pass
   `threadIds` (up to 100) instead of `threadId`. `bulk_modify` works from a query, but what a triage
   run holds after the user's approval is a list, and archiving seven approved threads took seven
@@ -231,6 +238,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   right. It affected bodies whose bytes Gmail had not converted and encoded-word headers such as
   a Subject, whose bytes Gmail passes on as the sender wrote them. Both now go through `src/charset.ts`,
   which fills in those characters on any Node.
+- **One mail of unclosed tags could hold the server for seconds.** The HTML-to-text rendering that
+  `export_thread` uses since 0.23.0, and `get_thread` with `bodies: "text"` or `"new"` since this
+  release, scanned to the end of the body at every tag, comment or `<script>` that never closes.
+  Measured on 26 October: 9 seconds for 480 KB of unclosed tags, 14 for unclosed `<br` and `<li`,
+  with every other tool waiting meanwhile. Found while fixing the second review round of
+  `grok-mailwarden`, which named the pattern. Every scan now stops at the next `<` or at what
+  closes it, and blocks are removed in one forward walk; a test holds each shape under half a second.
 
 ### Security
 - **`hono` 4.13.7 to 4.13.13 (moderate, GHSA-5r4p-p66f-jhc7).** Dependabot flagged it on the

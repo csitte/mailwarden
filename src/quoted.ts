@@ -154,47 +154,136 @@ export function stripQuotedText(text: string): Stripped {
 }
 
 /**
- * Opening tags the common clients put around quoted history in HTML mail. `delimited` says the
- * client closes the quote, so text after it can be told apart from it; Outlook does not: after
- * its header block the old message simply follows, to the end.
+ * Above this size an HTML body is not cut at all: the model gets more text, which is the safe
+ * direction, and no single mail can make the walk below expensive.
  */
-const HTML_QUOTE_START: { re: RegExp; delimited: boolean }[] = [
-  { re: /<div\b[^>]*\bclass\s*=\s*["'][^"']*\bgmail_quote\b[^"']*["'][^>]*>/i, delimited: true },
-  { re: /<blockquote\b[^>]*\btype\s*=\s*["']?cite\b[^>]*>/i, delimited: true },
-  { re: /<div\b[^>]*\bid\s*=\s*["']?(divRplyFwdMsg|appendonsend)\b[^>]*>/i, delimited: false },
-  { re: /<div\b[^>]*\bclass\s*=\s*["'][^"']*\b(yahoo_quoted|moz-cite-prefix)\b[^"']*["'][^>]*>/i, delimited: true },
-];
+export const MAX_HTML_CUT = 512 * 1024;
 
-/** Index just past the element whose opening tag starts at `start`, or the end if never closed. */
-function elementEnd(html: string, start: number, tag: string): number {
-  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
-  re.lastIndex = start;
-  let depth = 0;
-  for (let m = re.exec(html); m; m = re.exec(html)) {
-    depth += m[1] ? -1 : 1;
-    if (depth === 0) return m.index + m[0].length;
-  }
-  return html.length;
-}
+/** Longest tag looked into; a longer one is passed over as markup without meaning here. */
+const MAX_TAG = 4096;
 
-/** Remove every element whose opening tag `open` matches, with all it contains. */
-function removeElements(html: string, open: RegExp, tag: string): string {
-  const re = new RegExp(open.source, "i");
-  for (let m = re.exec(html); m; m = re.exec(html)) {
-    html = html.slice(0, m.index) + html.slice(elementEnd(html, m.index, tag));
-  }
-  return html;
+/** One tag of an HTML body, found by a single forward walk. */
+interface Tag {
+  start: number;
+  end: number;
+  name: string;
+  closing: boolean;
+  selfClosing: boolean;
+  attrs: string;
 }
 
 /**
- * What of `tail` (the HTML from the quote marker on) is not quote: cited blocks, Gmail's and
- * Thunderbird's attribution lines and a Yahoo quote taken out. Text left over was written after
- * or between the quoted parts.
+ * Every tag of `html` in order, in ONE pass: each `<` is looked at once and the walk only moves
+ * forward, so the cost is linear in the body whatever the sender writes. Comments and CDATA are
+ * skipped whole, so a `<blockquote>` inside one is not a tag (review grok-mailwarden, 26 Oct).
+ * The first version cut with regular expressions that searched from the start again after every
+ * removal, and a tag without its `>` made `[^>]*` scan to the end at every position: 19 s for one
+ * 1.8 MB mail, blocking every other tool meanwhile.
  */
-function textOutsideQuotes(tail: string): string {
-  let rest = removeElements(tail, /<blockquote\b[^>]*>/, "blockquote");
-  rest = removeElements(rest, /<div\b[^>]*\bclass\s*=\s*["'][^"']*\b(gmail_attr|moz-cite-prefix|yahoo_quoted)\b[^"']*["'][^>]*>/, "div");
-  return htmlToText(rest);
+function* tags(html: string): Generator<Tag> {
+  let pos = 0;
+  for (;;) {
+    const lt = html.indexOf("<", pos);
+    if (lt < 0) return;
+    const special = html.startsWith("<!--", lt) ? "-->" : html.startsWith("<![CDATA[", lt) ? "]]>" : null;
+    if (special) {
+      const close = html.indexOf(special, lt + 4);
+      if (close < 0) return;
+      pos = close + 3;
+      yield { start: lt, end: pos, name: "#comment", closing: false, selfClosing: true, attrs: "" };
+      continue;
+    }
+    const gt = html.indexOf(">", lt + 1);
+    if (gt < 0) return; // no tag closes any more: the rest is text
+    pos = gt + 1;
+    const inner = html.slice(lt + 1, gt);
+    // A tag too long to look into is still a tag: markup, and never a quote marker.
+    const m = inner.length > MAX_TAG ? null : /^(\/?)([a-zA-Z][\w:-]*)([\s\S]*)$/.exec(inner);
+    if (!m) {
+      yield { start: lt, end: pos, name: "#other", closing: false, selfClosing: true, attrs: "" };
+      continue;
+    }
+    yield {
+      start: lt,
+      end: gt + 1,
+      name: m[2].toLowerCase(),
+      closing: m[1] === "/",
+      selfClosing: /\/\s*$/.test(m[3]),
+      attrs: m[3],
+    };
+  }
+}
+
+const hasClass = (attrs: string, re: RegExp) => {
+  const m = /\bclass\s*=\s*(["'])([^"']*)\1/i.exec(attrs);
+  return m !== null && re.test(m[2]);
+};
+
+/**
+ * Is this tag where a client's quoted history starts? `delimited` says the client closes the
+ * quote, so text after it can be told apart from it; Outlook does not: after its header block the
+ * old message simply follows, to the end.
+ */
+function quoteStart(t: Tag): { delimited: boolean } | null {
+  if (t.closing) return null;
+  if (t.name === "div" && hasClass(t.attrs, /\bgmail_quote\b/)) return { delimited: true };
+  if (t.name === "blockquote" && /\btype\s*=\s*["']?cite\b/i.test(t.attrs)) return { delimited: true };
+  if (t.name === "div" && /\bid\s*=\s*["']?(divRplyFwdMsg|appendonsend)\b/i.test(t.attrs)) return { delimited: false };
+  if (t.name === "div" && hasClass(t.attrs, /\b(yahoo_quoted|moz-cite-prefix)\b/)) return { delimited: true };
+  return null;
+}
+
+/** Divs that hold only quote: Gmail's and Thunderbird's attribution lines, Yahoo's whole quote. */
+const isQuoteDiv = (t: Tag) => t.name === "div" && hasClass(t.attrs, /\b(gmail_attr|moz-cite-prefix|yahoo_quoted)\b/);
+
+/**
+ * The visible text of `tail` (the HTML from the quote marker on) outside the quoted parts: cited
+ * blocks, attribution lines and a Yahoo quote left out. Text left over was written after or
+ * between the quoted parts. `null` when a quoted part is never closed: then where the quote ends
+ * cannot be told, and the caller does not cut. Linear, like `tags`.
+ *
+ * Known limit: Yahoo does not put its quote in a blockquote, so an answer written INSIDE
+ * `yahoo_quoted` cannot be told from the quote and goes with it.
+ */
+function textOutsideQuotes(tail: string): string | null {
+  const kept: string[] = [];
+  let pos = 0;
+  let quote = 0; // open blockquotes and quote divs
+  const divs: boolean[] = []; // for each open div: is it a quote div?
+  for (const t of tags(tail)) {
+    if (quote === 0) kept.push(tail.slice(pos, t.start));
+    pos = t.end;
+    if (t.name === "#comment") continue;
+    if (t.selfClosing) {
+      if (quote === 0) kept.push(tail.slice(t.start, t.end));
+      continue;
+    }
+    if (t.name === "blockquote") {
+      if (!t.closing) quote++;
+      else if (quote > 0) quote--;
+    } else if (t.name === "div") {
+      if (!t.closing) {
+        const q = isQuoteDiv(t);
+        divs.push(q);
+        if (q) quote++;
+      } else if (divs.length > 0 && divs.pop() && quote > 0) quote--;
+    } else if (quote === 0) kept.push(tail.slice(t.start, t.end));
+  }
+  if (quote > 0) return null;
+  kept.push(tail.slice(pos));
+  return htmlToText(kept.join(""));
+}
+
+/** The visible characters of `html`, tags dropped, without a regex that can backtrack. */
+function visibleText(html: string): string {
+  const out: string[] = [];
+  let pos = 0;
+  for (const t of tags(html)) {
+    out.push(html.slice(pos, t.start));
+    pos = t.end;
+  }
+  out.push(html.slice(pos));
+  return out.join(" ").trim();
 }
 
 /**
@@ -203,26 +292,29 @@ function textOutsideQuotes(tail: string): string {
  * sits between its parts (a bottom post, an answer inside Gmail's opened quote, Apple Mail with
  * answers between cited blocks), nothing is cut (review grok-mailwarden, 26 Oct). Outlook does
  * not close its history, so there everything from the marker on goes. A forward marker close
- * behind the quote marker keeps the whole message too.
+ * behind the quote marker keeps the whole message too, and so does a body over MAX_HTML_CUT.
  */
 export function stripQuotedHtml(html: string): { html: string; stripped: boolean } {
+  if (html.length > MAX_HTML_CUT) return { html, stripped: false };
   let at = -1;
   let delimited = true;
-  for (const q of HTML_QUOTE_START) {
-    const m = q.re.exec(html);
-    if (m && (at < 0 || m.index < at)) {
-      at = m.index;
+  for (const t of tags(html)) {
+    const q = quoteStart(t);
+    if (q) {
+      at = t.start;
       delimited = q.delimited;
+      break;
     }
   }
   if (at < 0) return { html, stripped: false };
-  if (delimited && textOutsideQuotes(html.slice(at)) !== "") return { html, stripped: false };
+  if (delimited) {
+    const outside = textOutsideQuotes(html.slice(at));
+    if (outside === null || outside !== "") return { html, stripped: false };
+  }
   // Gmail wraps a forward in gmail_quote too; its "---------- Forwarded message ---------" line
   // follows within the first few hundred characters, and above it there is often nothing at all.
-  const ahead = html.slice(at, at + 800).replace(/<[^>]*>/g, " ");
-  if (FORWARD_MARKER.test(ahead)) return { html, stripped: false };
-  const rest = html.slice(at).replace(/<[^>]*>/g, "").trim();
-  if (rest === "") return { html, stripped: false };
+  if (FORWARD_MARKER.test(visibleText(html.slice(at, at + 800)))) return { html, stripped: false };
+  if (visibleText(html.slice(at)) === "") return { html, stripped: false };
   if (htmlToText(html.slice(0, at)) === "") {
     return { html, stripped: false }; // nothing written above the quote
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isForwardSubject, stripQuotedHtml, stripQuotedText } from "../src/quoted.js";
+import { isForwardSubject, MAX_HTML_CUT, stripQuotedHtml, stripQuotedText } from "../src/quoted.js";
 import { htmlToText } from "../src/export.js";
 import { trimBodies } from "../src/threadview.js";
 import type { ParsedMessage } from "../src/gmail.js";
@@ -345,8 +345,9 @@ describe("review 26 Oct — what bodies:new must never drop", () => {
     expect(stripQuotedHtml(html)).toEqual({ html: "<div>Ok.</div>", stripped: true });
   });
 
-  it("H2: an unclosed quote element runs to the end and is cut as before", () => {
-    expect(stripQuotedHtml('<div>Ok.</div><blockquote type="cite">old, never closed')).toEqual({ html: "<div>Ok.</div>", stripped: true });
+  it("H2: an unclosed quote element is not cut: where it ends cannot be told (round 2, L5)", () => {
+    const html = '<div>Ok.</div><blockquote type="cite">old, never closed';
+    expect(stripQuotedHtml(html)).toEqual({ html, stripped: false });
   });
 
   it("L2: a colon-ending sentence of one's own is no attribution; the own lines stay", () => {
@@ -361,5 +362,47 @@ describe("review 26 Oct — what bodies:new must never drop", () => {
     expect(stripQuotedText(lines("Ok.", "", "Am 24.10.26 schrieb Bob:", "> alt")).text).toBe("Ok.");
     // Without either, the line is kept even though the quote below it goes.
     expect(stripQuotedText(lines("Ok.", "", "Am Freitag schrieb ich dir:", "> alt")).text).toBe(lines("Ok.", "", "Am Freitag schrieb ich dir:"));
+  });
+});
+
+// Review grok-mailwarden, second round over 2525192..e9979b0 (26 Oct): M3, L5 and the size cap.
+describe("review 26 Oct, round 2 — the HTML walk", () => {
+  it("M3: twenty thousand attribution/blockquote pairs take no time (19 s before)", () => {
+    const one = '<div class="gmail_attr">On 1 Oct 2026, A wrote:</div><blockquote class="gmail_quote">x</blockquote>';
+    const html = '<p>a</p><div class="gmail_quote">' + one.repeat(5000) + "</div>";
+    const t = performance.now();
+    const r = stripQuotedHtml(html);
+    expect(performance.now() - t).toBeLessThan(500);
+    expect(r).toEqual({ html: "<p>a</p>", stripped: true });
+  });
+
+  it("M3: tags that never close cost no time either (2.4 s at 240 KB before)", () => {
+    const html = '<p>a</p><blockquote type="cite">x</blockquote>' + "<blockquote ".repeat(40_000);
+    const t = performance.now();
+    stripQuotedHtml(html);
+    expect(performance.now() - t).toBeLessThan(500);
+  });
+
+  it("a body over MAX_HTML_CUT is never cut", () => {
+    const html = '<p>Ok.</p><div class="gmail_quote"><blockquote>' + "o".repeat(MAX_HTML_CUT) + "</blockquote></div>";
+    expect(stripQuotedHtml(html)).toEqual({ html, stripped: false });
+  });
+
+  it.each([
+    ["a <blockquote> inside a comment", '<p>Hi</p><blockquote type="cite">old<!-- <blockquote> --></blockquote><p>Meine Antwort</p>'],
+    ["a cited block that is never closed", '<p>Hi</p><blockquote type="cite">old<p>Antwort</p>'],
+    ["a self-closing cited block", '<p>Hi</p><blockquote type="cite"/><p>Antwort</p>'],
+  ])("L5: keeps the answer with %s", (_n, html) => {
+    expect(stripQuotedHtml(html)).toEqual({ html, stripped: false });
+  });
+
+  it("L5: a comment after the quote is no text, and the quote still goes", () => {
+    const html = '<p>Ok.</p><blockquote type="cite">old</blockquote><!-- [if mso]> <p>x</p> <![endif] -->';
+    expect(stripQuotedHtml(html)).toEqual({ html: "<p>Ok.</p>", stripped: true });
+  });
+
+  it("an overlong tag is markup, never a marker: the safe direction", () => {
+    const html = '<p>Ok.</p><div class="gmail_quote" style="' + "x".repeat(5000) + '"><blockquote>old</blockquote></div>';
+    expect(stripQuotedHtml(html).stripped).toBe(false);
   });
 });
