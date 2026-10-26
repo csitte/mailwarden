@@ -222,7 +222,9 @@ or a connection that closed at once, and nothing that said why. Four facts cover
   without complaint, and a missing one makes the server fail to start with no mailwarden message
   at all, because there is no mailwarden yet to print one.
 - **Ask the running server what it is.** `get_profile` returns `serverVersion`, `serverPath` (the
-  directory the code was loaded from) and `account`. When a tool documented for a version seems
+  directory the code was loaded from) and `account`. A release reports its bare version; a clone's
+  `dist/` reports the commit it was built from (`0.23.0+a5ff4a7`, `.dirty` if sources were
+  uncommitted), so the two can no longer be mistaken for each other. When a tool documented for a version seems
   missing, this is the call that says whether the build you think is running actually is. Before
   that, `npx -y mailwarden --check` on the new machine tells credentials, token, scopes and a live
   call apart.

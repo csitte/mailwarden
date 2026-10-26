@@ -495,10 +495,12 @@ describe("tool results — structured content + fenced text", () => {
       threadsTotal: 640,
       account: "(default)",
     });
-    // Which build answers, and from where: the version is the package's own, the path is
-    // the directory the running code was loaded from (here the TypeScript source under test).
+    // Which build answers, and from where: the path is the directory the running code was loaded
+    // from (here the TypeScript source under test). A source run has no build record, so it must
+    // NOT report the bare version — that is reserved for a release build.
     const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-    expect(res.structuredContent.serverVersion).toBe(pkg.version);
+    expect(res.structuredContent.serverVersion).toBe(`${pkg.version}+unknown`);
+    expect(res.structuredContent.build).toBeUndefined();
     expect(res.structuredContent.serverPath.replace(/\\/g, "/")).toMatch(/\/src$/);
     expect(res.content[0].text.startsWith("<untrusted-tool-output>")).toBe(true);
   });

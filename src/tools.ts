@@ -24,6 +24,7 @@ import { CONFIRM_SCHEMA, confirmPlan, confirmed, resolveConfirmMode, type Confir
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
+import { describeBuild, loadBuildRecord } from "./buildinfo.js";
 import path from "node:path";
 
 /**
@@ -34,6 +35,8 @@ import path from "node:path";
  */
 const SERVER_VERSION: string = createRequire(import.meta.url)("../package.json").version;
 const SERVER_PATH: string = path.dirname(fileURLToPath(import.meta.url));
+// Read once: the record describes the code that was loaded, and that does not change while it runs.
+const SERVER_IDENTITY = describeBuild(SERVER_VERSION, loadBuildRecord(SERVER_PATH));
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
 /** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
@@ -499,7 +502,7 @@ function registerReadTools(server: McpServer): void {
     "get_profile",
     {
       description:
-        "Return the authorized account: email address plus total message/thread counts, and WHICH SERVER is answering: `serverVersion`, `serverPath` (the directory the running code was loaded from — an npm install, an npx cache or a clone's `dist/`) and `account` (the named mailwarden account, or `(default)`). " +
+        "Return the authorized account: email address plus total message/thread counts, and WHICH SERVER is answering: `serverVersion` (the bare version ONLY for a release build; anything else names its commit, e.g. `0.23.0+a5ff4a7`, `+a5ff4a7.dirty` when built from uncommitted sources, `+unknown` when the build left no record), `build` (commit, dirty, release, builtAt; absent when unknown), `serverPath` (the directory the running code was loaded from — an npm install, an npx cache or a clone's `dist/`) and `account` (the named mailwarden account, or `(default)`). " +
         "USE WHEN: confirming WHICH mailbox is connected before a bulk or filter action, as a cheap liveness check, or when a tool or field documented for a version seems missing — `serverVersion` says whether the running build is the one you think, and `serverPath` which install it is. " +
         "DO NOT USE: to enumerate messages — this returns only counts, not a listing (use search). " +
         "SIDE EFFECTS: none.",
@@ -511,6 +514,9 @@ function registerReadTools(server: McpServer): void {
         // what_changed later — mailwarden stores nothing between calls.
         historyId: z.string(),
         serverVersion: z.string(),
+        build: z
+          .object({ commit: z.string(), dirty: z.boolean(), release: z.boolean(), builtAt: z.string() })
+          .optional(),
         serverPath: z.string(),
         account: z.string(),
       },
@@ -519,7 +525,7 @@ function registerReadTools(server: McpServer): void {
     async () =>
       ok({
         ...(await (await client()).getProfile()),
-        serverVersion: SERVER_VERSION,
+        ...SERVER_IDENTITY,
         serverPath: SERVER_PATH,
         account: activeAccount() ?? "(default)",
       }),

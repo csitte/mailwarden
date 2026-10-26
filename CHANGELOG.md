@@ -42,6 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   could not tell whether the npm install or the clone was serving, and in both cases the symptom
   was a documented tool that seemed not to exist. A client's config says what it was told to
   start; only the running process knows what started, and this is the cheapest call that can say.
+  **Only a release build reports the bare version.** The first cut reported the package version
+  alone, and the first two sessions to try it (26 October) found that a clone's `dist/` six
+  commits past 0.23.0 and the npm install of 0.23.0 both said `0.23.0`: the field could not
+  answer the question it was added for. `npm run build` now records the commit in
+  `dist/build-info.json`, and `serverVersion` becomes `0.23.0+a5ff4a7` between releases,
+  `+a5ff4a7.dirty` when `src/`, `package.json`, the lockfile or `tsconfig.json` had uncommitted
+  or untracked changes (an untracked source file is compiled into `dist/` all the same), and
+  `+unknown` when there is no usable record (a source run, a bare `tsc`). A `build` object carries
+  `commit`, `dirty`, `release` and `builtAt`. A release is HEAD at `v<version>` with clean build
+  inputs; the package smoke test checks the record is in the tarball.
 - **`bulk_modify` previews can be confirmed exactly.** A dry run that matches anything returns a
   `previewToken`, and the server holds the matched message set for 30 minutes. A write that passes the
   token back with the same query, `add` and `remove` acts on exactly that set: mail that started matching

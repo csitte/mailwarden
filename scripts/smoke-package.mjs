@@ -75,6 +75,19 @@ try {
   // wrapper on Windows, which spawn cannot execute directly, and the shim adds nothing to test.
   const cliPath = path.join(consumer, "node_modules", "mailwarden", "dist", "index.js");
 
+  // get_profile reports the build from dist/build-info.json. Without it in the tarball, every
+  // npm install — the release included — would report `+unknown` instead of its version.
+  const buildInfoPath = path.join(consumer, "node_modules", "mailwarden", "dist", "build-info.json");
+  let buildInfo = null;
+  try {
+    buildInfo = JSON.parse(readFileSync(buildInfoPath, "utf8"));
+  } catch {}
+  check(
+    "package carries dist/build-info.json for this version",
+    buildInfo?.version === expectedVersion && typeof buildInfo?.commit === "string",
+    JSON.stringify(buildInfo),
+  );
+
   console.log("\nMCP handshake (default tiers):");
   const session = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig });
   const toolNames = session.tools.map((t) => t.name);

@@ -23,7 +23,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/write-build-info.mjs",
     "prepare": "npm run build",
     "version": "node scripts/sync-version.mjs && git add server.json .claude-plugin/plugin.json skills",
     "postversion": "node scripts/check-site-notice.mjs --warn",
