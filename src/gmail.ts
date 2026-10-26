@@ -40,6 +40,20 @@ export interface ThreadSummary {
    */
   lastMessageId: string;
   lastMessageDate: string;
+  /**
+   * Who wrote the LAST message, and whether it was this mailbox. `lastMessageDate` alone counts
+   * the user's own replies, so "has the other side answered?" — the commonest look at a thread —
+   * could not be told from a search row (reported 2026-10-26: the newest message of a thread was
+   * the user's own reply). `lastMessageSent` is the SENT label on that message.
+   */
+  lastMessageFrom: string;
+  lastMessageSent: boolean;
+  /**
+   * Whether any message of the thread is unread, from the live labels `search` re-verifies
+   * against — the same fact as `UNREAD` in `labelIds`, as a boolean, because the read gate is
+   * the most frequent decision a caller makes and reading it off a list invites slips.
+   */
+  unread: boolean;
   labelIds: string[];
   snippet: string;
   hasAttachments: boolean;
@@ -990,7 +1004,9 @@ export class Gmail {
         const raw = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
         const h = (n: string) => decodeRfc2047(raw(n));
         const last = msgs[msgs.length - 1];
-        const lastDate = last?.payload?.headers?.find((x) => x.name?.toLowerCase() === "date")?.value ?? "";
+        const lastRaw = (n: string) =>
+          last?.payload?.headers?.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
+        const lastDate = lastRaw("Date");
         out.push({
           threadId: t.id!,
           messageCount: msgs.length,
@@ -999,6 +1015,9 @@ export class Gmail {
           date: h("Date"),
           lastMessageId: last?.id ?? "",
           lastMessageDate: decodeRfc2047(lastDate),
+          lastMessageFrom: decodeAddressHeader(lastRaw("From")),
+          lastMessageSent: (last?.labelIds ?? []).includes("SENT"),
+          unread: labelIds.includes("UNREAD"),
           labelIds,
           snippet: t.snippet ?? msgs[0]?.snippet ?? "",
           hasAttachments: msgs.some((m) => collectAttachments(m).length > 0),

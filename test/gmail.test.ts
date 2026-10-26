@@ -430,6 +430,76 @@ describe("Gmail.search — drops index false positives via live-label re-verify"
     });
   });
 
+  describe("who wrote last, and is anything unread", () => {
+    const msg = (id: string, from: string, labels: string[]) => ({
+      id,
+      labelIds: labels,
+      payload: { headers: [{ name: "From", value: from }, { name: "Subject", value: "s" }, { name: "Date", value: "d" }] },
+    });
+    const apiFor = (messages: unknown[]): any => ({
+      users: {
+        threads: {
+          list: async () => ({ data: { threads: [{ id: "t1", snippet: "x" }] } }),
+          get: async () => ({ data: { messages } }),
+        },
+      },
+    });
+    const rowOf = async (messages: unknown[], q = "in:anywhere") =>
+      (await new Gmail(apiFor(messages) as gmail_v1.Gmail).search(q, 25)).threads[0];
+
+    it("our own reply last: lastMessageSent, and lastMessageFrom names us", async () => {
+      // Reported 2026-10-26: lastMessageDate counted the user's own reply, so "has the other
+      // side answered?" could not be read off a search row.
+      const row = await rowOf([
+        msg("m1", "Corvin <corvin@example.org>", ["INBOX"]),
+        msg("m2", "=?utf-8?q?Chris_M=C3=BCller?= <me@example.com>", ["SENT"]),
+      ]);
+      expect(row).toMatchObject({
+        from: "Corvin <corvin@example.org>",
+        lastMessageId: "m2",
+        lastMessageFrom: "Chris Müller <me@example.com>", // RFC 2047-decoded like `from`
+        lastMessageSent: true,
+        unread: false,
+      });
+    });
+
+    it("their answer last: lastMessageSent false, unread when that answer is unread", async () => {
+      const row = await rowOf([
+        msg("m1", "me@example.com", ["SENT"]),
+        msg("m2", "Corvin <corvin@example.org>", ["INBOX", "UNREAD"]),
+      ]);
+      expect(row).toMatchObject({ lastMessageFrom: "Corvin <corvin@example.org>", lastMessageSent: false, unread: true });
+    });
+
+    it("a message we sent AND received (to self) still counts as sent", async () => {
+      const row = await rowOf([msg("m1", "me@example.com", ["SENT", "INBOX"])]);
+      expect(row.lastMessageSent).toBe(true);
+    });
+
+    it("unread is thread-level: an older unread message makes the thread unread", async () => {
+      const row = await rowOf([
+        msg("m1", "a@example.org", ["INBOX", "UNREAD"]),
+        msg("m2", "b@example.org", ["INBOX"]),
+      ]);
+      expect(row.unread).toBe(true);
+      expect(row.labelIds).toContain("UNREAD"); // the boolean and the list never disagree
+    });
+
+    it("unread comes from live labels: an is:unread hit whose messages are all read is dropped, not reported unread:false", async () => {
+      const row = await rowOf([msg("m1", "a@example.org", ["INBOX"])], "is:unread");
+      expect(row).toBeUndefined();
+    });
+
+    it("a last message without a From header reads as empty, not as the first sender", async () => {
+      const row = await rowOf([
+        msg("m1", "a@example.org", ["INBOX"]),
+        { id: "m2", labelIds: ["INBOX"], payload: { headers: [] } },
+      ]);
+      expect(row.lastMessageFrom).toBe("");
+      expect(row.lastMessageSent).toBe(false);
+    });
+  });
+
   it("a single-message thread has the same message as first and last", async () => {
     const { api } = fakeSearchApi({ a: ["UNREAD"] });
     const gmail = new Gmail(api as gmail_v1.Gmail);

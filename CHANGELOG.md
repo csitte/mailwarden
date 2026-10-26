@@ -35,6 +35,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message as `date`. The id is what `get_thread`'s new `afterMessageId` takes, so "what came after the
   one I saw" is one call. The first-message fields keep their meaning: a newsletter stays a newsletter
   after the user replies to it, and `signals` still read the origin.
+  From the first trials of that build (26 October), three more fields. `lastMessageFrom` and
+  `lastMessageSent` (the SENT label on the last message) answer "has the other side replied?",
+  which `lastMessageDate` could not, because it also counts the user's own replies. `unread` states
+  as a boolean what callers read off `UNREAD` in `labelIds`; the read gate is their most frequent
+  decision, and it comes from the live labels `search` already re-verifies against.
 - **`get_profile` says which server is answering.** `serverVersion`, `serverPath` (the directory
   the running code was loaded from: an npm install, an npx cache or a clone's `dist/`) and
   `account` (the named mailwarden account or `(default)`). From the same 25 October round: one
