@@ -45,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the terms of service, so every check before archiving took a `get_thread`. `search` already
   fetches each hit in `full` format, so the list costs no call; attachment ids stay out because
   they run to a few hundred characters each, and `get_thread` with `bodies: "none"` has them.
+- **`get_thread` with `bodies: "new"` leaves out the quoted history of a reply.** From the first trial
+  of `lastN` (26 October): with only the newest message requested, about three quarters of its text
+  was the conversation just skipped, quoted back underneath. `new` is `text` minus the quote, and a
+  message that was cut says `quotedStripped: true`. The rule is conservative, because a wrong cut
+  drops what someone wrote: only the TRAILING quoted block goes, with its attribution line ("On ...
+  wrote:", "Am ... schrieb ...:" and the same in French, Spanish, Italian and Dutch, also when wrapped
+  over several lines), or an Outlook history from its "Original Message" line or header block. An
+  inline answer between quoted lines keeps every answer. A forwarded message is content and is never
+  cut, though forwards use the same header blocks. A message that is nothing but a quote is kept
+  whole. HTML-only mail is cut where the clients mark the quote (`gmail_quote`, `blockquote
+  type="cite"`, Outlook's `divRplyFwdMsg`, `yahoo_quoted`, `moz-cite-prefix`) before it is rendered.
+  A corpus of reply shapes from Gmail, Outlook, Apple Mail, Thunderbird and Yahoo holds the rules.
 - **`archive`, `mark_read`, `mark_unread` and `modify_labels` take a list of threads.** Pass
   `threadIds` (up to 100) instead of `threadId`. `bulk_modify` works from a query, but what a triage
   run holds after the user's approval is a list, and archiving seven approved threads took seven

@@ -149,7 +149,7 @@ export interface GetThreadOptions extends MessageSelection {
  */
 export type GetThreadResult = { threadId: string; messageCount: number; omittedMessages: number } & (
   | { messages: ParsedMessage[]; metadataOnly?: undefined; bodies?: undefined }
-  | { messages: TrimmedMessage[]; metadataOnly?: undefined; bodies: "text" | "none" }
+  | { messages: TrimmedMessage[]; metadataOnly?: undefined; bodies: "text" | "new" | "none" }
   | { messages: MessageHeaders[]; metadataOnly: true; bodies?: undefined }
 );
 

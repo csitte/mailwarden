@@ -15,9 +15,13 @@
 import { ToolError } from "./cli.js";
 import { htmlToText } from "./export.js";
 import type { ParsedMessage } from "./gmail.js";
+import { stripQuotedHtml, stripQuotedText } from "./quoted.js";
 
-/** How much of each message body to return. */
-export type BodyMode = "full" | "text" | "none";
+/**
+ * How much of each message body to return. `new` is `text` without the quoted history at the
+ * end of a reply (see quoted.ts).
+ */
+export type BodyMode = "full" | "text" | "new" | "none";
 
 export interface MessageSelection {
   /** Keep only the last N messages (after `afterMessageId`, when both are given). */
@@ -35,6 +39,8 @@ export interface MessageSelection {
 export type TrimmedMessage = Omit<ParsedMessage, "plaintextBody" | "htmlBody"> & {
   plaintextBody?: string;
   bodyFromHtml?: true;
+  /** Set by `new` when quoted history was cut off — what is shown is not the whole body. */
+  quotedStripped?: true;
 };
 
 /**
@@ -94,15 +100,32 @@ export function selectMessages<T extends { id: string }>(
  * that passes the default pays nothing.
  */
 export function trimBodies(message: ParsedMessage, mode: "full"): ParsedMessage;
-export function trimBodies(message: ParsedMessage, mode: "text" | "none"): TrimmedMessage;
+export function trimBodies(message: ParsedMessage, mode: "text" | "new" | "none"): TrimmedMessage;
 export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessage | TrimmedMessage;
 export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessage | TrimmedMessage {
   if (mode === "full") return message;
   const { plaintextBody, htmlBody, ...rest } = message;
   if (mode === "none") return rest;
-  if (plaintextBody.trim() !== "") return { ...rest, plaintextBody };
-  const fromHtml = htmlToText(htmlBody);
+  const fresh = mode === "new";
+  if (plaintextBody.trim() !== "") {
+    if (!fresh) return { ...rest, plaintextBody };
+    const s = stripQuotedText(plaintextBody);
+    return s.stripped ? { ...rest, plaintextBody: s.text, quotedStripped: true } : { ...rest, plaintextBody };
+  }
+  // HTML-only: cut the quote in the markup, where the clients mark it, then render; a `>` block
+  // that survives as text (a client that quotes in plain style inside HTML) is cut after.
+  const h = fresh ? stripQuotedHtml(htmlBody) : { html: htmlBody, stripped: false };
+  let fromHtml = htmlToText(h.html);
+  let cut = h.stripped;
+  if (fresh) {
+    const s = stripQuotedText(fromHtml);
+    if (s.stripped) {
+      fromHtml = s.text;
+      cut = true;
+    }
+  }
   // An HTML-only mail whose markup reduces to nothing is reported as empty text, not as
   // "no body": the field stays, so the shape does not change with the sender's choices.
-  return fromHtml === "" ? { ...rest, plaintextBody: "" } : { ...rest, plaintextBody: fromHtml, bodyFromHtml: true };
+  if (fromHtml === "") return { ...rest, plaintextBody: "" };
+  return { ...rest, plaintextBody: fromHtml, bodyFromHtml: true, ...(cut ? { quotedStripped: true as const } : {}) };
 }

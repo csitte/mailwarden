@@ -307,6 +307,36 @@ describe("tool results — structured content + fenced text", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it("get_thread bodies:new + lastN:1 returns only what the newest message added", async () => {
+    const b64url = (s: string) => Buffer.from(s, "utf8").toString("base64url");
+    const reply = [
+      "Thanks, booked for Friday.",
+      "",
+      "On Sat, 25 Oct 2026 at 11:41, Pullman <res@pullman.example> wrote:",
+      "> Dear guest,",
+      "> your room is ready.",
+    ].join("\n");
+    const m = (id: string, text: string) => ({
+      id,
+      threadId: "t1",
+      labelIds: ["INBOX"],
+      payload: { mimeType: "text/plain", headers: [{ name: "Subject", value: "Booking" }], body: { data: b64url(text) } },
+    });
+    (getAuth as Mock).mockResolvedValue({
+      users: { threads: { get: async () => ({ data: { messages: [m("m1", "Dear guest, your room is ready."), m("m2", reply)] } }) } },
+    });
+    const client = await connect();
+    const res: any = await client.callTool({ name: "get_thread", arguments: { threadId: "t1", bodies: "new", lastN: 1 } });
+    expect(res.isError).toBeFalsy();
+    expect(res.structuredContent).toMatchObject({ bodies: "new", messageCount: 2, omittedMessages: 1 });
+    expect(res.structuredContent.messages).toHaveLength(1);
+    expect(res.structuredContent.messages[0]).toMatchObject({
+      id: "m2",
+      plaintextBody: "Thanks, booked for Friday.",
+      quotedStripped: true,
+    });
+  });
+
   it("get_thread marks full:false as deprecated in favour of bodies:none", async () => {
     const client = await connect();
     const tool = (await client.listTools()).tools.find((t) => t.name === "get_thread")!;
