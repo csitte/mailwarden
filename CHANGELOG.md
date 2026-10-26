@@ -182,6 +182,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   file and held the plugin for review over it. Nothing in the plugin used it; `render.py` no
   longer writes it, and `favicon-32.png` stays for web pages.
 
+### Fixed
+- **Mail whose part declares ISO-8859-1 or windows-1252 no longer reads as mojibake.** Reported
+  from a real run on 26 October: an Outlook reply showed "Ã¼bersenden" and "GrÃ¼ÃŸen" in
+  `plaintextBody`, while Gmail's own snippet of the same message was right. Measured on that
+  message: the part said `charset="iso-8859-1"`, but the bytes Gmail returned for `format=full`
+  were already UTF-8. Gmail had converted the text and kept the header. Since July every part was
+  decoded by its label, which decoded such text a second time. Now bytes that are valid UTF-8
+  and not plain ASCII are read as UTF-8. Bytes that are not valid UTF-8 still go by the label, so
+  real windows-1252 text keeps working, and so does an ASCII-only part, which keeps 7-bit charsets
+  such as ISO-2022-JP right. The fix covers every tool that reads bodies, including `get_thread`
+  in all body modes, `export_thread` and the inline-image check behind the attachment lists.
+
 ### Security
 - **`hono` 4.13.7 to 4.13.13 (moderate, GHSA-5r4p-p66f-jhc7).** Dependabot flagged it on the
   25 October push. `serveStatic` decoded the request path a second time, so middleware mounted on a

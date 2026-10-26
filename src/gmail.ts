@@ -1,6 +1,7 @@
 import { CliError, ToolError } from "./cli.js";
 import { gmail as gmailApi, gmail_v1 } from "@googleapis/gmail";
 import type { OAuth2Client } from "google-auth-library";
+import { isAscii, isUtf8 } from "node:buffer";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
@@ -629,12 +630,18 @@ function partCharset(p: gmail_v1.Schema$MessagePart): string {
 export function collectBodies(payload?: gmail_v1.Schema$MessagePart): { text: string; html: string } {
   let text = "";
   let html = "";
-  // `body.data` holds the part's raw bytes in its declared charset — decoding
-  // everything as UTF-8 turns ISO-8859-1 / windows-1252 mail into mojibake.
+  // `body.data` is not reliably in the part's declared charset. Measured 26 Oct 2026:
+  // an Outlook part labelled iso-8859-1 came back from format=full as UTF-8, because Gmail
+  // had converted it and kept the header. Decoding that by the label double-decodes
+  // ("Ã¼" for "ü"). So bytes that are valid UTF-8 and not plain ASCII are read as UTF-8:
+  // real ISO-8859-1 / windows-1252 text with any non-ASCII letter is almost never valid
+  // UTF-8 (a lone 0xfc is not). Everything else goes by the label, which also keeps 7-bit
+  // charsets such as ISO-2022-JP, whose bytes are valid UTF-8 but mean something else.
   const decode = (p: gmail_v1.Schema$MessagePart): string => {
     const d = p.body?.data;
     if (!d) return "";
     const buf = Buffer.from(d, "base64url");
+    if (!isAscii(buf) && isUtf8(buf)) return buf.toString("utf8");
     try {
       return new TextDecoder(partCharset(p)).decode(buf);
     } catch {

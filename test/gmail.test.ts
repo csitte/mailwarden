@@ -194,6 +194,78 @@ describe("collectBodies — Bug 4: base64url decode", () => {
     expect(collectBodies(payload).text).toBe(original);
   });
 
+  // Measured 26 Oct 2026 on an Outlook mail: the part said charset="iso-8859-1", yet the
+  // `body.data` Gmail returned for format=full held UTF-8 (eight c3 bc, not one fc).
+  // Gmail had converted the text and left the header as sent.
+  it("reads UTF-8 bytes as UTF-8 even when the header declares ISO-8859-1", () => {
+    const original = "Wir übersenden die Verträge. Mit freundlichen Grüßen · Pullman";
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "text/plain",
+      headers: [{ name: "Content-Type", value: 'text/plain; charset="iso-8859-1"' }],
+      body: { data: b64url(original) },
+    };
+    const { text } = collectBodies(payload);
+    expect(text).toBe(original);
+    expect(text).not.toMatch(/Ã|Â/);
+  });
+
+  it("does the same for an HTML part and a windows-1252 label", () => {
+    const html = "<p>Grüße · 5 €</p>";
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "multipart/alternative",
+      parts: [
+        {
+          mimeType: "text/html",
+          headers: [{ name: "Content-Type", value: "text/html; charset=windows-1252" }],
+          body: { data: b64url(html) },
+        },
+      ],
+    };
+    expect(collectBodies(payload).html).toBe(html);
+  });
+
+  it("still reads windows-1252 bytes by their label (bytes that are not UTF-8)", () => {
+    const original = "Grüße · 5 €";
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "text/plain",
+      headers: [{ name: "Content-Type", value: "text/plain; charset=windows-1252" }],
+      // windows-1252: ü=fc, ß=df, middle dot=b7, euro=80
+      body: { data: Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65, 0x20, 0xb7, 0x20, 0x35, 0x20, 0x80]).toString("base64url") },
+    };
+    expect(collectBodies(payload).text).toBe(original);
+  });
+
+  it("keeps a 7-bit charset by its label (ASCII-only bytes are not taken for UTF-8)", () => {
+    // ISO-2022-JP is pure 7-bit, so its bytes are valid UTF-8 too; only the label tells
+    // them apart. "日本" = ESC $ B F| K\ ESC ( B
+    const bytes = Buffer.from([0x1b, 0x24, 0x42, 0x46, 0x7c, 0x4b, 0x5c, 0x1b, 0x28, 0x42]);
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "text/plain",
+      headers: [{ name: "Content-Type", value: "text/plain; charset=ISO-2022-JP" }],
+      body: { data: bytes.toString("base64url") },
+    };
+    expect(collectBodies(payload).text).toBe("日本");
+  });
+
+  it("decodes each part by its own bytes: one converted, one not", () => {
+    const payload: gmail_v1.Schema$MessagePart = {
+      mimeType: "multipart/mixed",
+      parts: [
+        {
+          mimeType: "text/plain",
+          headers: [{ name: "Content-Type", value: "text/plain; charset=iso-8859-1" }],
+          body: { data: b64url("für ") },
+        },
+        {
+          mimeType: "text/plain",
+          headers: [{ name: "Content-Type", value: "text/plain; charset=iso-8859-1" }],
+          body: { data: Buffer.from("März", "latin1").toString("base64url") },
+        },
+      ],
+    };
+    expect(collectBodies(payload).text).toBe("für März");
+  });
+
   it("falls back to UTF-8 for an unknown charset label", () => {
     const payload: gmail_v1.Schema$MessagePart = {
       mimeType: "text/plain",
