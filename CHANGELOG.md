@@ -196,6 +196,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   real windows-1252 text keeps working, and so does an ASCII-only part, which keeps 7-bit charsets
   such as ISO-2022-JP right. The fix covers every tool that reads bodies, including `get_thread`
   in all body modes, `export_thread` and the inline-image check behind the attachment lists.
+- **The euro sign, typographic quotes and dashes of windows-1252 mail on Node 20.** Node 20's
+  `TextDecoder` reads the windows-1252 label, and every label that means the same (iso-8859-1,
+  latin1, us-ascii), as plain ISO-8859-1, so the bytes 0x80 to 0x9f came out as invisible control
+  characters instead of "€", "„", "“" and "–". Found in CI on 26 October; Node 22 decodes them
+  right. It affected bodies whose bytes Gmail had not converted and encoded-word headers such as
+  a Subject, whose bytes Gmail passes on as the sender wrote them. Both now go through `src/charset.ts`,
+  which fills in those characters on any Node.
 
 ### Security
 - **`hono` 4.13.7 to 4.13.13 (moderate, GHSA-5r4p-p66f-jhc7).** Dependabot flagged it on the

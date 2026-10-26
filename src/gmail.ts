@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { decodeRfc2047 } from "./rfc2047.js";
+import { decodeCharset } from "./charset.js";
 
 export { decodeRfc2047 };
 import { parseAuthentication, type Authentication } from "./authentication.js";
@@ -643,7 +644,7 @@ export function collectBodies(payload?: gmail_v1.Schema$MessagePart): { text: st
     const buf = Buffer.from(d, "base64url");
     if (!isAscii(buf) && isUtf8(buf)) return buf.toString("utf8");
     try {
-      return new TextDecoder(partCharset(p)).decode(buf);
+      return decodeCharset(buf, partCharset(p));
     } catch {
       return buf.toString("utf8"); // unknown charset label → best-effort UTF-8
     }

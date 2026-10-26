@@ -225,13 +225,15 @@ describe("collectBodies — Bug 4: base64url decode", () => {
   });
 
   it("still reads windows-1252 bytes by their label (bytes that are not UTF-8)", () => {
-    const original = "Grüße · 5";
+    const original = "Grüße · 5 € „x“";
     const payload: gmail_v1.Schema$MessagePart = {
       mimeType: "text/plain",
       headers: [{ name: "Content-Type", value: "text/plain; charset=windows-1252" }],
-      // windows-1252: ü=fc, ß=df, middle dot=b7. No euro sign (0x80): Node 20's TextDecoder
-      // reads the windows-1252 label as ISO-8859-1 and returns U+0080 for it (CI, 26 Oct).
-      body: { data: Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65, 0x20, 0xb7, 0x20, 0x35]).toString("base64url") },
+      // windows-1252: ü=fc, ß=df, middle dot=b7, euro=80, „=84, “=93. The last three are what
+      // Node 20's TextDecoder gets wrong on its own (U+0080...); src/charset.ts fills that in.
+      body: {
+        data: Buffer.from([0x47, 0x72, 0xfc, 0xdf, 0x65, 0x20, 0xb7, 0x20, 0x35, 0x20, 0x80, 0x20, 0x84, 0x78, 0x93]).toString("base64url"),
+      },
     };
     expect(collectBodies(payload).text).toBe(original);
   });
@@ -1100,6 +1102,9 @@ describe("decodeAddressHeader — RFC 2047 text must not become address syntax",
     expect(decodeAddressHeader("Alice Example <alice@example.com>")).toBe("Alice Example <alice@example.com>");
     expect(decodeAddressHeader("=?UTF-8?B?Tm9yZWVu?= <noreply@x.example>")).toBe("Noreen <noreply@x.example>");
     expect(decodeAddressHeader("=?iso-8859-1?Q?M=FCller=2C_Hans?= <h@x.example>")).toBe('"Müller, Hans" <h@x.example>');
+    // windows-1252 punctuation in an encoded-word: Gmail never converts headers, so the label rules
+    expect(decodeRfc2047("=?windows-1252?Q?=84Angebot=93_=96_5_=80?=")).toBe("„Angebot“ – 5 €");
+    expect(decodeRfc2047("=?iso-8859-1?Q?=84Angebot=93?=")).toBe("„Angebot“");
     expect(parseSender(decodeAddressHeader("=?iso-8859-1?Q?M=FCller=2C_Hans?= <h@x.example>"))).toEqual({
       email: "h@x.example",
       name: "Müller, Hans",

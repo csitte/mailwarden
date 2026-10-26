@@ -3,6 +3,8 @@
  * display name without importing the API wrapper. `gmail.ts` re-exports `decodeRfc2047`.
  */
 
+import { decodeCharset } from "./charset.js";
+
 /** Decode the byte payload of one RFC 2047 encoded-word (B = base64, Q = quoted-printable-ish). */
 function encodedWordBytes(encoding: string, data: string): Uint8Array {
   if (/b/i.test(encoding)) return Buffer.from(data, "base64");
@@ -34,7 +36,7 @@ export function decodeRfc2047(value: string): string {
     /=\?([^?*\s]+)(?:\*[^?\s]*)?\?([BbQq])\?([^?\s]*)\?=/g,
     (whole, charset: string, enc: string, data: string) => {
       try {
-        return new TextDecoder(charset).decode(encodedWordBytes(enc, data));
+        return decodeCharset(encodedWordBytes(enc, data), charset);
       } catch {
         return whole;
       }
