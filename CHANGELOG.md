@@ -129,6 +129,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   length in `chars` and a `nextOffset`, and `offset` with that entry selected continues it. `entry`
   on an attachment that is not an archive, a pattern that matches nothing, and an `offset` that is
   past the end or not aimed at exactly one entry are `invalid_input` rather than empty answers.
+  **Hardened against hostile archives after a review by `grok-mailwarden` (26 October),** each
+  point reproduced before it was fixed: the `entry` pattern was a regular expression that
+  backtracked cubically on a long near-miss name (353 ms at 1,024 characters here, 130 s at 8,192
+  in the review), which blocked the whole server; it is now a linear match. Entry names, which
+  the sender picks and which may be 65,535 bytes long, are cut to 256 characters in the answer
+  and marked `nameTruncated` with their `nameLength`, because the budget counts text only and a
+  hundred long names made an answer of millions of characters. Central headers that point at a
+  local header already read are `corrupt` rather than inflated again, an inflate stopped at the
+  entry cap counts against the archive budget, and a "directory" that carries data is listed as
+  `corrupt` instead of being hidden from `list`.
 - **`MAILWARDEN_CONFIRM`: a human yes before a filter or an unsubscribe.** Set to `ask`, `create_filter`,
   `unsubscribe` and `bulk_unsubscribe` first ask the person at the client through MCP elicitation —
   the filter rule, or the senders and hosts to be contacted, spelled out; one question for a whole

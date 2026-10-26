@@ -42,6 +42,14 @@ export const DEFAULT_LIMITS: AttachmentTextLimits = {
   maxEntries: 50,
 };
 
+/**
+ * Longest entry name an answer carries. A ZIP name may be 65,535 bytes and the sender picks it;
+ * a hundred of them (entries plus notSelectedNames) made an answer of 6.5 million characters while
+ * `maxChars` held, because the budget counts text only (review grok-mailwarden, 26 Oct). Longer
+ * names are cut, marked `nameTruncated` with their `nameLength`, and still match by pattern.
+ */
+export const MAX_NAME_CHARS = 256;
+
 /** The most `maxChars` a caller may ask for. */
 export const MAX_CHARS_CEILING = 100_000;
 
@@ -77,6 +85,9 @@ export interface TextEntry {
   chars?: number;
   text?: string;
   truncated?: boolean;
+  /** Set when `name` was cut to MAX_NAME_CHARS; `nameLength` is the whole name's length. */
+  nameTruncated?: true;
+  nameLength?: number;
   /** Where to continue with `offset` (and this entry selected) when `truncated`. */
   nextOffset?: number;
   skipped?: SkipReason;
@@ -107,14 +118,47 @@ export function entryMatcher(pattern: string): (name: string) => boolean {
   const p = pattern.trim().toLowerCase();
   const base = (n: string) => n.slice(n.lastIndexOf("/") + 1);
   if (!/[*?]/.test(p)) return (n) => n.toLowerCase() === p || base(n).toLowerCase() === p;
-  const re = new RegExp(
-    "^" +
-      [...p]
-        .map((c) => (c === "*" ? "[^/]*" : c === "?" ? "[^/]" : c.replace(/[.+^${}()|[\]\\]/g, "\\$&")))
-        .join("") +
-      "$",
-  );
-  return (n) => re.test(n.toLowerCase()) || re.test(base(n).toLowerCase());
+  return (n) => globMatch(p, n.toLowerCase()) || globMatch(p, base(n).toLowerCase());
+}
+
+/**
+ * `*` and `?` never cross a `/`, so a pattern matches only a name with the same number of path
+ * segments, segment by segment. Within a segment the usual two-pointer walk with a return to the
+ * last star: no regex, because a regex of several `[^/]*` backtracks cubically on a long near-miss
+ * name, and the sender chooses the name (review grok-mailwarden, 26 Oct: 130 s for one 8 KB name).
+ */
+function globMatch(pattern: string, name: string): boolean {
+  const ps = pattern.split("/");
+  const ns = name.split("/");
+  return ps.length === ns.length && ps.every((seg, i) => segmentMatch(seg, ns[i]));
+}
+
+function segmentMatch(p: string, s: string): boolean {
+  let i = 0; // into s
+  let j = 0; // into p
+  let star = -1; // position in p of the last star
+  let mark = 0; // position in s where that star started matching
+  while (i < s.length) {
+    if (j < p.length && (p[j] === "?" || p[j] === s[i])) {
+      i++;
+      j++;
+    } else if (j < p.length && p[j] === "*") {
+      star = j++;
+      mark = i;
+    } else if (star >= 0) {
+      j = star + 1;
+      i = ++mark;
+    } else return false;
+  }
+  while (j < p.length && p[j] === "*") j++;
+  return j === p.length;
+}
+
+/** An entry name as an answer carries it: whole, or cut to MAX_NAME_CHARS and marked. */
+function shownName(name: string): { name: string; nameTruncated?: true; nameLength?: number } {
+  return name.length <= MAX_NAME_CHARS
+    ? { name }
+    : { name: name.slice(0, MAX_NAME_CHARS - 1) + "…", nameTruncated: true, nameLength: name.length };
 }
 
 export class AttachmentTextError extends Error {}
@@ -187,9 +231,12 @@ function readZip(
   let notSelected = 0;
   let notListed = 0;
   const notSelectedNames: string[] = [];
+  // Central headers may all point at one local header: one bomb, inflated once per header.
+  const localsRead = new Set<number>();
   for (let n = 0; n < total; n++) {
     if (p + 46 > b.length || b.readUInt32LE(p) !== ZIP_CENTRAL) {
-      // Past the limit only the counts are at stake: keep the entries read, count the rest as unseen.
+      // Past the limit only the counts are at stake: keep the entries read and count the rest of
+      // the directory as unseen. An upper bound: what lies there cannot be told apart any more.
       if (entries.length >= limits.maxEntries) {
         notListed += total - n;
         break;
@@ -206,7 +253,9 @@ function readZip(
     const local = b.readUInt32LE(p + 42);
     const name = b.subarray(p + 46, p + 46 + nameLen).toString(flags & 0x800 ? "utf8" : "latin1");
     p += 46 + nameLen + extraLen + commentLen;
-    if (name.endsWith("/")) continue; // a directory
+    // A directory has no data. A "directory" that has some is listed as corrupt, so that `list`
+    // shows everything the archive holds. Two compressed bytes are an empty deflate stream.
+    if (name.endsWith("/") && size === 0 && compSize <= 2) continue;
     if (!selected(name)) {
       notSelected++; // not inflated, not counted against any budget
       if (notSelectedNames.length < limits.maxEntries) notSelectedNames.push(name);
@@ -219,6 +268,10 @@ function readZip(
       continue;
     }
     const skip = (skipped: SkipReason) => entries.push({ name, bytes: size, skipped });
+    if (name.endsWith("/")) {
+      skip("corrupt");
+      continue;
+    }
     if (flags & 0x1) {
       skip("encrypted");
       continue;
@@ -228,10 +281,11 @@ function readZip(
       skip("too large");
       continue;
     }
-    if (local + 30 > b.length || b.readUInt32LE(local) !== ZIP_LOCAL) {
+    if (local + 30 > b.length || b.readUInt32LE(local) !== ZIP_LOCAL || localsRead.has(local)) {
       skip("corrupt");
       continue;
     }
+    localsRead.add(local);
     const start = local + 30 + b.readUInt16LE(local + 26) + b.readUInt16LE(local + 28);
     if (start + compSize > b.length) {
       skip("corrupt");
@@ -240,6 +294,10 @@ function readZip(
     const raw = b.subarray(start, start + compSize);
     // The declared size is the attacker's number: the inflate cap is what actually holds.
     const remaining = Math.min(limits.maxEntryBytes, limits.maxTotalBytes - spent);
+    if (remaining <= 0) {
+      skip("too large");
+      continue;
+    }
     const data =
       method === 0
         ? raw.length > remaining
@@ -253,6 +311,9 @@ function readZip(
       continue;
     }
     if (typeof data === "string") {
+      // An inflate stopped at the cap did that much work; it counts like a read, or a run of
+      // oversized entries would each inflate up to the entry cap for free.
+      if (data === "too large" && method === 8) spent += remaining;
       skip(data);
       continue;
     }
@@ -270,18 +331,17 @@ function shape(entries: RawEntry[], opts: ReadOptions, budget: number): TextEntr
   const offset = opts.offset ?? 0;
   let left = budget;
   return entries.map((e) => {
-    if (e.text === undefined) return { name: e.name, bytes: e.bytes, skipped: e.skipped };
+    const named = { ...shownName(e.name), bytes: e.bytes };
+    if (e.text === undefined) return { ...named, skipped: e.skipped };
     const chars = e.text.length;
-    if (opts.list) return { name: e.name, bytes: e.bytes, chars };
+    if (opts.list) return { ...named, chars };
     if (offset > chars) {
-      throw new AttachmentTextError(`offset ${offset} is past the end of ${e.name}, which has ${chars} characters.`);
+      throw new AttachmentTextError(`offset ${offset} is past the end of ${named.name}, which has ${chars} characters.`);
     }
     const text = e.text.slice(offset, offset + left);
     left -= text.length;
     const end = offset + text.length;
-    return end < chars
-      ? { name: e.name, bytes: e.bytes, chars, text, truncated: true, nextOffset: end }
-      : { name: e.name, bytes: e.bytes, chars, text };
+    return end < chars ? { ...named, chars, text, truncated: true, nextOffset: end } : { ...named, chars, text };
   });
 }
 
@@ -314,7 +374,7 @@ export function attachmentText(
     entries: shape(raw.entries, opts, budget),
     notListed: raw.notListed,
     ...(opts.entry !== undefined ? { notSelected: raw.notSelected } : {}),
-    ...(opts.entry !== undefined && raw.notSelected > 0 ? { notSelectedNames: raw.notSelectedNames } : {}),
+    ...(opts.entry !== undefined && raw.notSelected > 0 ? { notSelectedNames: raw.notSelectedNames.map((n) => shownName(n).name) } : {}),
     ...(opts.list ? { list: true as const } : {}),
   };
 }

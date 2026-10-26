@@ -6,6 +6,7 @@ import {
   decodeText,
   entryMatcher,
   AttachmentTextError,
+  MAX_NAME_CHARS,
   DEFAULT_LIMITS,
   MAX_CHARS_CEILING,
   type AttachmentTextLimits,
@@ -432,5 +433,115 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
     expect(r.entries).toEqual([{ name: "ok.txt", bytes: 4, chars: 4, text: "fine" }]);
     // Without selection the same entry is reported, proving it would otherwise have been looked at.
     expect(attachmentText(zip([huge]), "b.zip", small).entries[0].skipped).toBe("too large");
+  });
+});
+
+// Review grok-mailwarden, 26 Oct 2026 (Bridge 595): findings M1, M2, L1, N4 on hostile archives.
+describe("attachmentText — hostile names and overlapping entries (review 26 Oct)", () => {
+  /** The same matcher as a regex, as it was before: the reference for what a pattern means. */
+  const reference = (pattern: string) => {
+    const p = pattern.trim().toLowerCase();
+    const re = new RegExp(
+      "^" +
+        [...p].map((c) => (c === "*" ? "[^/]*" : c === "?" ? "[^/]" : c.replace(/[.+^${}()|[\]\\]/g, "\\$&"))).join("") +
+        "$",
+    );
+    return (n: string) => re.test(n.toLowerCase()) || re.test(n.slice(n.lastIndexOf("/") + 1).toLowerCase());
+  };
+
+  it("M1: a pattern with several stars against a long near-miss name takes no time", () => {
+    // Measured before the fix: 353 ms at 1,024 characters, cubic; grok measured 130 s at 8,192.
+    const t = performance.now();
+    expect(entryMatcher("*a*a*.csv")("a".repeat(65_535))).toBe(false);
+    expect(entryMatcher("*report*.csv")("report".repeat(10_922))).toBe(false);
+    expect(performance.now() - t).toBeLessThan(500);
+  });
+
+  it("M1: the matcher means what the regex meant, over a corpus of patterns and names", () => {
+    const patterns = ["*.csv", "*report*.csv", "t?ip*.CSV", "TripLog/*.csv", "*/*.html", "*", "?", "a*b*c", "**.txt", "a/*/c", "*a*a*", "x.y", "[x].csv", "a+b?.txt", "*/"];
+    const names = ["trips.csv", "TripLog/trips.csv", "TripLog/report.html", "a/b/c", "a/bb/c", "abc", "aXbYc", "a/c", "x.y", "xay", "[x].csv", "a+bc.txt", "report-2026.csv", "reportreport.csv.bak", "sub/", "", "a", "dir/a"];
+    for (const p of patterns) {
+      const a = entryMatcher(p);
+      const b = reference(p);
+      for (const n of names) expect([p, n, a(n)]).toEqual([p, n, b(n)]);
+    }
+  });
+
+  it("M2: a name is shortened in the answer, marked, and still selects by pattern", () => {
+    const long = "A".repeat(65_000) + ".txt";
+    const r = attachmentText(zip([{ name: long, data: Buffer.from("x") }, { name: "ok.csv", data: Buffer.from("y") }]), "n.zip", DEFAULT_LIMITS, {
+      list: true,
+    });
+    expect(r.entries[0].name.length).toBeLessThanOrEqual(MAX_NAME_CHARS);
+    expect(r.entries[0]).toMatchObject({ nameTruncated: true, nameLength: long.length });
+    expect(r.entries[1]).not.toHaveProperty("nameTruncated");
+    // A pattern still reaches the long entry: matching uses the whole name.
+    const sel = attachmentText(zip([{ name: long, data: Buffer.from("x") }]), "n.zip", DEFAULT_LIMITS, { entry: "a*.txt" });
+    expect(sel.entries[0]).toMatchObject({ text: "x", nameTruncated: true });
+  });
+
+  it("M2: sixty 65 KB names cannot make the answer megabytes long", () => {
+    const many = Array.from({ length: 60 }, (_, i) => ({ name: "A".repeat(65_000) + i + ".txt", data: Buffer.from("x"), method: 0 as const }));
+    const z = zip([...many, { name: "wanted.csv", data: Buffer.from("a;b") }]);
+    const sel = attachmentText(z, "n.zip", DEFAULT_LIMITS, { entry: "wanted.csv" });
+    expect(sel.notSelected).toBe(60);
+    expect(sel.notSelectedNames?.every((n) => n.length <= MAX_NAME_CHARS)).toBe(true);
+    const wire = (o: unknown) => Buffer.byteLength(fenceOutput(JSON.stringify(sanitizeStructured(o), null, 2)));
+    expect(wire(sel)).toBeLessThan(50_000);
+    expect(wire(attachmentText(z, "n.zip", DEFAULT_LIMITS, { list: true }))).toBeLessThan(50_000);
+  });
+
+  it("M2: an error message names a long entry by its shortened name", () => {
+    const long = "B".repeat(65_000) + ".txt";
+    try {
+      attachmentText(zip([{ name: long, data: Buffer.from("x") }]), "n.zip", DEFAULT_LIMITS, { entry: "b*", offset: 5 });
+      expect.unreachable();
+    } catch (e) {
+      expect((e as Error).message.length).toBeLessThan(MAX_NAME_CHARS + 200);
+    }
+  });
+
+  it("N4: a 'directory' that carries data is listed as corrupt, not hidden", () => {
+    const r = attachmentText(zip([{ name: "hidden/", data: Buffer.from("secret payload") }, { name: "a.txt", data: Buffer.from("a") }]), "d.zip");
+    expect(r.entries).toEqual([
+      { name: "hidden/", bytes: 14, skipped: "corrupt" },
+      { name: "a.txt", bytes: 1, chars: 1, text: "a" },
+    ]);
+    // A real directory (no data) still stays out of the answer.
+    expect(attachmentText(zip([{ name: "sub/", data: Buffer.alloc(0) }, { name: "a.txt", data: Buffer.from("a") }]), "d.zip").entries).toHaveLength(1);
+  });
+
+  /** Point every central header after the first at the first local header: one body, many entries. */
+  function overlapping(body: Buffer, copies: number, declaredSize: number): Buffer {
+    const z = zip(Array.from({ length: copies }, (_, i) => ({ name: `${i}.txt`, data: body, declaredSize })));
+    for (let i = 0, seen = 0; i + 4 <= z.length; i++) {
+      if (z.readUInt32LE(i) === 0x02014b50 && seen++ > 0) z.writeUInt32LE(0, i + 42);
+    }
+    return z;
+  }
+
+  it("L1: entries that share one local header are read once, the rest are corrupt", () => {
+    const r = attachmentText(overlapping(Buffer.from("hello"), 3, 5), "o.zip");
+    expect(r.entries.map((e) => e.skipped)).toEqual([undefined, "corrupt", "corrupt"]);
+  });
+
+  it("L1: an inflate stopped at the cap still counts against the archive budget", () => {
+    // small: 1,000 bytes per entry, 1,500 per archive. Each body inflates past the entry cap
+    // while declaring 10 bytes. Before, every attempt was free; now the first spends 1,000, the
+    // second the 500 left, and the third is refused without inflating at all.
+    const bomb = Buffer.alloc(5000, 0x61);
+    const r = attachmentText(
+      zip([
+        { name: "1.txt", data: bomb, declaredSize: 10 },
+        { name: "2.txt", data: bomb, declaredSize: 10 },
+        { name: "3.txt", data: bomb, declaredSize: 10 },
+        { name: "4.txt", data: Buffer.from("tiny"), declaredSize: 4 },
+      ]),
+      "b.zip",
+      { ...small, maxEntries: 10 },
+    );
+    expect(r.entries.map((e) => e.skipped)).toEqual(["too large", "too large", "too large", "too large"]);
+    // Without the bombs the same small entry is read: it was the spent budget that refused it.
+    expect(attachmentText(zip([{ name: "4.txt", data: Buffer.from("tiny") }]), "c.zip", small).entries[0]).toMatchObject({ text: "tiny" });
   });
 });
