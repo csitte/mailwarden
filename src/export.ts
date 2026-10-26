@@ -26,20 +26,24 @@ export function htmlToText(html: string): string {
   const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   // Repeat until nothing changes, so a removal cannot assemble the next block from its
   // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
-  // stays, as a browser shows it.
+  // stays, as a browser shows it. The passes are capped: each is linear, and what a deeper
+  // nesting leaves is text for a model, never markup a browser runs.
   let s = html;
-  for (let prev = ""; prev !== s; ) {
+  for (let pass = 0, prev = ""; prev !== s && pass < 8; pass++) {
     prev = s;
-    s = s.replace(/<(script|style|head)\b[\s\S]*?<\/\1\s*>/gi, "");
+    s = removeBlocks(s, ["script", "style", "head"]);
   }
+  // Every scan below stops at the next `<` or at what closes it, never at the end of the body:
+  // `[^>]*` and `[\s\S]*?` searched to the end at every unclosed tag, and one mail of tags that
+  // never close held get_thread for seconds (review grok-mailwarden, 26 Oct: 9 s for 480 KB).
+  s = cutBetween(s, "<!--", "-->", () => "");
+  s = cutBetween(s, "<![CDATA[", "]]>", (inner) => inner);
   const text = s
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<br\b[^>]*>/gi, "\n")
+    .replace(/<br\b[^<>]*>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|table|blockquote)\s*>/gi, "\n")
-    .replace(/<li\b[^>]*>/gi, "- ")
+    .replace(/<li\b[^<>]*>/gi, "- ")
     // A tag starts with a letter, `/` or `!`; `a < b and c > d` is text, not a tag.
-    .replace(/<[/!]?[a-zA-Z][^>]*>/g, "")
+    .replace(/<[/!]?[a-zA-Z][^<>]*>/g, "")
     .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
       if (e[0] === "#") {
         const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
@@ -48,6 +52,61 @@ export function htmlToText(html: string): string {
       return named[e.toLowerCase()] ?? m;
     });
   return tidyRenderedText(text);
+}
+
+/**
+ * Remove `<name ...>...</name>` blocks for each name, case-insensitively, in one forward walk. An
+ * opening tag whose block never closes ends the walk: the rest stays, for the tag pass to strip.
+ */
+function removeBlocks(s: string, names: string[]): string {
+  // ASCII only: a full toLowerCase can change the length ("İ" becomes two characters), and
+  // the indices found in `lower` must hold in `s`.
+  const lower = s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+  const out: string[] = [];
+  let pos = 0;
+  // The next opening of each name, looked up again only once the walk has passed it: searching
+  // every name from `pos` on each step would re-scan the same gap once per block.
+  const next = names.map(() => -2);
+  for (;;) {
+    let open = -1;
+    let name = "";
+    names.forEach((n, k) => {
+      if (next[k] !== -1 && next[k] < pos) {
+        let i = lower.indexOf("<" + n, pos);
+        // `<scripts>` is not `<script>`: the name must end there.
+        while (i >= 0 && /[a-z0-9]/.test(lower[i + 1 + n.length] ?? "")) i = lower.indexOf("<" + n, i + 1);
+        next[k] = i;
+      }
+      if (next[k] >= 0 && (open < 0 || next[k] < open)) {
+        open = next[k];
+        name = n;
+      }
+    });
+    if (open < 0) break;
+    const close = lower.indexOf("</" + name, open);
+    const end = close < 0 ? -1 : lower.indexOf(">", close);
+    if (end < 0) break;
+    out.push(s.slice(pos, open));
+    pos = end + 1;
+  }
+  out.push(s.slice(pos));
+  return out.join("");
+}
+
+/** Replace each `start ... end` span by `keep(inner)`, in one forward walk; an unclosed one stays. */
+function cutBetween(s: string, start: string, end: string, keep: (inner: string) => string): string {
+  const out: string[] = [];
+  let pos = 0;
+  for (;;) {
+    const i = s.indexOf(start, pos);
+    if (i < 0) break;
+    const j = s.indexOf(end, i + start.length);
+    if (j < 0) break;
+    out.push(s.slice(pos, i), keep(s.slice(i + start.length, j)));
+    pos = j + end.length;
+  }
+  out.push(s.slice(pos));
+  return out.join("");
 }
 
 /**

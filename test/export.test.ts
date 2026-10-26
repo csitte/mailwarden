@@ -263,3 +263,33 @@ describe("Gmail.exportThread writes under the download fence", () => {
     await expect(gmail().exportThread("t1", "../outside.md", "markdown")).rejects.toThrow(/escapes MAILWARDEN_DOWNLOAD_DIR/);
   });
 });
+
+// Review grok-mailwarden, round 2 (26 Oct): htmlToText renders every HTML-only body for get_thread
+// and export_thread, and its patterns scanned to the end of the body at every unclosed tag.
+describe("htmlToText — linear on hostile markup", () => {
+  const fast = (html: string) => {
+    const t = performance.now();
+    const out = htmlToText(html);
+    expect(performance.now() - t).toBeLessThan(500);
+    return out;
+  };
+
+  it.each([
+    ["tags that never close", "<p>a</p>" + "<blockquote ".repeat(40_000)],
+    ["br and li that never close", "<br ".repeat(30_000) + "<li ".repeat(30_000)],
+    ["script, style and head that never close", "<script ".repeat(15_000) + "<style>".repeat(15_000) + "<head ".repeat(15_000)],
+    ["comments and CDATA that never close", "<!--".repeat(30_000) + "<![CDATA[".repeat(30_000)],
+    ["nested script fragments", "<scr".repeat(20_000) + "<script></script>" + "ipt>".repeat(20_000)],
+  ])("%s", (_n, html) => {
+    fast(html);
+  });
+
+  it("still removes what it removed, and keeps text after an unclosed block", () => {
+    expect(fast("<p>a</p><script>x()</script><style>p{}</style><!-- c --><p>b</p>")).toBe("a\nb");
+    expect(fast("<scr<script></script>ipt>alert(1)</script>ok")).not.toMatch(/alert/);
+    expect(fast("<p>keep</p><script>never closed")).toContain("keep");
+    expect(fast("<![CDATA[inner]]> text")).toBe("inner text");
+    // A letter whose lower case is longer must not shift what is cut.
+    expect(fast("<p>İstanbul</p><STYLE>p{}</STYLE><p>ok</p>")).toBe(["İstanbul", "ok"].join(String.fromCharCode(10)));
+  });
+});
