@@ -185,9 +185,15 @@ function readZip(
   const entries: RawEntry[] = [];
   let spent = 0;
   let notSelected = 0;
+  let notListed = 0;
   const notSelectedNames: string[] = [];
   for (let n = 0; n < total; n++) {
     if (p + 46 > b.length || b.readUInt32LE(p) !== ZIP_CENTRAL) {
+      // Past the limit only the counts are at stake: keep the entries read, count the rest as unseen.
+      if (entries.length >= limits.maxEntries) {
+        notListed += total - n;
+        break;
+      }
       throw new AttachmentTextError("The ZIP archive's central directory is damaged.");
     }
     const flags = b.readUInt16LE(p + 8);
@@ -206,8 +212,11 @@ function readZip(
       if (notSelectedNames.length < limits.maxEntries) notSelectedNames.push(name);
       continue;
     }
+    // Past the limit the rest of the directory is still walked, header by header and never
+    // inflated, so that notListed counts only selected files and notSelected stays exact.
     if (entries.length >= limits.maxEntries) {
-      return { entries, notListed: total - n, notSelected, notSelectedNames };
+      notListed++;
+      continue;
     }
     const skip = (skipped: SkipReason) => entries.push({ name, bytes: size, skipped });
     if (flags & 0x1) {
@@ -250,7 +259,7 @@ function readZip(
     spent += data.length;
     entries.push(textEntry(name, data));
   }
-  return { entries, notListed: 0, notSelected, notSelectedNames };
+  return { entries, notListed, notSelected, notSelectedNames };
 }
 
 /**

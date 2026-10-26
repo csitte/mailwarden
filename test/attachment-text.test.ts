@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { deflateRawSync, gzipSync } from "node:zlib";
+import { fenceOutput, sanitizeStructured } from "../src/sanitize.js";
 import {
   attachmentText,
   decodeText,
@@ -195,6 +196,41 @@ describe("attachmentText — ZIP", () => {
     expect(r.notListed).toBe(2);
   });
 
+  it("past maxEntries, notListed counts only selected entries and notSelected keeps counting", () => {
+    // Five that match, then a directory and two that do not. The walk used to stop at the limit:
+    // notListed was total minus position (directory and non-matches included) and the two
+    // non-matches behind it were never counted in notSelected.
+    const r = attachmentText(
+      zip([
+        ...Array.from({ length: 5 }, (_, i) => ({ name: `${i}.txt`, data: Buffer.from(String(i)) })),
+        { name: "sub/", data: Buffer.alloc(0) },
+        { name: "a.csv", data: Buffer.from("a") },
+        { name: "b.csv", data: Buffer.from("b") },
+      ]),
+      "a.zip",
+      small,
+      { entry: "*.txt" },
+    );
+    expect(r.entries.map((e) => e.name)).toEqual(["0.txt", "1.txt", "2.txt"]);
+    expect(r.notListed).toBe(2);
+    expect(r.notSelected).toBe(2);
+    expect(r.notSelectedNames).toEqual(["a.csv", "b.csv"]);
+  });
+
+  it("without entry, notListed past the limit leaves directories out", () => {
+    const r = attachmentText(
+      zip([
+        ...Array.from({ length: 4 }, (_, i) => ({ name: `${i}.txt`, data: Buffer.from(String(i)) })),
+        { name: "sub/", data: Buffer.alloc(0) },
+        { name: "sub/9.txt", data: Buffer.from("9") },
+      ]),
+      "a.zip",
+      small,
+    );
+    expect(r.entries).toHaveLength(3);
+    expect(r.notListed).toBe(2);
+  });
+
   it("marks an entry whose data runs past the end of the file as corrupt", () => {
     const z = zip([{ name: "a.txt", data: Buffer.from("hello world") }]);
     // Point the entry's local header offset somewhere that is no local header.
@@ -366,7 +402,9 @@ describe("attachmentText — choosing what to read (2026-10-26: a 97 KB report b
     const report = row.repeat(Math.ceil(100_000 / row.length));
     const r = attachmentText(zip([{ name: "report.html", data: Buffer.from(report) }]), "x.zip");
     expect(r.entries[0]).toMatchObject({ truncated: true, nextOffset: DEFAULT_LIMITS.maxChars });
-    expect(Buffer.byteLength(JSON.stringify(r))).toBeLessThan(50_000);
+    // Measured as it goes out: tools.ts `ok()` sends pretty-printed JSON inside the fence.
+    const wire = fenceOutput(JSON.stringify(sanitizeStructured(r), null, 2));
+    expect(Buffer.byteLength(wire)).toBeLessThan(50_000);
   });
 
   it("maxChars is capped at the ceiling, whatever is asked", () => {
