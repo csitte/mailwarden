@@ -1290,6 +1290,11 @@ export class Gmail {
    */
   async modifyLabels(threadId: string, add: string[] = [], remove: string[] = []): Promise<void> {
     const { addLabelIds, removeLabelIds } = await this.resolveLabelIds(add, remove);
+    await this.modifyThreadLabelIds(threadId, addLabelIds, removeLabelIds);
+  }
+
+  /** One thread, label IDS already resolved — the step `modifyThreads` repeats per thread. */
+  async modifyThreadLabelIds(threadId: string, addLabelIds: string[], removeLabelIds: string[]): Promise<void> {
     await this.req(() =>
       this.api.users.threads.modify({
         userId: "me",
@@ -1313,7 +1318,7 @@ export class Gmail {
   }
 
   /** Resolve label ids/names for modify calls (names created in `add`, skipped in `remove`). */
-  private async resolveLabelIds(
+  async resolveLabelIds(
     add: string[],
     remove: string[],
   ): Promise<{ addLabelIds: string[]; removeLabelIds: string[] }> {

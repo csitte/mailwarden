@@ -25,6 +25,7 @@ import { waitingOnMe, waitingOnThem } from "./followups.js";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { describeBuild, loadBuildRecord } from "./buildinfo.js";
+import { modifyThreads, resolveThreadTargets } from "./thread-batch.js";
 import path from "node:path";
 
 /**
@@ -318,6 +319,39 @@ const undoPlanSchema = z.object({
 });
 
 const okOutput = { ok: z.boolean() };
+
+// The label tools take one thread (`threadId`) or a list (`threadIds`). Neither field is required
+// by the schema; resolveThreadTargets demands exactly one, with a message a caller can act on.
+const threadTargetInput = {
+  threadId: z.string().optional(),
+  threadIds: z.array(z.string()).min(1).optional(),
+};
+const threadBatchOutput = {
+  ok: z.boolean(),
+  changed: z.array(z.string()).optional(),
+  failed: z
+    .array(z.object({ threadId: z.string(), code: z.string(), message: z.string(), retryable: z.boolean() }))
+    .optional(),
+  notAttempted: z.array(z.string()).optional(),
+};
+
+/** One thread: the old answer, `{ ok: true }` or an error. A list: the per-thread report. */
+async function applyToThreads(
+  args: { threadId?: string; threadIds?: string[] },
+  add: string[],
+  remove: string[],
+) {
+  const { ids, many } = resolveThreadTargets(args);
+  const gmail = await client();
+  if (!many) {
+    await gmail.modifyLabels(ids[0], add, remove);
+    return ok({ ok: true });
+  }
+  return ok(await modifyThreads(gmail, ids, add, remove));
+}
+
+const LIST_NOTE =
+  "Pass `threadIds` (a list of up to 100) instead of `threadId` to apply the same change to every listed thread in one call — for 'exactly these threads, as approved'. The answer then reports per thread: `changed`, `failed` (with code and message; the others still ran) and `notAttempted` (the run stopped at a rate limit, dead token or missing scope, which would have hit every remaining thread alike); `ok` is true only when all were changed. ";
 
 const unsubscribeOptionsSchema = z.object({
   oneClick: z.boolean(),
@@ -843,19 +877,17 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
         "Labels may be given by name or by id: an unknown name in `add` is created automatically (use '/' for nested labels), an unknown name in `remove` is ignored. " +
         "USE WHEN: applying custom labels or label combinations in one call. " +
         "DO NOT USE: for plain archive/read/unread — the dedicated tools are clearer. " +
-        "SIDE EFFECTS: changes the thread's labels (and may create a label named in `add`); reversible by the inverse call.",
+        LIST_NOTE +
+        "SIDE EFFECTS: changes the thread's labels (and may create a label named in `add`, once per call even for a list); reversible by the inverse call.",
       inputSchema: {
-        threadId: z.string(),
+        ...threadTargetInput,
         add: z.array(z.string()).default([]),
         remove: z.array(z.string()).default([]),
       },
-      outputSchema: okOutput,
+      outputSchema: threadBatchOutput,
       annotations: { title: "Modify labels", ...write },
     },
-    async ({ threadId, add, remove }) => {
-      await (await client()).modifyLabels(threadId, add, remove);
-      return ok({ ok: true });
-    },
+    async ({ threadId, threadIds, add, remove }) => applyToThreads({ threadId, threadIds }, add, remove),
   );
 
   registerTool(
@@ -1145,45 +1177,37 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
         "Archive a thread (remove it from the inbox). " +
         "USE WHEN: inbox triage — the thread is handled and should leave the inbox. " +
         "DO NOT USE: to delete (use trash) or to defer to a date (use snooze). " +
+        LIST_NOTE +
         "SIDE EFFECTS: thread leaves the inbox; reversible via modify_labels add INBOX.",
-      inputSchema: { threadId: z.string() },
-      outputSchema: okOutput,
+      inputSchema: threadTargetInput,
+      outputSchema: threadBatchOutput,
       annotations: { title: "Archive thread", ...write },
     },
-    async ({ threadId }) => {
-      await (await client()).modifyLabels(threadId, [], ["INBOX"]);
-      return ok({ ok: true });
-    },
+    async ({ threadId, threadIds }) => applyToThreads({ threadId, threadIds }, [], ["INBOX"]),
   );
 
   registerTool(
     "mark_read",
     {
       description:
-        "Mark a thread as read. SIDE EFFECTS: removes UNREAD; reversible via mark_unread.",
-      inputSchema: { threadId: z.string() },
-      outputSchema: okOutput,
+        "Mark a thread as read. " + LIST_NOTE + "SIDE EFFECTS: removes UNREAD; reversible via mark_unread.",
+      inputSchema: threadTargetInput,
+      outputSchema: threadBatchOutput,
       annotations: { title: "Mark read", ...write },
     },
-    async ({ threadId }) => {
-      await (await client()).modifyLabels(threadId, [], ["UNREAD"]);
-      return ok({ ok: true });
-    },
+    async ({ threadId, threadIds }) => applyToThreads({ threadId, threadIds }, [], ["UNREAD"]),
   );
 
   registerTool(
     "mark_unread",
     {
       description:
-        "Mark a thread as unread. SIDE EFFECTS: adds UNREAD; reversible via mark_read.",
-      inputSchema: { threadId: z.string() },
-      outputSchema: okOutput,
+        "Mark a thread as unread. " + LIST_NOTE + "SIDE EFFECTS: adds UNREAD; reversible via mark_read.",
+      inputSchema: threadTargetInput,
+      outputSchema: threadBatchOutput,
       annotations: { title: "Mark unread", ...write },
     },
-    async ({ threadId }) => {
-      await (await client()).modifyLabels(threadId, ["UNREAD"], []);
-      return ok({ ok: true });
-    },
+    async ({ threadId, threadIds }) => applyToThreads({ threadId, threadIds }, ["UNREAD"], []),
   );
 
   registerTool(

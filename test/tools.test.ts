@@ -1913,3 +1913,100 @@ describe("tool results — structured content + fenced text", () => {
     expect(listCalls).toHaveLength(0); // rejected before any API call
   });
 });
+
+describe("label tools on a list of threads (threadIds)", () => {
+  function fakeModifyApi(missing: string[] = []) {
+    const modified: { id: string; body: any }[] = [];
+    const api = {
+      users: {
+        labels: { list: async () => ({ data: { labels: [{ id: "Label_7", name: "Receipts" }] } }) },
+        threads: {
+          modify: async (req: any) => {
+            if (missing.includes(req.id)) throw Object.assign(new Error("Requested entity was not found."), { code: 404 });
+            modified.push({ id: req.id, body: req.requestBody });
+            return { data: {} };
+          },
+        },
+      },
+    };
+    return { api, modified };
+  }
+  const errorOf = (res: any) => JSON.parse(res.content[0].text.replace(/<\/?untrusted-tool-output>/g, "").trim()).error;
+
+  it("archive with threadIds changes every listed thread and reports each one", async () => {
+    const { api, modified } = fakeModifyApi(["gone"]);
+    (getAuth as Mock).mockResolvedValue(api);
+    const client = await connect();
+    const res: any = await client.callTool({ name: "archive", arguments: { threadIds: ["a", "gone", "b", "a"] } });
+    expect(res.isError).toBeFalsy();
+    expect(res.structuredContent).toEqual({
+      ok: false,
+      changed: ["a", "b"],
+      failed: [{ threadId: "gone", code: "not_found", message: "Requested entity was not found.", retryable: false }],
+      notAttempted: [],
+    });
+    expect(modified.map((m) => m.id)).toEqual(["a", "b"]); // the duplicate "a" was changed once
+    for (const m of modified) expect(m.body).toEqual({ addLabelIds: [], removeLabelIds: ["INBOX"] });
+  });
+
+  it("modify_labels with threadIds resolves a label name once and applies it to all", async () => {
+    const { api, modified } = fakeModifyApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const client = await connect();
+    const res: any = await client.callTool({
+      name: "modify_labels",
+      arguments: { threadIds: ["a", "b", "c"], add: ["Receipts"], remove: ["INBOX", "UNREAD"] },
+    });
+    expect(res.structuredContent).toEqual({ ok: true, changed: ["a", "b", "c"], failed: [], notAttempted: [] });
+    for (const m of modified) expect(m.body).toEqual({ addLabelIds: ["Label_7"], removeLabelIds: ["INBOX", "UNREAD"] });
+  });
+
+  it("mark_read and mark_unread take a list too", async () => {
+    const { api, modified } = fakeModifyApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const client = await connect();
+    await client.callTool({ name: "mark_read", arguments: { threadIds: ["a", "b"] } });
+    await client.callTool({ name: "mark_unread", arguments: { threadIds: ["c"] } });
+    expect(modified).toEqual([
+      { id: "a", body: { addLabelIds: [], removeLabelIds: ["UNREAD"] } },
+      { id: "b", body: { addLabelIds: [], removeLabelIds: ["UNREAD"] } },
+      { id: "c", body: { addLabelIds: ["UNREAD"], removeLabelIds: [] } },
+    ]);
+  });
+
+  it("one threadId keeps the old answer exactly: { ok: true }, or an error", async () => {
+    const { api } = fakeModifyApi(["gone"]);
+    (getAuth as Mock).mockResolvedValue(api);
+    const client = await connect();
+    const okRes: any = await client.callTool({ name: "archive", arguments: { threadId: "a" } });
+    expect(okRes.structuredContent).toEqual({ ok: true });
+    const bad: any = await client.callTool({ name: "archive", arguments: { threadId: "gone" } });
+    expect(bad.isError).toBe(true);
+    expect(errorOf(bad).code).toBe("not_found");
+  });
+
+  it("neither or both ids is invalid_input, and nothing is sent", async () => {
+    const { api, modified } = fakeModifyApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const client = await connect();
+    for (const args of [{}, { threadId: "a", threadIds: ["b"] }]) {
+      for (const name of ["archive", "mark_read", "mark_unread", "modify_labels"]) {
+        const res: any = await client.callTool({ name, arguments: args });
+        expect(res.isError, `${name} ${JSON.stringify(args)}`).toBe(true);
+        expect(errorOf(res).code).toBe("invalid_input");
+      }
+    }
+    expect(modified).toHaveLength(0);
+  });
+
+  it("all four advertise threadIds in their input schema", async () => {
+    const client = await connect();
+    const { tools } = await client.listTools();
+    for (const name of ["archive", "mark_read", "mark_unread", "modify_labels"]) {
+      const t = tools.find((x) => x.name === name)!;
+      expect(Object.keys(t.inputSchema.properties ?? {}), name).toEqual(expect.arrayContaining(["threadId", "threadIds"]));
+      expect(t.inputSchema.required ?? [], name).not.toContain("threadId");
+      expect(t.description, name).toMatch(/threadIds/);
+    }
+  });
+});

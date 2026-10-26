@@ -45,6 +45,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the terms of service, so every check before archiving took a `get_thread`. `search` already
   fetches each hit in `full` format, so the list costs no call; attachment ids stay out because
   they run to a few hundred characters each, and `get_thread` with `bodies: "none"` has them.
+- **`archive`, `mark_read`, `mark_unread` and `modify_labels` take a list of threads.** Pass
+  `threadIds` (up to 100) instead of `threadId`. `bulk_modify` works from a query, but what a triage
+  run holds after the user's approval is a list, and archiving seven approved threads took seven
+  calls (reported 26 October). Labels are resolved once per call, so a new name in `add` is created
+  once. The answer reports each thread: `changed`, `failed` with code and message (a thread that is
+  gone fails alone, the others still run), and `notAttempted` when the run stopped at a rate limit,
+  a dead token or a missing scope, which would have hit every remaining thread the same way. `ok` is
+  true only when all were changed. One `threadId` keeps the old answer, `{ ok: true }` or an error.
 - **`get_profile` says which server is answering.** `serverVersion`, `serverPath` (the directory
   the running code was loaded from: an npm install, an npx cache or a clone's `dist/`) and
   `account` (the named mailwarden account or `(default)`). From the same 25 October round: one
