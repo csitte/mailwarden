@@ -41,9 +41,15 @@ const FORWARD_MARKER =
 
 /**
  * Prefixes that make a subject a forward, by language: Fwd/Fw, WG (German), TR (French), RV
- * (Spanish), ENC (Portuguese), I (Italian), VS/VL (Nordic), Doorst (Dutch), VB.
+ * (Spanish), ENC (Portuguese), I (Italian), VS/VL (Nordic), Doorst (Dutch), VB, PD (Polish),
+ * TOV (Hungarian), Пересл (Russian), 转发/轉寄 (Chinese), 転送 (Japanese); also with a full-width
+ * colon. A few match a reply or a word too ("VS:" answers in Finnish, "TR: Turkey trip"): then
+ * nothing is cut, which is the safe direction.
  */
-const FORWARD_PREFIX = /^(fwd?|wg|tr|rv|enc|i|vs|vl|vb|doorst)\s*:/i;
+const FORWARD_PREFIX = /^(fwd?|wg|tr|rv|enc|i|vs|vl|vb|pd|tov|doorst|пересл|转发|轉寄|転送)\s*[:：]/iu;
+
+/** Tags a mail system puts in front of a subject: "[EXT]", "*EXTERNAL*", "EXT:". */
+const SUBJECT_TAGS = /^\s*((\[[^\]]{0,40}\]|\*{1,2}[^*]{0,20}\*{1,2}|ext(ernal)?\s*:)\s*)*/i;
 
 /**
  * Is this message a forward, by the OUTERMOST prefix of its subject? Outlook writes the header of
@@ -54,7 +60,7 @@ const FORWARD_PREFIX = /^(fwd?|wg|tr|rv|enc|i|vs|vl|vb|doorst)\s*:/i;
  * Leading tags such as "[EXT]" are skipped.
  */
 export function isForwardSubject(subject: string): boolean {
-  return FORWARD_PREFIX.test(subject.replace(/^\s*(\[[^\]]*\]\s*)*/, ""));
+  return FORWARD_PREFIX.test(subject.replace(SUBJECT_TAGS, ""));
 }
 
 /**

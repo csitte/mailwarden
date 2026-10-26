@@ -75,7 +75,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in one forward walk over its tags that skips comments and CDATA; a quote that is never closed,
   or a `<blockquote>` hidden in a comment, no longer makes the answer below it disappear, and a
   body over 512 KiB is not cut at all. Known limit: an answer written inside Yahoo's
-  `yahoo_quoted` cannot be told from the quote and goes with it.
+  `yahoo_quoted` cannot be told from the quote and goes with it. The same round added forward
+  prefixes (PD, TOV, Пересл, 转发, 轉寄, 転送, a full-width colon) and the mail-system tags
+  "*EXTERNAL*" and "EXT:" in front of them; `read_attachment` keeps a UTF-8 file with one broken
+  byte as UTF-8, counts a broken deflate stream against its budget and takes an `entry` pattern of
+  at most 512 characters; and no cut name or dialog line ends in half an emoji.
 - **`archive`, `mark_read`, `mark_unread` and `modify_labels` take a list of threads.** Pass
   `threadIds` (up to 100) instead of `threadId`. `bulk_modify` works from a query, but what a triage
   run holds after the user's approval is a list, and archiving seven approved threads took seven

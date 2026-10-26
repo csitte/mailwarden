@@ -82,3 +82,15 @@ export function fenceOutput(s: string): string {
   const safe = stripHiddenChars(s).replace(FENCE_BREAKOUT, "&lt;$1$2");
   return `<${FENCE_TAG}>\n${safe}\n</${FENCE_TAG}>`;
 }
+
+/**
+ * `s` cut to at most `max` characters with an ellipsis, never inside a surrogate pair: a cut in
+ * the middle of an emoji leaves half of it, which is not valid text (review grok-mailwarden, 26 Oct).
+ */
+export function cutText(s: string, max: number): string {
+  if (s.length <= max) return s;
+  let end = max - 1;
+  const last = s.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end--;
+  return s.slice(0, end) + "\u2026";
+}

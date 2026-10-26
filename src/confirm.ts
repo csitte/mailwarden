@@ -1,5 +1,5 @@
 import { CliError } from "./cli.js";
-import { stripHiddenChars } from "./sanitize.js";
+import { cutText, stripHiddenChars } from "./sanitize.js";
 
 /**
  * A human's yes before the actions that outlast the conversation, asked through MCP elicitation —
@@ -75,7 +75,9 @@ export const CONFIRM_SCHEMA = {
  */
 export function dialogText(s: string, max = 80): string {
   const flat = stripHiddenChars(s)
-    .replace(/[\s\u0000-\u001f\u007f-\u009f]+/g, " ")
+    .replace(/[\s\u0000-\u001f\u007f-\u009f\u2800]+/g, " ")
+    // Stacked combining marks ("Zalgo") fill the line without saying anything; two stay.
+    .replace(/(\p{M}{2})\p{M}+/gu, "$1")
     .trim();
-  return flat.length <= max ? flat : flat.slice(0, max - 1) + "\u2026";
+  return cutText(flat, max);
 }

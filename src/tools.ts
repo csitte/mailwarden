@@ -19,7 +19,7 @@ import { ToolError } from "./cli.js";
 import { UNDO_LIMIT } from "./undo.js";
 import { PREVIEW_TTL_MS, PreviewStore, previewDrift } from "./preview.js";
 import { compareFilters } from "./filter-preview.js";
-import { attachmentText, AttachmentTextError, DEFAULT_LIMITS, MAX_CHARS_CEILING, MAX_NAME_CHARS } from "./attachment-text.js";
+import { attachmentText, AttachmentTextError, DEFAULT_LIMITS, MAX_CHARS_CEILING, MAX_NAME_CHARS, MAX_PATTERN_CHARS } from "./attachment-text.js";
 import { CONFIRM_SCHEMA, confirmPlan, confirmed, dialogText, resolveConfirmMode, type ConfirmMode } from "./confirm.js";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 import { createRequire } from "node:module";
@@ -477,7 +477,7 @@ function registerReadTools(server: McpServer): void {
         attachmentId: z.string(),
         // Only used to name a gzip file's content and the result; never trusted for the format.
         filename: z.string().optional(),
-        entry: z.string().min(1).optional(),
+        entry: z.string().min(1).max(MAX_PATTERN_CHARS).optional(),
         list: z.boolean().optional(),
         maxChars: z.number().int().min(1).max(MAX_CHARS_CEILING).optional(),
         offset: z.number().int().min(0).optional(),

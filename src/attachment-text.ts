@@ -1,6 +1,7 @@
 import { isUtf8 } from "node:buffer";
 import { gunzipSync, inflateRawSync } from "node:zlib";
 import { decodeCharset } from "./charset.js";
+import { cutText } from "./sanitize.js";
 
 /**
  * The text inside an attachment, for reading it without saving it — pure, so a corpus of crafted
@@ -51,6 +52,9 @@ export const DEFAULT_LIMITS: AttachmentTextLimits = {
  * names are cut, marked `nameTruncated` with their `nameLength`, and still match by pattern.
  */
 export const MAX_NAME_CHARS = 256;
+
+/** Longest `entry` pattern (review grok-mailwarden, round 2: 2,002 characters took a second). */
+export const MAX_PATTERN_CHARS = 512;
 
 /** The most `maxChars` a caller may ask for. */
 export const MAX_CHARS_CEILING = 100_000;
@@ -162,7 +166,7 @@ function segmentMatch(p: string, s: string): boolean {
 function shownName(name: string): { name: string; nameTruncated?: true; nameLength?: number } {
   return name.length <= MAX_NAME_CHARS
     ? { name }
-    : { name: name.slice(0, MAX_NAME_CHARS - 1) + "…", nameTruncated: true, nameLength: name.length };
+    : { name: cutText(name, MAX_NAME_CHARS), nameTruncated: true, nameLength: name.length };
 }
 
 export class AttachmentTextError extends Error {}
@@ -197,14 +201,33 @@ export function decodeText(b: Buffer): string | undefined {
     if (byte < 0x20 && byte !== 0x09 && byte !== 0x0a && byte !== 0x0d && byte !== 0x0c && byte !== 0x1b) control++;
   }
   if (body.length > 0 && control * 100 > body.length) return undefined;
-  return isUtf8(body) ? new TextDecoder("utf-8").decode(body) : decodeCharset(body, "windows-1252");
+  return preferUtf8(body) ? new TextDecoder("utf-8").decode(body) : decodeCharset(body, "windows-1252");
 }
 
-/** Would `decodeText` read these bytes as windows-1252: no UTF-16 byte-order mark, not valid UTF-8? */
+/**
+ * Read as UTF-8 when the bytes are valid UTF-8, or when they hold more well-formed non-ASCII
+ * characters than broken sequences: one damaged byte in a UTF-8 file must not turn every umlaut
+ * in it into mojibake (review grok-mailwarden, round 2). windows-1252 text almost never forms a
+ * well-formed multi-byte sequence, so it still goes to windows-1252.
+ */
+const REPLACEMENT = String.fromCharCode(0xfffd);
+
+function preferUtf8(body: Buffer): boolean {
+  if (isUtf8(body)) return true;
+  let good = 0;
+  let bad = 0;
+  for (const c of new TextDecoder("utf-8").decode(body)) {
+    if (c === REPLACEMENT) bad++;
+    else if (c.charCodeAt(0) > 0x7f) good++;
+  }
+  return good > bad;
+}
+
+/** Would `decodeText` read these bytes as windows-1252: no UTF-16 byte-order mark, not UTF-8? */
 export function guessesWindows1252(b: Buffer): boolean {
   if (b.length >= 2 && ((b[0] === 0xff && b[1] === 0xfe) || (b[0] === 0xfe && b[1] === 0xff))) return false;
   const body = b.length >= 3 && b[0] === 0xef && b[1] === 0xbb && b[2] === 0xbf ? b.subarray(3) : b;
-  return !isUtf8(body);
+  return !preferUtf8(body);
 }
 
 function textEntry(name: string, data: Buffer): RawEntry {
@@ -326,7 +349,8 @@ function readZip(
     if (typeof data === "string") {
       // An inflate stopped at the cap did that much work; it counts like a read, or a run of
       // oversized entries would each inflate up to the entry cap for free.
-      if (data === "too large" && method === 8) spent += remaining;
+      // A broken stream counts the same: it may inflate up to the cap before zlib gives up.
+      if (method === 8) spent += remaining;
       skip(data);
       continue;
     }
@@ -371,6 +395,10 @@ export function attachmentText(
   opts: ReadOptions = {},
 ): AttachmentText {
   const budget = Math.min(opts.maxChars ?? limits.maxChars, MAX_CHARS_CEILING);
+  // The match is linear in name times pattern; a pattern is a name's worth, not a book.
+  if (opts.entry !== undefined && opts.entry.length > MAX_PATTERN_CHARS) {
+    throw new AttachmentTextError(`An entry pattern has at most ${MAX_PATTERN_CHARS} characters.`);
+  }
   const raw = readRaw(bytes, name, limits, opts);
   if (opts.entry !== undefined && raw.entries.length === 0) {
     throw new AttachmentTextError(

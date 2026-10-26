@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { randomBytes } from "node:crypto";
 import { deflateRawSync, gzipSync } from "node:zlib";
 import { fenceOutput, sanitizeStructured } from "../src/sanitize.js";
 import {
@@ -96,6 +97,15 @@ describe("decodeText — text or not, by the bytes", () => {
       expect(guessesWindows1252(b)).toBe(false);
       expect(attachmentText(b, "x.csv").entries[0]).not.toHaveProperty("guessedCharset");
     }
+  });
+
+  // Review round 2 (N10): one broken byte must not turn a UTF-8 file into mojibake.
+  it("keeps UTF-8 with a single broken byte as UTF-8, and guesses nothing", () => {
+    const b = Buffer.concat([Buffer.from("Müller;Größe;Straße\n"), Buffer.from([0xff])]);
+    expect(guessesWindows1252(b)).toBe(false);
+    const text = decodeText(b)!;
+    expect(text.startsWith("Müller;Größe;Straße")).toBe(true);
+    expect(attachmentText(b, "x.csv").entries[0]).not.toHaveProperty("guessedCharset");
   });
 
   it("a windows-1252 entry inside a ZIP is guessed the same way", () => {
@@ -509,6 +519,40 @@ describe("attachmentText — hostile names and overlapping entries (review 26 Oc
     const wire = (o: unknown) => Buffer.byteLength(fenceOutput(JSON.stringify(sanitizeStructured(o), null, 2)));
     expect(wire(sel)).toBeLessThan(50_000);
     expect(wire(attachmentText(z, "n.zip", DEFAULT_LIMITS, { list: true }))).toBeLessThan(50_000);
+  });
+
+  it("N8: a name is never cut inside a surrogate pair", () => {
+    const name = "a".repeat(MAX_NAME_CHARS - 2) + String.fromCodePoint(0x1f600).repeat(4) + ".txt";
+    const r = attachmentText(zip([{ name, data: Buffer.from("x"), utf8Name: true }]), "e.zip", DEFAULT_LIMITS, { list: true });
+    expect(r.entries[0].name.isWellFormed()).toBe(true);
+    expect(r.entries[0]).toMatchObject({ nameTruncated: true });
+  });
+
+  it("N12: an entry pattern longer than 512 characters is refused", () => {
+    expect(() => attachmentText(zip([{ name: "a.txt", data: Buffer.from("x") }]), "p.zip", DEFAULT_LIMITS, { entry: "*".repeat(513) })).toThrow(
+      AttachmentTextError,
+    );
+  });
+
+  it("N11: a broken deflate stream counts against the archive budget too", () => {
+    // A stream cut short inflates some bytes, then fails: "corrupt". Each such attempt now spends
+    // the share it was allowed, so a run of them cannot inflate for free.
+    const noisy = randomBytes(5000); // does not compress, so a cut stream really breaks
+    const broken = deflateRawSync(noisy).subarray(0, 600);
+    const entries = Array.from({ length: 3 }, (_, i) => ({ name: `${i}.txt`, data: broken, method: 0 as const, declaredSize: 10 }));
+    const z = zip(entries);
+    // Mark the stored entries as deflated so the reader inflates the cut stream.
+    for (let i = 0; i + 4 <= z.length; i++) {
+      const sig = z.readUInt32LE(i);
+      if (sig === 0x04034b50) z.writeUInt16LE(8, i + 8);
+      if (sig === 0x02014b50) z.writeUInt16LE(8, i + 10);
+    }
+    const r = attachmentText(Buffer.concat([z]), "k.zip", { ...small, maxEntries: 10 });
+    expect(r.entries[0].skipped).toBe("corrupt");
+    // The second may fail either way, depending on how much it inflated before the cut.
+    expect(["corrupt", "too large"]).toContain(r.entries[1].skipped);
+    // By then the budget is spent: the third is refused without inflating.
+    expect(r.entries[2].skipped).toBe("too large");
   });
 
   it("M2: an error message names a long entry by its shortened name", () => {

@@ -221,6 +221,21 @@ describe("dialogText", () => {
     expect(dialogText("Evil\u202Egnp.exe\n\nSafe\t \u0007 x")).toBe("Evilgnp.exe Safe x");
   });
 
+  // Review round 2 (N8, N9): no half emoji at the cut, no blank-looking or stacked characters.
+  it("never cuts inside a surrogate pair", () => {
+    const emoji = String.fromCodePoint(0x1f600);
+    const s = dialogText("N".repeat(78) + emoji + "tail");
+    expect(s.isWellFormed()).toBe(true);
+    expect(s.endsWith(String.fromCharCode(0x2026))).toBe(true);
+  });
+
+  it("folds braille blanks and thins out stacked combining marks", () => {
+    const blank = String.fromCharCode(0x2800);
+    const zalgo = "a" + String.fromCharCode(0x0301).repeat(30) + "b";
+    expect(dialogText("x" + blank + blank + "y")).toBe("x y");
+    expect(dialogText(zalgo)).toBe("a" + String.fromCharCode(0x0301).repeat(2) + "b");
+  });
+
   it("cuts a long sender to the limit with an ellipsis", () => {
     const s = dialogText("N".repeat(500));
     expect(s.length).toBe(80);
