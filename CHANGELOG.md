@@ -103,6 +103,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unpacked. Encrypted, nested-archive and unsupported entries are listed, not opened. The read tier
   grows to eleven tools, thirty-one in all. `gmail-tidy-mcp` reads text, `.gz` and `.zip` attachments
   inline too; this is our own reader, with no new dependency.
+  **Choosing what to read, from the first trial (26 October).** A TripLog export held the 3 KB CSV
+  that was wanted and a 97 KB HTML report that was not; the answer came to over a hundred thousand
+  characters, the client moved it to a file, and the session unpacked the archive by hand after all.
+  Now `list: true` returns each entry's name, size and text length without any text; `entry` reads
+  only the matching entries (an exact name or a pattern with `*` and `?`, matched against the path
+  and the bare file name), and the rest are counted in `notSelected` and never unpacked. The
+  character limit is now a budget for the WHOLE answer, `maxChars`, default 50,000 and at most
+  100,000, where it used to be 100,000 per entry; an entry it cuts reports `truncated`, its full
+  length in `chars` and a `nextOffset`, and `offset` with that entry selected continues it. `entry`
+  on an attachment that is not an archive, a pattern that matches nothing, and an `offset` that is
+  past the end or not aimed at exactly one entry are `invalid_input` rather than empty answers.
 - **`MAILWARDEN_CONFIRM`: a human yes before a filter or an unsubscribe.** Set to `ask`, `create_filter`,
   `unsubscribe` and `bulk_unsubscribe` first ask the person at the client through MCP elicitation —
   the filter rule, or the senders and hosts to be contacted, spelled out; one question for a whole

@@ -1480,6 +1480,74 @@ describe("tool results — structured content + fenced text", () => {
       expect(JSON.stringify(res.content)).toMatch(/download_attachment/);
     });
 
+    it("list, entry, maxChars and offset pass through and validate against the outputSchema", async () => {
+      const { deflateRawSync } = await import("node:zlib");
+      // A two-entry stored+deflated ZIP, built by hand like the module tests do.
+      const entries = [
+        { name: "t/trips.csv", data: Buffer.from("date;km\n2026-10-20;12\n") },
+        { name: "t/report.html", data: Buffer.from("<td>x</td>".repeat(500)) },
+      ];
+      const locals: Buffer[] = [];
+      const centrals: Buffer[] = [];
+      let off = 0;
+      for (const e of entries) {
+        const body = deflateRawSync(e.data);
+        const name = Buffer.from(e.name);
+        const l = Buffer.alloc(30);
+        l.writeUInt32LE(0x04034b50, 0);
+        l.writeUInt16LE(8, 8);
+        l.writeUInt32LE(body.length, 18);
+        l.writeUInt32LE(e.data.length, 22);
+        l.writeUInt16LE(name.length, 26);
+        locals.push(l, name, body);
+        const c = Buffer.alloc(46);
+        c.writeUInt32LE(0x02014b50, 0);
+        c.writeUInt16LE(8, 10);
+        c.writeUInt32LE(body.length, 20);
+        c.writeUInt32LE(e.data.length, 24);
+        c.writeUInt16LE(name.length, 28);
+        c.writeUInt32LE(off, 42);
+        centrals.push(c, name);
+        off += 30 + name.length + body.length;
+      }
+      const cd = Buffer.concat(centrals);
+      const end = Buffer.alloc(22);
+      end.writeUInt32LE(0x06054b50, 0);
+      end.writeUInt16LE(2, 8);
+      end.writeUInt16LE(2, 10);
+      end.writeUInt32LE(cd.length, 12);
+      end.writeUInt32LE(off, 16);
+      attachment(Buffer.concat([...locals, cd, end]));
+      const client = await connect();
+      const call = (args: object): Promise<any> =>
+        client.callTool({ name: "read_attachment", arguments: { messageId: "m1", attachmentId: "a1", ...args } });
+
+      const listed = await call({ list: true });
+      expect(listed.isError).toBeFalsy();
+      expect(listed.structuredContent).toMatchObject({
+        format: "zip",
+        list: true,
+        entries: [
+          { name: "t/trips.csv", chars: 22 },
+          { name: "t/report.html", chars: 5000 },
+        ],
+      });
+      expect(listed.structuredContent.entries.every((e: any) => e.text === undefined)).toBe(true);
+
+      const csv = await call({ entry: "*.csv" });
+      expect(csv.structuredContent).toMatchObject({ notSelected: 1, entries: [{ name: "t/trips.csv", text: "date;km\n2026-10-20;12\n" }] });
+
+      const part = await call({ entry: "report.html", maxChars: 1000 });
+      expect(part.structuredContent.entries[0]).toMatchObject({ truncated: true, nextOffset: 1000, chars: 5000 });
+      const next = await call({ entry: "report.html", maxChars: 1000, offset: 1000 });
+      expect(next.structuredContent.entries[0]).toMatchObject({ nextOffset: 2000 });
+
+      const missing = await call({ entry: "*.pdf" });
+      expect(missing.isError).toBe(true);
+      expect(JSON.stringify(missing.content)).toMatch(/invalid_input/);
+      expect(JSON.stringify(missing.content)).toMatch(/list: true/);
+    });
+
     it("is a read-tier, read-only tool", async () => {
       vi.stubEnv("MAILWARDEN_READONLY", "1");
       const client = await connect();
