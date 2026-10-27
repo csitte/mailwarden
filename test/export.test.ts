@@ -312,6 +312,10 @@ describe("htmlToText — linear on hostile markup", () => {
     expect(fast("<p>a</p><script>x</script")).toBe("a");
     // A head that never closes is closed by the body in a browser, so the body stays.
     expect(fast("<head><title>t</title><p>body</p>")).toContain("body");
+    // Round 4 (M5): an unclosed head gives up on itself, not on the scripts and styles after it.
+    expect(fast("<head><script>LEAK</script><body><p>b</p>")).toBe("b");
+    expect(fast("<head><title>t</title><style>p{}</style><p>b</p>")).toBe("tb");
+    expect(fast("<head><p>a</p><script>never closed")).toBe("a");
     expect(fast("<![CDATA[inner]]> text")).toBe("inner text");
     // A letter whose lower case is longer must not shift what is cut.
     expect(fast("<p>İstanbul</p><STYLE>p{}</STYLE><p>ok</p>")).toBe(["İstanbul", "ok"].join(String.fromCharCode(10)));

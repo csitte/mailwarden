@@ -59,8 +59,10 @@ export function htmlToText(html: string): string {
  * A block closes where a browser closes it: at `</name` followed by whitespace, `/` or `>`, so
  * `</scriptx>` inside a script is still script (review grok-mailwarden, round 3: the first
  * version closed there and showed the model what a browser hides). A script or style that never
- * closes runs to the end, as in a browser; a head that never closes ends the walk and the rest
- * stays, because a browser closes it implicitly and shows the body that follows.
+ * closes runs to the end, as in a browser; a head that never closes is left in place, because a
+ * browser closes it implicitly and shows the body that follows, and the walk goes on after it.
+ * Known limit: the double-escaped form `<script><!--<script></script>...</script>`, which a
+ * browser keeps as one script, is closed at the first `</script>` here, as it was in 0.23.0.
  */
 function removeBlocks(s: string, names: string[]): string {
   // ASCII only: a full toLowerCase can change the length ("İ" becomes two characters), and
@@ -93,7 +95,12 @@ function removeBlocks(s: string, names: string[]): string {
     }
     const end = close < 0 ? -1 : lower.indexOf(">", close);
     if (end < 0) {
-      if (name === "head") break;
+      // Give up on the head only, not on the walk: a script after it is still a script
+      // (round 4, M5). No later head can close either, there is no `</head` after this one.
+      if (name === "head") {
+        next[names.indexOf("head")] = -1;
+        continue;
+      }
       out.push(s.slice(pos, open));
       pos = s.length;
       break;

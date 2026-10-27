@@ -251,7 +251,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   closes it, and blocks are removed in one forward walk; a test holds each shape under half a second.
   A block closes only where a browser closes it, at `</script` followed by whitespace, `/` or `>`:
   the first version of the walk also closed at `</scriptx>` and handed the model text that a
-  browser hides as script (third review round, never released).
+  browser hides as script (third review round, never released). A `<head>` that never closes
+  no longer ends the walk, so a script after it is still removed (fourth round, never released).
+  Known limit, as in 0.23.0: a double-escaped script (`<script><!--<script></script>`) is closed
+  at its first `</script>`, where a browser keeps it open.
 - **A `<script>` or `<style>` that never closes no longer shows its content as text.** A browser
   hides everything after it; the HTML-to-text rendering since 0.23.0 kept it, so a model read
   script text that no person sees in the mail. It now drops the rest of the body, as a browser
