@@ -193,7 +193,7 @@ function* tags(html: string): Generator<Tag> {
     if (lt < 0) return;
     const special = html.startsWith("<!--", lt) ? "-->" : html.startsWith("<![CDATA[", lt) ? "]]>" : null;
     if (special) {
-      const close = html.indexOf(special, lt + 4);
+      const close = html.indexOf(special, lt + (special === "-->" ? "<!--" : "<![CDATA[").length);
       if (close < 0) return;
       pos = close + 3;
       yield { start: lt, end: pos, name: "#comment", closing: false, selfClosing: true, attrs: "" };

@@ -55,8 +55,12 @@ export function htmlToText(html: string): string {
 }
 
 /**
- * Remove `<name ...>...</name>` blocks for each name, case-insensitively, in one forward walk. An
- * opening tag whose block never closes ends the walk: the rest stays, for the tag pass to strip.
+ * Remove `<name ...>...</name>` blocks for each name, case-insensitively, in one forward walk.
+ * A block closes where a browser closes it: at `</name` followed by whitespace, `/` or `>`, so
+ * `</scriptx>` inside a script is still script (review grok-mailwarden, round 3: the first
+ * version closed there and showed the model what a browser hides). A script or style that never
+ * closes runs to the end, as in a browser; a head that never closes ends the walk and the rest
+ * stays, because a browser closes it implicitly and shows the body that follows.
  */
 function removeBlocks(s: string, names: string[]): string {
   // ASCII only: a full toLowerCase can change the length ("İ" becomes two characters), and
@@ -83,9 +87,17 @@ function removeBlocks(s: string, names: string[]): string {
       }
     });
     if (open < 0) break;
-    const close = lower.indexOf("</" + name, open);
+    let close = lower.indexOf("</" + name, open);
+    while (close >= 0 && !/[\t\n\f\r />]/.test(lower[close + 2 + name.length] ?? "")) {
+      close = lower.indexOf("</" + name, close + 1);
+    }
     const end = close < 0 ? -1 : lower.indexOf(">", close);
-    if (end < 0) break;
+    if (end < 0) {
+      if (name === "head") break;
+      out.push(s.slice(pos, open));
+      pos = s.length;
+      break;
+    }
     out.push(s.slice(pos, open));
     pos = end + 1;
   }

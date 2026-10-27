@@ -249,6 +249,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with every other tool waiting meanwhile. Found while fixing the second review round of
   `grok-mailwarden`, which named the pattern. Every scan now stops at the next `<` or at what
   closes it, and blocks are removed in one forward walk; a test holds each shape under half a second.
+  A block closes only where a browser closes it, at `</script` followed by whitespace, `/` or `>`:
+  the first version of the walk also closed at `</scriptx>` and handed the model text that a
+  browser hides as script (third review round, never released).
+- **A `<script>` or `<style>` that never closes no longer shows its content as text.** A browser
+  hides everything after it; the HTML-to-text rendering since 0.23.0 kept it, so a model read
+  script text that no person sees in the mail. It now drops the rest of the body, as a browser
+  does. A `<head>` that never closes still keeps what follows, because a browser closes it at
+  the body. Found in the third review round of `grok-mailwarden`.
 
 ### Security
 - **`hono` 4.13.7 to 4.13.13 (moderate, GHSA-5r4p-p66f-jhc7).** Dependabot flagged it on the
