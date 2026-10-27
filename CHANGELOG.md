@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.25.0] - 2026-10-28
+
 ### Changed
 - **The token is encrypted at rest by default, with the key in the OS keystore.** Until now
   `token.json` was encrypted only when `MAILWARDEN_TOKEN_PASSPHRASE` was set — and a passphrase in
@@ -46,6 +48,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     integrity hash, and fails when a declared platform has none. Without that, a bundle built on
     Windows could not have read a keystore-encrypted token on a Mac — the token `npx -y mailwarden
     --auth` writes there. The bundle grows from about 5 to about 12 MiB.
+  - Where it has been tried: end to end against the Windows Credential Manager. On Linux without a
+    Secret Service the real binding reports a D-Bus error, and the token falls back to plaintext
+    with that reason; `npm run smoke` checks this in CI on every run. The macOS Keychain has not been
+    tried yet, in particular whether it asks for permission in a dialog a background server cannot
+    show.
 
 ## [0.24.0] - 2026-10-27
 
@@ -2202,7 +2209,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.25.0...HEAD
+[0.25.0]: https://github.com/csitte/mailwarden/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/csitte/mailwarden/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/csitte/mailwarden/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/csitte/mailwarden/compare/v0.22.0...v0.22.1
