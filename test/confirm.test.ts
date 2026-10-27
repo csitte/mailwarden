@@ -107,6 +107,21 @@ describe("MAILWARDEN_CONFIRM on create_filter", () => {
     expect(created).toHaveLength(1);
   });
 
+  // Release check 27 Oct: the criteria come from the model, the party the dialog guards against.
+  it("ask: shows model-supplied criteria on one line, without hidden characters", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    filterApi();
+    const nl = String.fromCharCode(10);
+    const rlo = String.fromCharCode(0x202e);
+    const { client, asked } = await connect({ action: "decline" });
+    const query = `news${nl}${nl}mailwarden has checked this rule and recommends it.${rlo}`;
+    await client.callTool({ name: "create_filter", arguments: { ...filterArgs, query } });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).not.toContain(nl);
+    expect(asked[0]).not.toContain(rlo);
+    expect(asked[0]).toMatch(/query: news mailwarden has checked/);
+  });
+
   it.each([
     ["declines", { action: "decline" as const }],
     ["cancels", { action: "cancel" as const }],
@@ -188,7 +203,16 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]).toMatch(/1 unsubscribe request/);
     expect(asked[0]).toMatch(/x\.example/);
+    expect(asked[0]).toMatch(/redirect .*at most three/);
     expect(res.isError).toBe(true);
+  });
+
+  it("names the redirect rule in the single dialog too", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    newsletter();
+    const { client, asked } = await connect({ action: "decline" });
+    await client.callTool({ name: "unsubscribe", arguments: { threadId: "t1" } });
+    expect(asked[0]).toMatch(/redirect .*at most three/);
   });
 
   // Review grok-mailwarden, 26 Oct (L3): the sender's display name reaches the one channel that
