@@ -17,7 +17,9 @@
  *   6. the SHIPPED documentation is not broken for the person who installed it — every relative
  *      link resolves inside the package and every anchor points at a real heading,
  *   7. the comparison table's claims about other projects were checked recently enough to still be
- *      worth printing.
+ *      worth printing,
+ *   8. the REAL OS-keystore binding, loaded from the installed package, either opens or says why
+ *      not — read-only, the one place a run sees it unmocked (on CI: Linux without a desktop).
  *
  * On (6): README once pointed npm users at a script that only exists in the repo. Checking it by
  * hand is unreliable in a way this file exists to avoid — an ad-hoc grep for it found two of three
@@ -32,7 +34,7 @@ import { createRequire } from "node:module";
 import { mkdtempSync, rmSync, mkdirSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { mcpSession } from "./lib/mcp-session.mjs";
 import { npm, run } from "./lib/run.mjs";
 import { tableAgeState } from "./lib/table-age.mjs";
@@ -182,6 +184,46 @@ try {
   check(
     "--check diagnoses rather than crashes",
     !/ERR_MODULE_NOT_FOUND|Cannot find (module|package)|unexpected error/i.test(doctorOut),
+  );
+
+  // The tests mock the keystore binding throughout, so what the REAL one does on this platform is
+  // otherwise only assumed — above all on a Linux host without a Secret Service, where `--auth` must
+  // fall back to a plaintext token with a reason rather than fail. Strictly reading: it opens the
+  // store and looks up a key id nothing ever writes; no entry is created.
+  console.log("\nOS keystore through the installed package (read-only):");
+  const keystoreProbe = spawnSync(
+    process.execPath,
+    [
+      "--input-type=module",
+      "-e",
+      `const { openKeyStore } = await import(process.argv[1]);
+       const r = await openKeyStore();
+       let lookup = "not attempted";
+       if (r.ok) {
+         try { lookup = (await r.store.get("0".repeat(24))) === null ? "null (no such key)" : "a value"; }
+         catch (e) { lookup = "threw: " + (e instanceof Error ? e.message : String(e)); }
+       }
+       console.log(JSON.stringify({ ok: r.ok, reason: r.ok ? undefined : r.reason, lookup }));`,
+      pathToFileURL(path.join(installed, "dist", "keystore-io.js")).href,
+    ],
+    { encoding: "utf8" },
+  );
+  const probeLine = (keystoreProbe.stdout ?? "").trim().split(/\r?\n/).pop() ?? "";
+  let probe;
+  try {
+    probe = JSON.parse(probeLine);
+  } catch {
+    probe = undefined;
+  }
+  check(
+    `keystore opens or names why not on ${process.platform}-${process.arch}`,
+    keystoreProbe.status === 0 && probe !== undefined && (probe.ok || typeof probe.reason === "string"),
+    probe ? (probe.ok ? `available, lookup: ${probe.lookup}` : probe.reason) : (keystoreProbe.stderr ?? "").trim().split(/\r?\n/)[0],
+  );
+  check(
+    "an unknown key id reads as absent, never as a value",
+    !probe?.ok || probe.lookup !== "a value",
+    probe?.ok ? probe.lookup : "no keystore here",
   );
 
   if (failures.length > 0) {
