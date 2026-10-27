@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.24.0] - 2026-10-27
+
 ### Added
 - **`get_thread` can return part of a thread, and bodies without their HTML.** Four deployments
   were asked on 25 October what gets in their way, and three named the same tool: a seven-message
@@ -2160,7 +2162,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.23.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/csitte/mailwarden/compare/v0.23.0...v0.24.0
 [0.23.0]: https://github.com/csitte/mailwarden/compare/v0.22.1...v0.23.0
 [0.22.1]: https://github.com/csitte/mailwarden/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/csitte/mailwarden/compare/v0.21.0...v0.22.0
