@@ -148,7 +148,13 @@ function isEncrypted(o: unknown): o is EncryptedToken {
  * machine or user), or a key that does not open the file.
  */
 async function unlockKeystoreToken(env: KeystoreEnvelope, tp: string): Promise<string> {
-  const reauth = "Re-run `mailwarden --auth` on this machine to store a fresh token.";
+  // `--force`, because the overwrite guard cannot read this file to confirm whose token it is and
+  // refuses a plain `--auth` — advice without it pointed at a command that says no.
+  const account = activeAccount();
+  const reauth =
+    `Re-run \`mailwarden --auth${account ? ` --account ${account}` : ""} --force\` on this machine to store a ` +
+    "fresh token (--force: the old one cannot be read here to confirm its account). If this folder is " +
+    "shared with another machine, that machine then needs its own --auth too.";
   // The id comes from a file anyone with write access could edit: reject it before it names an
   // entry, so an edited file cannot point mailwarden at another application's credential.
   const entry = keyEntryName(env.keyId);
@@ -242,8 +248,8 @@ function scopesOf(parsed: unknown): string[] | null {
 /**
  * Why the granted scopes could not be read — `--check` must tell these apart. Collapsing them
  * into one "unknown" produced a false "token records no scopes, re-run `--auth`" for a merely
- * locked token, and following that advice re-authorizes WITHOUT the passphrase, replacing an
- * encrypted token with a plaintext one.
+ * locked token, and following that advice re-authorizes WITHOUT the passphrase, replacing a
+ * passphrase-encrypted token with one the passphrase no longer protects.
  */
 export type ScopeRead =
   | { known: true; scopes: string[] } // recorded and readable
@@ -802,6 +808,9 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
   }
   const cred = checkCredentials(raw, CRED_PATH);
   if (!cred.ok) throw new CliError(cred.message);
+  // persistToken reads this again after the consent; a typo found only there would cost the user
+  // the consent they just gave, so it is refused here, before the browser opens.
+  parseKeystoreSetting(process.env.MAILWARDEN_KEYSTORE);
 
   // `mailwarden --auth`: always run the browser consent flow. We deliberately do NOT return a
   // previously saved token here — a stale/expired token.json (e.g. the 7-day refresh-token expiry

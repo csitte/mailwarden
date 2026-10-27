@@ -226,7 +226,7 @@ describe("keystore-encrypted token", () => {
   });
 
   it.each([
-    [{ state: "missing" as const }, /not in this machine's OS keystore.*copied from another machine.*--auth/s],
+    [{ state: "missing" as const }, /not in this machine's OS keystore.*copied from another machine.*--auth --force/s],
     [{ state: "unavailable" as const, reason: "no OS keystore reachable (x)" }, /but no OS keystore reachable \(x\).*--auth/s],
     [{ state: "error" as const, reason: "locked" }, /Could not read its key.*\(locked\).*unlock/s],
   ])("fails with the fix for %j", (key, detail) => {

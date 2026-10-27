@@ -224,6 +224,24 @@ describe("keystore through getAuth", () => {
     mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
     await expect((await fresh({ MAILWARDEN_KEYSTORE: "maybe" })).getAuth(true)).rejects.toThrow(/MAILWARDEN_KEYSTORE/);
     await expect(fs.access(tokenFile())).rejects.toThrow();
+    // Before the browser, not after: a typo found in persistToken would cost the consent.
+    expect(mocks.runConsentFlow).not.toHaveBeenCalled();
+  });
+
+  // `off` stores no key, but the key of the token it replaces is removed all the same — otherwise
+  // every such re-auth would leave an orphaned entry behind.
+  it("with MAILWARDEN_KEYSTORE=off, stores no key but still removes the replaced one", async () => {
+    quiet();
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt-1" });
+    await (await fresh()).getAuth(true);
+    const first = (await readToken()).keyId;
+    ks.calls.length = 0;
+
+    mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt-2" });
+    await (await fresh({ MAILWARDEN_KEYSTORE: "off" })).getAuth(true, { force: true });
+    expect(await readToken()).toMatchObject({ type: "authorized_user", refresh_token: "rt-2" });
+    expect(ks.calls.filter((c) => c.startsWith("set:"))).toEqual([]);
+    expect(ks.entries.has(first)).toBe(false);
   });
 
   describe("loading a keystore token that cannot be opened", () => {
@@ -238,6 +256,28 @@ describe("keystore through getAuth", () => {
       const { keyId } = await writeSealed({ storeKey: false });
       await expect((await fresh()).getAuth(false)).rejects.toThrow(
         new RegExp(`not in this machine's OS keystore \\(mailwarden / token-key-${keyId}\\).*copied from another machine`, "s"),
+      );
+    });
+
+    // The overwrite guard cannot read a token whose key is gone, so it cannot confirm the account
+    // and refuses a plain --auth. The advice must therefore name --force, or it points at a refusal.
+    it("advises --auth --force for a missing key, and a plain --auth is refused", async () => {
+      quiet();
+      await writeSealed({ storeKey: false });
+      await expect((await fresh()).getAuth(false)).rejects.toThrow(/mailwarden --auth --force/);
+
+      mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt-new" });
+      await expect((await fresh()).getAuth(true)).rejects.toThrow(/Refusing to overwrite/);
+      await (await fresh()).getAuth(true, { force: true });
+      const client = await (await fresh()).getAuth(false);
+      expect(client.credentials.refresh_token ?? (client as any)._refreshToken).toBe("rt-new");
+    });
+
+    it("names the account in that advice for a named account", async () => {
+      const { keyId, key } = newKey();
+      await fs.writeFile(path.join(tmp, "token.work.json"), JSON.stringify(sealWithKey(payload, key, keyId)));
+      await expect((await fresh({ MAILWARDEN_ACCOUNT: "work" })).getAuth(false)).rejects.toThrow(
+        /mailwarden --auth --account work --force/,
       );
     });
 

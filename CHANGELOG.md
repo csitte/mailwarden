@@ -33,7 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     point mailwarden at another application's credential.
   - Every failure names its cause and fix — no keystore here, a key that is not on this machine (the
     file was copied, or the entry removed), a keystore that is locked, a file that was edited — in the
-    server's error and in `--check`, which also says how the next `--auth` would store the token.
+    server's error and in `--check`. For a plaintext token, `--check` also says how the next `--auth`
+    would store it. A token whose key is gone cannot be read to confirm its account, so replacing it
+    takes `--auth --force`, and the messages say so.
+  - An invalid `MAILWARDEN_KEYSTORE` value is refused by `--auth` before the browser opens, and makes
+    `--check` fail with a `Keystore` line.
+  - `MAILWARDEN_KEYSTORE=off` never stores a key. Re-authorizing over a token that has one still
+    removes that key, so no entry is left orphaned.
   - The MCPB bundle carries the keystore binding for every platform it declares — macOS, Windows and
     Linux (glibc and musl), each on x64 and arm64. `npm ci` installs the build machine's binary only,
     so `npm run mcpb` adds the others from the lockfile's pinned URLs, checks each against its

@@ -211,7 +211,8 @@ or a connection that closed at once, and nothing that said why. Four facts cover
   `~/.mailwarden/` on the machine that ran `--auth`; a clone, a synced project folder or a
   dotfiles repo does not carry them. Run `npx -y mailwarden --auth` on the new machine. A token
   encrypted with a keystore key does not work on another machine at all — the key stays behind,
-  which is the point — and `--check` there says so. If you copy the directory instead (USB stick,
+  which is the point — and `--check` there says so; replace it there with `--auth --force` (the
+  old file cannot be read on that machine to confirm its account). If you copy the directory instead (USB stick,
   file share), set `MAILWARDEN_TOKEN_PASSPHRASE` and re-run `--auth` on the *source* first, so what
   leaves the machine is encrypted with something you can bring along: a plaintext `token.json` is
   the mailbox, for whoever holds the copy.
@@ -279,17 +280,26 @@ You (or a previous `--auth` run) turned on at-rest encryption by setting
 `MAILWARDEN_TOKEN_PASSPHRASE`, but the server process doesn't have it. The **same** passphrase
 must be present both when you run `--auth` *and* whenever the server runs — set it in the same
 environment your MCP client launches mailwarden from (or your shell/service definition). If you
-never meant to encrypt the token, just run `--auth` again *without* the variable set and it'll be
-stored in plaintext.
+never meant to use a passphrase, run `--auth --force` *without* the variable set: the token is then
+stored under a key in the OS keystore, or in plaintext where there is none. `--force`, because
+`--auth` cannot read the passphrase-encrypted file to confirm its account without the passphrase.
 
 ### "token.json is encrypted with a key that is not in this machine's OS keystore"
 
 The token was stored under a key in the OS keystore, and that key is not here: the file was copied
 from another machine or user account, or the entry (`mailwarden` / `token-key-…`) was removed from
-the keystore. The key cannot be recovered from the file. Run `--auth` again on this machine (with
-the matching `--account <name>` for a named account). A variant says *no OS keystore reachable*
-instead: on Linux the Secret Service is not running or not unlocked in this session — start or
-unlock it, or authorize again with `MAILWARDEN_TOKEN_PASSPHRASE` set.
+the keystore. The key cannot be recovered from the file. Run `--auth --force` again on this
+machine (with the matching `--account <name>` for a named account): `--force` because `--auth`
+cannot read the old file to confirm which mailbox it belongs to, and refuses to replace a token it
+cannot identify. If the folder is synced with another machine, the new file replaces that
+machine's token as well, so authorize there again too, or give each machine its own
+`MAILWARDEN_DIR`. Two variants name the keystore instead of the key. *No OS keystore reachable*: on Linux the
+Secret Service is not running in this session (the reason in parentheses is the binding's own,
+e.g. a D-Bus error) — start it, or authorize again with `MAILWARDEN_TOKEN_PASSPHRASE` set (again
+with `--force`). *No native keystore binding for <platform>*: the installed package has no prebuilt
+binary for this platform — use the passphrase the same way. A keystore that is reachable but
+refuses the read says *Could not read the key … from the OS keystore* instead; if it is locked,
+unlock it and retry, and nothing needs re-authorizing.
 
 ### "Could not decrypt token.json — MAILWARDEN_TOKEN_PASSPHRASE is wrong or the file is corrupted"
 
