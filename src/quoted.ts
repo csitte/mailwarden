@@ -110,8 +110,11 @@ function outlookCut(lines: string[]): number {
     let start = -1;
     if (ORIGINAL_SEPARATOR.test(t)) start = i;
     else if (/^_{10,}$/.test(t)) {
-      const j = lines.findIndex((l, k) => k > i && !isBlank(l));
-      if (j > 0 && j <= i + 2 && headerBlockAt(lines, j)) start = i;
+      // Look at the next two lines only: a search from the top for every rule made a mail of
+      // rules quadratic (17 s for 1.8 MB, release check 27 Oct).
+      let j = i + 1;
+      while (j < lines.length && j <= i + 2 && isBlank(lines[j])) j++;
+      if (j < lines.length && j <= i + 2 && headerBlockAt(lines, j)) start = i;
     } else if (headerBlockAt(lines, i) && (i === 0 || isBlank(lines[i - 1]))) start = i;
     if (start < 0) continue;
     if (nearForward(lines, start)) return -1; // a forward from here on: content, keep all

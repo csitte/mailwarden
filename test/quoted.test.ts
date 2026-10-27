@@ -393,6 +393,26 @@ describe("review 26 Oct, round 2 — the HTML walk", () => {
     expect(performance.now() - t).toBeLessThan(500);
   });
 
+  // Release check 27 Oct: the plain-text path, which also runs on text rendered from HTML,
+  // searched from the top for the line after every rule.
+  it("a text of rule lines costs no time (17 s for 1.8 MB before)", () => {
+    const text = "Answer\n" + "__________\n".repeat(160_000);
+    const t = performance.now();
+    const r = stripQuotedText(text);
+    expect(performance.now() - t).toBeLessThan(500);
+    expect(r.stripped).toBe(false);
+  });
+
+  it("a rule followed by a header block is still an Outlook history", () => {
+    const head = ["From: A <a@x.example>", "Sent: 1 Oct 2026", "To: B", "Subject: x", "", "old"];
+    for (const gap of [[], [""]]) {
+      const text = ["My answer", "", "__________", ...gap, ...head].join(String.fromCharCode(10));
+      expect(stripQuotedText(text)).toEqual({ text: "My answer", stripped: true });
+    }
+    const far = ["My answer", "", "__________", "", "", ...head].join(String.fromCharCode(10));
+    expect(stripQuotedText(far).text).toContain("__________");
+  });
+
   it("a body over MAX_HTML_CUT is never cut", () => {
     const html = '<p>Ok.</p><div class="gmail_quote"><blockquote>' + "o".repeat(MAX_HTML_CUT) + "</blockquote></div>";
     expect(stripQuotedHtml(html)).toEqual({ html, stripped: false });

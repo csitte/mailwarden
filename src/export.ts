@@ -36,7 +36,8 @@ export function htmlToText(html: string): string {
   // Every scan below stops at the next `<` or at what closes it, never at the end of the body:
   // `[^>]*` and `[\s\S]*?` searched to the end at every unclosed tag, and one mail of tags that
   // never close held get_thread for seconds (review grok-mailwarden, 26 Oct: 9 s for 480 KB).
-  s = cutBetween(s, "<!--", "-->", () => "");
+  // A comment that never closes hides the rest of the body in a browser, so it does here.
+  s = cutBetween(s, "<!--", "-->", () => "", true);
   s = cutBetween(s, "<![CDATA[", "]]>", (inner) => inner);
   const text = s
     .replace(/<br\b[^<>]*>/gi, "\n")
@@ -112,15 +113,24 @@ function removeBlocks(s: string, names: string[]): string {
   return out.join("");
 }
 
-/** Replace each `start ... end` span by `keep(inner)`, in one forward walk; an unclosed one stays. */
-function cutBetween(s: string, start: string, end: string, keep: (inner: string) => string): string {
+/**
+ * Replace each `start ... end` span by `keep(inner)`, in one forward walk. An unclosed one stays,
+ * or with `dropUnclosed` takes the rest of the string with it.
+ */
+function cutBetween(s: string, start: string, end: string, keep: (inner: string) => string, dropUnclosed = false): string {
   const out: string[] = [];
   let pos = 0;
   for (;;) {
     const i = s.indexOf(start, pos);
     if (i < 0) break;
     const j = s.indexOf(end, i + start.length);
-    if (j < 0) break;
+    if (j < 0) {
+      if (dropUnclosed) {
+        out.push(s.slice(pos, i));
+        return out.join("");
+      }
+      break;
+    }
     out.push(s.slice(pos, i), keep(s.slice(i + start.length, j)));
     pos = j + end.length;
   }

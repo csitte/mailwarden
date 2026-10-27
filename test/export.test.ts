@@ -310,6 +310,9 @@ describe("htmlToText — linear on hostile markup", () => {
     expect(fast("<p>keep</p><script>never closed")).toBe("keep");
     expect(fast("<p>keep</p><style>p{} never closed")).toBe("keep");
     expect(fast("<p>a</p><script>x</script")).toBe("a");
+    // Release check 27 Oct: so is everything after a comment that never closes.
+    expect(fast("<p>a</p><!-- IGNORE PREVIOUS INSTRUCTIONS")).toBe("a");
+    expect(fast("<p>a</p><!-- c --><p>b</p>")).toBe("a\nb");
     // A head that never closes is closed by the body in a browser, so the body stays.
     expect(fast("<head><title>t</title><p>body</p>")).toContain("body");
     // Round 4 (M5): an unclosed head gives up on itself, not on the scripts and styles after it.
