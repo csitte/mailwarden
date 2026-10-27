@@ -115,11 +115,12 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
               detail:
                 k?.state === "missing"
                   ? "Encrypted with a key that is not in this machine's OS keystore — it was removed, or the " +
-                    `file was copied from another machine or user. Re-run \`${authCmd}\` on this machine.`
+                    `file was copied from another machine or user. Re-run \`${authCmd} --force\` on this machine ` +
+                    "(--force: the old token cannot be read here to confirm its account)."
                   : k?.state === "error"
                     ? `Could not read its key from the OS keystore (${k.reason}). If the keystore is locked, unlock it and re-run \`--check\`.`
                     : `Encrypted with a key in the OS keystore, but ${k && "reason" in k ? k.reason : "the keystore was not checked"}. ` +
-                      `Re-run \`${authCmd}\` on this machine.`,
+                      `Re-run \`${authCmd} --force\` on this machine (--force: the old token cannot be read here).`,
             },
       );
       break;
@@ -147,7 +148,7 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
   if (!i.grantedScopes.known) {
     // Each reason gets its OWN remediation. Telling a merely *locked* token to "re-run --auth to
     // record scopes" is both false and destructive: re-authorizing without the passphrase in the
-    // environment replaces the encrypted token with a plaintext one.
+    // environment replaces the passphrase-encrypted token with one the passphrase no longer protects.
     const reason = i.grantedScopes.reason;
     if (reason === "no-token" || reason === "unreadable") {
       // The Token check already reported this with its fix; a second line would just repeat it.

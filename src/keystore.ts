@@ -96,7 +96,8 @@ export function openWithKey(env: KeystoreEnvelope, key: Buffer): string {
 
 /**
  * `MAILWARDEN_KEYSTORE`: `auto` (default) encrypts new tokens with a keystore key wherever one is
- * reachable; `off` never writes to the keystore. It governs writing only — a token that was stored
+ * reachable; `off` never stores a key in the keystore (a re-auth still removes the key of the token it
+ * replaces, so none is left orphaned). It governs writing only — a token that was stored
  * with a keystore key still needs that key to be read, whatever this says.
  */
 export type KeystoreSetting = "auto" | "off";

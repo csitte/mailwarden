@@ -368,7 +368,7 @@ export function registerTools(server: McpServer): void {
     // Scope-gate the filters tier: advertise it only when the stored token
     // actually carries gmail.settings.basic. `false` = a token known to lack it
     // (skip + tell the user), `undefined` = unknown (no token yet, an old token
-    // without a recorded scope, or an encrypted one) → keep the prior behavior of
+    // without a recorded scope, or a passphrase-encrypted one) → keep the prior behavior of
     // advertising and letting the runtime insufficient-scope message guide re-auth.
     if (hasFilterScope() === false) {
       console.error(
@@ -852,7 +852,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
   const previews = new PreviewStore();
   // Unlike the filters tier, manage is NOT scope-gated: gmail.modify is the default
   // grant so almost every token has it, and hasModifyScope() is `undefined` (unknown)
-  // for the common encrypted/old-token case — gating here would either do nothing or
+  // for the common passphrase-encrypted/old-token case — gating here would either do nothing or
   // hide tools from users who can actually write. A genuine mismatch (broader runtime
   // MAILWARDEN_TOOLS than the token was authorized for) fails gracefully at call time
   // via the insufficient-scope message in gmail.ts; the sweep paths warn in index.ts.

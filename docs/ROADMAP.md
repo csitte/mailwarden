@@ -85,7 +85,8 @@ rather than a new kind of thing: a `bulk_modify` dry run that binds the write th
 for the text inside reports and archives (from `gmail-tidy-mcp`), `MAILWARDEN_CONFIRM` asking the user
 through elicitation before a filter or an unsubscribe (from `klodr`), and two more header signals,
 `displayNameSpoof` and `lookalikeDomain`. One gap remained, token encryption by default with the key
-in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it; it is item 1 under Next.
+in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it; it was item 1 under Next and is built
+on `main` since 27 October 2026.
 
 ## Non-goals
 
