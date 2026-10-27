@@ -19,7 +19,7 @@ importantly — what it deliberately does **not** protect against.
 every operation hits the live Gmail API. The only local state is the OAuth token in `~/.mailwarden/`
 (`token.json`, plus one `token.<account>.json` per named account when multiple accounts are used).
 In memory, and only for as long as the process runs, it holds two short-lived lists and nothing
-else: the senders `bulk_unsubscribe` already contacted, and the message ids of a `bulk_modify` dry
+else: the senders `unsubscribe` and `bulk_unsubscribe` already contacted (kept until the process ends), and the message ids of a `bulk_modify` dry
 run behind its `previewToken` (at most twenty sets, each for 30 minutes — ids, never content).
 
 ## Data flow
@@ -116,14 +116,15 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   all-or-nothing silently.
 - **A human yes for what outlasts the conversation, if you want one.** With `MAILWARDEN_CONFIRM=ask`
   (or `require`), `create_filter`, `unsubscribe` and `bulk_unsubscribe` first ask the person at the
-  client through MCP elicitation, with the rule or the hosts to be contacted spelled out. The answer
+  client through MCP elicitation, with the rule or the hosts to be contacted spelled out (the first host of each request; a redirect, at most three, is followed and checked the same way, and the dialog says so). The answer
   comes from the client's own dialog and never passes through the model — a "yes" typed in the chat
   is text a prompt-injected mail can produce, an elicitation answer is not. Off by default, because
   a client that cannot show a dialog answers with a cancel and unattended runs would fail. Note what
   `ask` means on such a client: it proceeds WITHOUT asking, so `ask` is a convenience, not a
   guarantee; `require` is the setting that guarantees the question, and it refuses instead of
   proceeding where no dialog is possible. The sender name a dialog shows is folded to one short line
-  without hidden characters, so a display name cannot lay out text of its own in it. A label change is not on the list: it is
+  without hidden characters, and so are the filter criteria and label names, which come from the model:
+  neither a display name nor a model can lay out text of its own in it. A label change is not on the list: it is
   reversible, exactly so with `undo: true`.
 - **A preview that binds the write.** A `bulk_modify` dry run returns a `previewToken`; the write that
   carries it acts on exactly the previewed messages and refuses a reworded query or a different

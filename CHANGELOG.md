@@ -73,8 +73,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   parts searched from the start again after every removal, so one Gmail quote of twenty thousand
   attribution and blockquote pairs (1.8 MB) held `get_thread` for 19 seconds. The HTML is now read
   in one forward walk over its tags that skips comments and CDATA; a quote that is never closed,
-  or a `<blockquote>` hidden in a comment, no longer makes the answer below it disappear, and a
-  body over 512 KiB is not cut at all. Known limit: an answer written inside Yahoo's
+  or a `<blockquote>` hidden in a comment, no longer makes the answer below it disappear, and an
+  HTML body over 512 KiB is not cut in its markup. The plain-text cut, which also runs on text
+  rendered from HTML, looked for the line after every rule from the top of the body: 17 seconds
+  for 1.8 MB of rule lines, found by the release check and fixed before release. Known limit: an answer written inside Yahoo's
   `yahoo_quoted` cannot be told from the quote and goes with it. The same round added forward
   prefixes (PD, TOV, Пересл, 转发, 轉寄, 転送, a full-width colon) and the mail-system tags
   "*EXTERNAL*" and "EXT:" in front of them; `read_attachment` keeps a UTF-8 file with one broken
@@ -166,7 +168,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   umlaut in it turned into a replacement character without a word.
 - **`MAILWARDEN_CONFIRM`: a human yes before a filter or an unsubscribe.** Set to `ask`, `create_filter`,
   `unsubscribe` and `bulk_unsubscribe` first ask the person at the client through MCP elicitation —
-  the filter rule, or the senders and hosts to be contacted, spelled out; one question for a whole
+  the filter rule, or the senders and hosts to be contacted, spelled out (the first host of each request, with a line that a redirect, at most three, is followed and checked the same way; the criteria and label names, which come from the model, folded to one line without hidden characters); one question for a whole
   bulk run, none for a dry run. The answer never passes through the model, so a prompt-injected mail
   cannot give it. `require` also refuses on a client that cannot show the dialog. Off by default:
   a client without a dialog answers with a cancel, and unattended runs would fail. A no is the new
@@ -259,7 +261,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hides everything after it; the HTML-to-text rendering since 0.23.0 kept it, so a model read
   script text that no person sees in the mail. It now drops the rest of the body, as a browser
   does. A `<head>` that never closes still keeps what follows, because a browser closes it at
-  the body. Found in the third review round of `grok-mailwarden`.
+  the body. Found in the third review round of `grok-mailwarden`. The same holds for an HTML
+  comment that never closes (found by the release check).
 
 ### Security
 - **`hono` 4.13.7 to 4.13.13 (moderate, GHSA-5r4p-p66f-jhc7).** Dependabot flagged it on the
