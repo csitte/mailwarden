@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The token is encrypted at rest by default, with the key in the OS keystore.** Until now
+  `token.json` was encrypted only when `MAILWARDEN_TOKEN_PASSPHRASE` was set — and a passphrase in
+  practice sits in the MCP client's configuration next to the token, so a copied folder carried
+  both. `--auth` now generates a random 256-bit key, files it in the OS keystore (Windows Credential
+  Manager, macOS Keychain, the Secret Service on Linux) through the native `@napi-rs/keyring` binding
+  — no shell-out to `security`, `secret-tool` or PowerShell — and seals the token with the same
+  AES-256-GCM as before (envelope `v: 2`). A copy of the file is useless on another machine or under
+  another user. Precedence: a passphrase, when set, still wins; then the keystore; where none is
+  reachable (a Linux host without a desktop session, a platform without a prebuilt binding) the token
+  is stored in plaintext as before and `--auth` says why. `MAILWARDEN_KEYSTORE=off` keeps new tokens
+  out of the keystore. An existing token is never rewritten: a plaintext one keeps loading, and
+  `--check` suggests the `--auth` that encrypts it. Details that matter in use:
+  - One key per token file, filed as `mailwarden` / `token-key-<random id>`, never under the account
+    name — two config directories can both hold a `token.work.json`, and a shared entry would let one
+    `--auth` replace the key the other still needs. A re-auth removes the key it replaces.
+  - The granted scopes stay readable in the envelope, bound into the GCM tag, so registration still
+    hides the filter tools from a token known to lack their scope — a passphrase-encrypted token never
+    could. An edited scope fails at the next decryption.
+  - On Linux the binding is pinned to the Secret Service. Its own fallback, the kernel keyring, lives
+    in memory and does not survive a reboot: a key there would leave the token undecryptable after
+    the next restart.
+  - The key id from the file is validated before it names a keystore entry, so an edited file cannot
+    point mailwarden at another application's credential.
+  - Every failure names its cause and fix — no keystore here, a key that is not on this machine (the
+    file was copied, or the entry removed), a keystore that is locked, a file that was edited — in the
+    server's error and in `--check`, which also says how the next `--auth` would store the token.
+  - Open before release: an MCPB bundle carries the binary of the platform it was built on only, so a
+    bundle built on Windows falls back to plaintext on macOS and Linux.
+
 ## [0.24.0] - 2026-10-27
 
 ### Added

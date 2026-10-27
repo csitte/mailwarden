@@ -215,3 +215,53 @@ describe("shouldLiveCheck", () => {
     expect(shouldLiveCheck("invalid", true)).toBe(false);
   });
 });
+
+describe("keystore-encrypted token", () => {
+  const ks = (keystoreKey: DoctorInputs["keystoreKey"]) => buildReport(inputs({ tokenState: "keystore", keystoreKey }));
+
+  it("is green when its key is in the keystore", () => {
+    const r = ks({ state: "present" });
+    expect(check(r, "Token")).toMatchObject({ status: "ok", detail: expect.stringMatching(/key in the OS keystore/) });
+    expect(reportExitCode(r)).toBe(0);
+  });
+
+  it.each([
+    [{ state: "missing" as const }, /not in this machine's OS keystore.*copied from another machine.*--auth/s],
+    [{ state: "unavailable" as const, reason: "no OS keystore reachable (x)" }, /but no OS keystore reachable \(x\).*--auth/s],
+    [{ state: "error" as const, reason: "locked" }, /Could not read its key.*\(locked\).*unlock/s],
+  ])("fails with the fix for %j", (key, detail) => {
+    const r = ks(key);
+    expect(check(r, "Token")).toMatchObject({ status: "fail" });
+    expect(check(r, "Token").detail).toMatch(detail);
+  });
+
+  // A locked keystore is not a broken token: re-authorizing would replace a working one.
+  it("does not advise --auth for a locked keystore", () => {
+    expect(check(ks({ state: "error", reason: "locked" }), "Token").detail).not.toMatch(/--auth/);
+  });
+
+  it("tries a live call only when the key is there", () => {
+    expect(shouldLiveCheck("keystore", false, { state: "present" })).toBe(true);
+    expect(shouldLiveCheck("keystore", true, { state: "missing" })).toBe(false);
+    expect(shouldLiveCheck("keystore", false, { state: "unavailable", reason: "x" })).toBe(false);
+    expect(shouldLiveCheck("keystore", false)).toBe(false);
+  });
+});
+
+describe("plaintext token: the fix depends on what --auth would do", () => {
+  const detail = (protection: DoctorInputs["protection"]) => check(buildReport(inputs({ protection })), "Token").detail;
+
+  it("points at the keystore when one is reachable", () => {
+    expect(detail({ kind: "keystore" })).toMatch(/Re-run `mailwarden --auth` to encrypt it at rest with a key in the OS keystore/);
+  });
+
+  it("names the missing keystore and the passphrase where there is none", () => {
+    expect(detail({ kind: "plaintext", why: "unavailable", detail: "no Secret Service" })).toMatch(
+      /No OS keystore here \(no Secret Service\).*MAILWARDEN_TOKEN_PASSPHRASE/,
+    );
+  });
+
+  it("names the passphrase when the keystore is switched off", () => {
+    expect(detail({ kind: "plaintext", why: "off" })).toMatch(/Set MAILWARDEN_TOKEN_PASSPHRASE/);
+  });
+});

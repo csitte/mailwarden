@@ -124,7 +124,7 @@ const SCOPE_COVERS: Record<string, string> = {
  *
  * Registration already hides the filters tier when the stored token is known to lack its scope
  * (tools.ts), but "known" is the weak part: a token is unreadable at registration time whenever it
- * is encrypted, since that path is synchronous and never decrypts. Those deployments advertise the
+ * is passphrase-encrypted, since that path is synchronous and never decrypts. Those deployments advertise the
  * full surface and only discover the gap when Google refuses a call. This function is what lets the
  * later, asynchronous read say something precise instead — it is handed the scopes the token really
  * carries, so the message can name what IS granted rather than list every scope that might be the

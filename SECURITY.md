@@ -187,9 +187,18 @@ An action fires against mail that has since changed — or against the search in
 ### 5. Token theft (file at rest)
 A backup, a synced folder, or another machine exposes `token.json`.
 
-- **Optional AES-256-GCM encryption at rest.** Set `MAILWARDEN_TOKEN_PASSPHRASE` and the refresh
-  token is stored encrypted (scrypt-derived key, fresh salt+IV, versioned envelope). A *copy* of the
-  file is then useless without the passphrase. On POSIX the file is also `mode 0o600`.
+- **AES-256-GCM encryption at rest, by default.** `--auth` stores the refresh token encrypted under
+  a random 256-bit key held in the OS keystore (Windows Credential Manager, macOS Keychain, the Linux
+  Secret Service), one key per token file, fresh IV, versioned envelope. A *copy* of the file is then
+  useless on its own: the key stays with this machine and user. The granted scopes stay readable in
+  the envelope so the tool surface can be built without the key; they are bound into the GCM tag, so
+  an edit fails at the next decryption, and until then can only change which tools are advertised —
+  Google enforces the real grant. On Linux the binding is pinned to the Secret Service, because its
+  fallback, the kernel keyring, does not survive a reboot and would strand the token.
+- **A passphrase where there is no keystore.** `MAILWARDEN_TOKEN_PASSPHRASE` keys the same cipher by
+  scrypt (fresh salt+IV) and takes precedence over the keystore when set. With neither available the
+  token is stored in plaintext as before, and both `--auth` and `--check` say so. On POSIX the file is
+  also `mode 0o600`.
 
 ### 6. Network attacker against the optional HTTP listener
 `--http` is opt-in and hardened:
@@ -374,9 +383,10 @@ the same line: a compromised client or machine is outside what this server can d
 
 Stating these plainly is part of the threat model:
 
-- **Malware running as the same user.** A process with your privileges can read `token.json`, and can
-  read `MAILWARDEN_TOKEN_PASSPHRASE` straight from the environment. At-rest encryption defends against
-  *file copies*, not against local code execution as you.
+- **Malware running as the same user.** A process with your privileges can read `token.json`, can ask
+  the OS keystore for its key exactly as mailwarden does, and can read `MAILWARDEN_TOKEN_PASSPHRASE`
+  straight from the environment. At-rest encryption defends against *file copies*, not against local
+  code execution as you.
 - **A compromised AI client or machine.** `mailwarden` trusts the client it speaks to; if that client
   is malicious it can drive every tool the enabled tiers expose — but *only* those tools, so still no
   send and no hard delete. A compromised **machine** is worse: it holds the token and can call the

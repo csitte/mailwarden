@@ -19,9 +19,14 @@ import {
   readGrantedScopes,
   type ScopeRead,
   tokenFileState,
+  keystoreKeyState,
+  plannedProtection,
   getAuth,
   type CredCheck,
 } from "./auth.js";
+import type { Protection } from "./keystore.js";
+
+type KeyState = Awaited<ReturnType<typeof keystoreKeyState>>;
 import { helpFooter } from "./cli.js";
 import { Gmail } from "./gmail.js";
 import { authScopesForTiers, missingScopes, resolveEnabledTiers, scopeShort, type ToolTier } from "./tiers.js";
@@ -39,9 +44,14 @@ export interface DoctorInputs {
   /** Active account name, or null for the default — so remediation names the right --account. */
   account: string | null;
   cred: CredCheck;
-  tokenState: "missing" | "plaintext" | "encrypted" | "invalid";
+  /** "encrypted" = passphrase envelope, "keystore" = key in the OS keystore. */
+  tokenState: "missing" | "plaintext" | "encrypted" | "keystore" | "invalid";
   /** Whether MAILWARDEN_TOKEN_PASSPHRASE is set (only relevant for an encrypted token). */
   passphraseSet: boolean;
+  /** For a "keystore" token: whether its key is in this machine's keystore. */
+  keystoreKey?: KeyState;
+  /** How the next `--auth` would store the token — names the right fix for a plaintext one. */
+  protection?: Protection;
   /** Granted scopes, or the reason they could not be read (see auth.ScopeRead). */
   grantedScopes: ScopeRead;
   enabledTiers: Set<ToolTier>;
@@ -94,15 +104,41 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
             },
       );
       break;
-    case "plaintext":
+    case "keystore": {
+      const k = i.keystoreKey;
+      checks.push(
+        k?.state === "present"
+          ? { name: "Token", status: "ok", detail: "Encrypted at rest (AES-256-GCM); key in the OS keystore." }
+          : {
+              name: "Token",
+              status: "fail",
+              detail:
+                k?.state === "missing"
+                  ? "Encrypted with a key that is not in this machine's OS keystore — it was removed, or the " +
+                    `file was copied from another machine or user. Re-run \`${authCmd}\` on this machine.`
+                  : k?.state === "error"
+                    ? `Could not read its key from the OS keystore (${k.reason}). If the keystore is locked, unlock it and re-run \`--check\`.`
+                    : `Encrypted with a key in the OS keystore, but ${k && "reason" in k ? k.reason : "the keystore was not checked"}. ` +
+                      `Re-run \`${authCmd}\` on this machine.`,
+            },
+      );
+      break;
+    }
+    case "plaintext": {
+      const p = i.protection;
       checks.push({
         name: "Token",
         status: i.passphraseSet ? "warn" : "ok",
         detail: i.passphraseSet
           ? `Stored in plaintext while a passphrase is set — re-run \`${authCmd}\` to encrypt it at rest.`
-          : `Present (plaintext). Set MAILWARDEN_TOKEN_PASSPHRASE + re-run \`${authCmd}\` to encrypt at rest (optional).`,
+          : p?.kind === "keystore"
+            ? `Present (plaintext). Re-run \`${authCmd}\` to encrypt it at rest with a key in the OS keystore (optional).`
+            : p?.kind === "plaintext" && p.why === "unavailable"
+              ? `Present (plaintext). No OS keystore here (${p.detail}) — set MAILWARDEN_TOKEN_PASSPHRASE + re-run \`${authCmd}\` to encrypt at rest (optional).`
+              : `Present (plaintext). Set MAILWARDEN_TOKEN_PASSPHRASE + re-run \`${authCmd}\` to encrypt at rest (optional).`,
       });
       break;
+    }
   }
 
   // 3. Granted scopes vs. what the enabled tiers need.
@@ -122,7 +158,7 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
         detail:
           `${need} Recorded inside the encrypted token, which cannot be read without ` +
           "MAILWARDEN_TOKEN_PASSPHRASE — set it and re-run `--check`. " +
-          "(Do NOT re-run `--auth` without it: that would replace the encrypted token with a plaintext one.)",
+          "(Do NOT re-run `--auth` without it: that would replace the token with one your passphrase no longer protects.)",
       });
     } else if (reason === "bad-key") {
       checks.push({
@@ -205,8 +241,13 @@ export function classifyCredRead(
 export function shouldLiveCheck(
   tokenState: DoctorInputs["tokenState"],
   passphraseSet: boolean,
+  keystoreKey?: KeyState,
 ): boolean {
-  return tokenState === "plaintext" || (tokenState === "encrypted" && passphraseSet);
+  return (
+    tokenState === "plaintext" ||
+    (tokenState === "encrypted" && passphraseSet) ||
+    (tokenState === "keystore" && keystoreKey?.state === "present")
+  );
 }
 
 /** Worst status present, which maps to the process exit code (fail → 1). */
@@ -250,8 +291,19 @@ export async function runDoctor(): Promise<number> {
     cred = classifyCredRead({ ok: false, code: (err as NodeJS.ErrnoException).code }, CRED_PATH);
   }
 
-  const tokenState = tokenFileState();
+  const file = tokenFileState();
+  const tokenState = file.state;
   const passphraseSet = Boolean(process.env.MAILWARDEN_TOKEN_PASSPHRASE);
+  const keystoreKey = file.state === "keystore" ? await keystoreKeyState(file.keyId) : undefined;
+  // A bad MAILWARDEN_KEYSTORE would fail the next --auth; report it here whatever the token state.
+  let protection: Protection;
+  try {
+    protection = await plannedProtection();
+  } catch (err) {
+    console.error(`  ✗ Keystore: ${err instanceof Error ? err.message : String(err)}`);
+    console.error("\n✗ Setup has problems — fix MAILWARDEN_KEYSTORE and re-run.");
+    return 1;
+  }
 
   // A bad MAILWARDEN_TOOLS is a misconfiguration --check should *explain*, not crash on.
   let enabledTiers: Set<ToolTier>;
@@ -266,7 +318,7 @@ export async function runDoctor(): Promise<number> {
 
   // Live smoke test — only when the token is plausibly usable (see shouldLiveCheck).
   let profile: DoctorInputs["profile"] = null;
-  if (shouldLiveCheck(tokenState, passphraseSet)) {
+  if (shouldLiveCheck(tokenState, passphraseSet, keystoreKey)) {
     try {
       const { emailAddress } = await new Gmail(await getAuth(false)).getProfile();
       profile = { ok: true, email: emailAddress };
@@ -282,6 +334,8 @@ export async function runDoctor(): Promise<number> {
     cred,
     tokenState,
     passphraseSet,
+    keystoreKey,
+    protection,
     grantedScopes: await readGrantedScopes(),
     enabledTiers,
     requiredScopes,

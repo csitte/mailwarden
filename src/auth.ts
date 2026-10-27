@@ -9,6 +9,19 @@ import path from "node:path";
 import os from "node:os";
 import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
 import { CliError, ToolError } from "./cli.js";
+import {
+  ENC_TYPE,
+  chooseProtection,
+  isKeystoreEnvelope,
+  keyEntryName,
+  KEYSTORE_SERVICE,
+  newKey,
+  openWithKey,
+  parseKeystoreSetting,
+  sealWithKey,
+  type KeystoreEnvelope,
+} from "./keystore.js";
+import { openKeyStore } from "./keystore-io.js";
 // gmail.ts does not import this module, so this stays acyclic. The invalid_grant test lives there
 // because that is where it is normally raised (the API layer), and the overwrite guard needs the
 // same judgement: a token Google rejects is dead, a token that merely timed out is not.
@@ -92,16 +105,17 @@ export function discoverAccounts(): string[] {
 }
 
 /**
- * Optional at-rest encryption of token.json.
+ * At-rest encryption of token.json.
  *
  * token.json holds a refresh token + client secret (scope `gmail.modify`). On disk it is protected
- * only by `mode 0o600`, which is a no-op on Windows. Setting `MAILWARDEN_TOKEN_PASSPHRASE` to a passphrase
- * turns on AES-256-GCM encryption keyed by scrypt, so a *copy* of the file (a backup, a synced
- * folder, another machine) is useless without the passphrase. It does NOT defend against malware
- * running as the same user — that process can read the passphrase from the environment too. Opt-in,
- * mirroring the `--http` / `MAILWARDEN_TOKEN` pattern; unset means today's plaintext behavior.
+ * only by `mode 0o600`, which is a no-op on Windows. By default a new token is encrypted with
+ * AES-256-GCM under a random key kept in the OS keystore (envelope `v: 2`, see keystore.ts). Setting
+ * `MAILWARDEN_TOKEN_PASSPHRASE` instead keys the same cipher by scrypt from a passphrase (`v: 1`,
+ * below) — the choice for a host without a keystore. Either way a *copy* of the file (a backup, a
+ * synced folder, another machine) is useless on its own. Neither defends against malware running as
+ * the same user — that process can query the keystore, or read the passphrase from the environment.
+ * Where no keystore is reachable and no passphrase is set, the token is stored in plaintext as before.
  */
-const ENC_TYPE = "mailwarden-encrypted";
 // These scrypt parameters are pinned to envelope `v: 1`. They are NOT stored in the file, so the
 // same values must derive the key on read. If you ever change them, bump `v` and branch on the
 // stored version when decrypting — otherwise every existing token.json becomes undecryptable
@@ -119,8 +133,50 @@ interface EncryptedToken {
   ciphertext: string; // base64
 }
 
+/**
+ * The passphrase envelope (`v: 1`). Anything else carrying our type is treated as one too, so an
+ * unknown future version fails as "cannot decrypt" rather than being read as a plaintext token.
+ * Callers test `isKeystoreEnvelope` first.
+ */
 function isEncrypted(o: unknown): o is EncryptedToken {
-  return typeof o === "object" && o !== null && (o as { type?: unknown }).type === ENC_TYPE;
+  return typeof o === "object" && o !== null && (o as { type?: unknown }).type === ENC_TYPE && !isKeystoreEnvelope(o);
+}
+
+/**
+ * Decrypt a keystore envelope with its key from the OS keystore. Throws a CliError naming the
+ * actual cause: no keystore here, a key that is gone (removed, or the file was copied from another
+ * machine or user), or a key that does not open the file.
+ */
+async function unlockKeystoreToken(env: KeystoreEnvelope, tp: string): Promise<string> {
+  const reauth = "Re-run `mailwarden --auth` on this machine to store a fresh token.";
+  // The id comes from a file anyone with write access could edit: reject it before it names an
+  // entry, so an edited file cannot point mailwarden at another application's credential.
+  const entry = keyEntryName(env.keyId);
+  const opened = await openKeyStore();
+  if (!opened.ok) {
+    throw new CliError(`${tp} is encrypted with a key in the OS keystore, but ${opened.reason}. ${reauth}`);
+  }
+  let key: Buffer | null;
+  try {
+    key = await opened.store.get(env.keyId);
+  } catch (err) {
+    throw new CliError(
+      `Could not read the key for ${tp} from the OS keystore (${err instanceof Error ? err.message : String(err)}). ` +
+        "If the keystore is locked, unlock it and retry.",
+    );
+  }
+  if (!key) {
+    throw new CliError(
+      `${tp} is encrypted with a key that is not in this machine's OS keystore ` +
+        `(${KEYSTORE_SERVICE} / ${entry}) — it was removed, or the file was copied ` +
+        `from another machine or user. ${reauth}`,
+    );
+  }
+  try {
+    return openWithKey(env, key);
+  } catch {
+    throw new CliError(`Could not decrypt ${tp} with its key from the OS keystore — the file is corrupted or was edited. ${reauth}`);
+  }
 }
 
 function deriveKey(passphrase: string, salt: Buffer): Buffer {
@@ -161,14 +217,16 @@ export function decryptToken(enc: EncryptedToken, passphrase: string): string {
 
 /**
  * The scopes recorded in token.json, or null when unknown — no token yet, an older
- * token written before scopes were recorded, or an encrypted token (whose scope lives
- * inside the ciphertext; we deliberately don't decrypt synchronously at registration).
+ * token written before scopes were recorded, or a passphrase-encrypted token (whose scope lives
+ * inside the ciphertext; we deliberately don't decrypt synchronously at registration). A keystore
+ * envelope carries its scope in the clear for exactly this reason (see keystore.ts).
  * Synchronous + network-free by design: it runs while the tool surface is being built.
  */
 export function persistedScopes(): string[] | null {
   try {
     const parsed: unknown = JSON.parse(readFileSync(tokenPath(), "utf8"));
-    if (isEncrypted(parsed)) return null; // encrypted → scope not readable without the key
+    if (isKeystoreEnvelope(parsed)) return scopesOf(parsed);
+    if (isEncrypted(parsed)) return null; // passphrase envelope → scope not readable without the key
     return scopesOf(parsed);
   } catch {
     return null; // missing / unreadable / not JSON
@@ -204,6 +262,11 @@ export async function readGrantedScopes(): Promise<ScopeRead> {
   } catch (err) {
     return { known: false, reason: (err as NodeJS.ErrnoException).code === "ENOENT" ? "no-token" : "unreadable" };
   }
+  if (isKeystoreEnvelope(parsed)) {
+    // In the clear and authenticated at decryption — no keystore access needed to report it.
+    const scopes = scopesOf(parsed);
+    return scopes ? { known: true, scopes } : { known: false, reason: "unrecorded" };
+  }
   if (isEncrypted(parsed)) {
     const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
     if (!key) return { known: false, reason: "locked" };
@@ -219,21 +282,56 @@ export async function readGrantedScopes(): Promise<ScopeRead> {
 
 /**
  * The on-disk state of token.json, for the `--check` doctor: whether it exists and,
- * if so, whether it is a plaintext or an encrypted envelope. "invalid" = present but
- * not JSON. Synchronous + network-free; does not attempt to decrypt.
+ * if so, whether it is plaintext, a passphrase envelope ("encrypted") or a keystore envelope
+ * ("keystore", with the key id the doctor looks up). "invalid" = present but not JSON.
+ * Synchronous + network-free; does not attempt to decrypt.
  */
-export function tokenFileState(): "missing" | "plaintext" | "encrypted" | "invalid" {
+export type TokenFileState =
+  | { state: "missing" | "plaintext" | "encrypted" | "invalid" }
+  | { state: "keystore"; keyId: string };
+
+export function tokenFileState(): TokenFileState {
   let raw: string;
   try {
     raw = readFileSync(tokenPath(), "utf8");
   } catch {
-    return "missing";
+    return { state: "missing" };
   }
+  let parsed: unknown;
   try {
-    return isEncrypted(JSON.parse(raw)) ? "encrypted" : "plaintext";
+    parsed = JSON.parse(raw);
   } catch {
-    return "invalid";
+    return { state: "invalid" };
   }
+  if (isKeystoreEnvelope(parsed)) return { state: "keystore", keyId: parsed.keyId };
+  return { state: isEncrypted(parsed) ? "encrypted" : "plaintext" };
+}
+
+/**
+ * Whether the keystore key of a keystore-encrypted token is there, for `--check`. Never throws.
+ * "unavailable" = no keystore on this machine; "missing" = keystore present, key not in it.
+ */
+export async function keystoreKeyState(
+  keyId: string,
+): Promise<{ state: "present" | "missing" } | { state: "unavailable" | "error"; reason: string }> {
+  const opened = await openKeyStore();
+  if (!opened.ok) return { state: "unavailable", reason: opened.reason };
+  try {
+    return { state: (await opened.store.get(keyId)) ? "present" : "missing" };
+  } catch (err) {
+    return { state: "error", reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * How the NEXT `--auth` would protect the token, for `--check`. Opens the keystore only when the
+ * setting allows it to be used, so `MAILWARDEN_KEYSTORE=off` never loads native code.
+ */
+export async function plannedProtection(env: NodeJS.ProcessEnv = process.env) {
+  const setting = parseKeystoreSetting(env.MAILWARDEN_KEYSTORE);
+  const passphraseSet = Boolean(env.MAILWARDEN_TOKEN_PASSPHRASE);
+  const store = passphraseSet || setting === "off" ? { ok: false as const, reason: "not consulted" } : await openKeyStore();
+  return chooseProtection({ passphraseSet, setting, store });
 }
 
 /**
@@ -266,7 +364,16 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
     return null; // missing or malformed → treated as "not authorized"
   }
 
-  if (isEncrypted(parsed)) {
+  if (isKeystoreEnvelope(parsed)) {
+    // Same rule as the passphrase branch below: only a genuine unlock failure throws; a payload
+    // that decrypts but is not JSON reads as "not authorized".
+    const decrypted = await unlockKeystoreToken(parsed, tp);
+    try {
+      parsed = JSON.parse(decrypted);
+    } catch {
+      return null;
+    }
+  } else if (isEncrypted(parsed)) {
     // An encrypted token is unusable without the key: distinguish a wrong/missing key from
     // "not authorized" so the user fixes the passphrase instead of pointlessly re-running --auth.
     const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
@@ -430,13 +537,79 @@ async function persistToken(
     null,
     2,
   );
-  // Encrypt at rest when a passphrase is configured; otherwise store as before. The 0o600 mode
-  // still applies to the encrypted file (defense in depth on POSIX; no-op on Windows, which is
-  // exactly the gap MAILWARDEN_TOKEN_PASSPHRASE closes for file copies).
-  const key = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
-  const contents = key ? JSON.stringify(encryptToken(payload, key), null, 2) : payload;
-  await fs.writeFile(tokenPath(account), contents, { mode: 0o600 });
-  if (key) console.error("mailwarden: token stored encrypted at rest (MAILWARDEN_TOKEN_PASSPHRASE).");
+  // Encrypt at rest (see chooseProtection for the order). The 0o600 mode still applies to the
+  // encrypted file (defense in depth on POSIX; no-op on Windows, which is exactly the gap the
+  // encryption closes for file copies).
+  const file = tokenPath(account);
+  const passphrase = process.env.MAILWARDEN_TOKEN_PASSPHRASE;
+  const setting = parseKeystoreSetting(process.env.MAILWARDEN_KEYSTORE);
+  const opened = passphrase || setting === "off" ? null : await openKeyStore();
+  const protection = chooseProtection({
+    passphraseSet: Boolean(passphrase),
+    setting,
+    store: opened ?? { ok: false, reason: "not consulted" },
+  });
+  // The key the file in place was sealed with, removed once the new file is down — re-authorizing
+  // would otherwise leave one orphaned keystore entry behind each time.
+  const previousKeyId = await keyIdOf(file);
+
+  if (protection.kind === "passphrase") {
+    await fs.writeFile(file, JSON.stringify(encryptToken(payload, passphrase!), null, 2), { mode: 0o600 });
+    console.error("mailwarden: token stored encrypted at rest (MAILWARDEN_TOKEN_PASSPHRASE).");
+  } else if (protection.kind === "keystore" && opened?.ok) {
+    const { keyId, key } = newKey();
+    let stored = false;
+    try {
+      await opened.store.set(keyId, key);
+      stored = true;
+    } catch (err) {
+      // A keystore that is present but refuses the write (locked, denied) must not cost the user the
+      // consent they just gave: store as before and say why.
+      console.error(
+        `mailwarden: could not store a key in the OS keystore (${err instanceof Error ? err.message : String(err)}) — ` +
+          "token stored in plaintext. Set MAILWARDEN_TOKEN_PASSPHRASE to encrypt it instead.",
+      );
+    }
+    if (stored) {
+      try {
+        await fs.writeFile(file, JSON.stringify(sealWithKey(payload, key, keyId, client.credentials.scope ?? undefined), null, 2), {
+          mode: 0o600,
+        });
+      } catch (err) {
+        await opened.store.delete(keyId).catch(() => false);
+        throw err;
+      }
+      console.error("mailwarden: token stored encrypted at rest (key in the OS keystore).");
+    } else {
+      await fs.writeFile(file, payload, { mode: 0o600 });
+    }
+  } else {
+    await fs.writeFile(file, payload, { mode: 0o600 });
+    if (protection.kind === "plaintext" && protection.why === "unavailable") {
+      console.error(
+        `mailwarden: token stored in plaintext — ${protection.detail}. ` +
+          "Set MAILWARDEN_TOKEN_PASSPHRASE to encrypt it at rest.",
+      );
+    }
+  }
+
+  if (previousKeyId) {
+    const current = await keyIdOf(file);
+    if (current !== previousKeyId) {
+      const store = opened ?? (await openKeyStore());
+      if (store.ok) await store.store.delete(previousKeyId).catch(() => false);
+    }
+  }
+}
+
+/** The keystore key id of the token file at `file`, or null (absent, plaintext, passphrase). */
+async function keyIdOf(file: string): Promise<string | null> {
+  try {
+    const parsed: unknown = JSON.parse(await fs.readFile(file, "utf8"));
+    return isKeystoreEnvelope(parsed) ? parsed.keyId : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Gmail addresses are case-insensitive in practice; compare them that way. */
@@ -533,6 +706,15 @@ async function identifyStoredToken(): Promise<{ exists: boolean; email: string |
     // identified — reported as such rather than as absent, which would wave the write through.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") return { exists: false, email: null, dead: false };
     return { exists: true, email: null, dead: false };
+  }
+  if (isKeystoreEnvelope(parsed)) {
+    // The address is inside the ciphertext. A key that is gone leaves the file unidentifiable,
+    // which the verdict treats as a mismatch — the same as any other token it cannot read.
+    try {
+      parsed = JSON.parse(await unlockKeystoreToken(parsed, tokenPath()));
+    } catch {
+      return { exists: true, email: null, dead: false };
+    }
   }
   const recorded = (parsed as { email?: unknown } | null)?.email;
   if (typeof recorded === "string" && recorded.trim()) return { exists: true, email: recorded.trim(), dead: false };

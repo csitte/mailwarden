@@ -33,7 +33,7 @@ const VERSION: string = createRequire(import.meta.url)("../package.json").versio
  * return while the server is listening, so there is no "after" there to fire from.
  *
  * Registration cannot do this. `hasFilterScope()` reads the token synchronously and never decrypts,
- * so it returns `undefined` for every encrypted deployment — which then advertises its full tier
+ * so it returns `undefined` for every passphrase-encrypted deployment — which then advertises its full tier
  * surface and discovers the gap only when Google refuses a call. This read is asynchronous and can
  * decrypt, so it sees what the token really carries and can say so in advance.
  *

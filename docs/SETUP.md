@@ -135,12 +135,14 @@ approve the `gmail.modify` and `gmail.settings.basic` scopes, and the terminal p
 the refresh token in `~/.mailwarden/token.json` (mode `0600`) — that's the only local state
 it keeps, and you never have to do this again on this machine.
 
-> **Optional — encrypt the token at rest.** `mode 0600` is a no-op on Windows, so on that
-> platform (or if `token.json` might end up in a backup or synced folder) set a passphrase
-> before authorizing: `MAILWARDEN_TOKEN_PASSPHRASE=<your-passphrase>`. The token is then stored
-> AES-256-GCM-encrypted, and a copy of the file is useless without the passphrase. The server
-> needs the same `MAILWARDEN_TOKEN_PASSPHRASE` set at runtime to read it. This guards against a stolen
-> *file*, not against malware running as your own user. See *Security & privacy* in the README.
+> **The token is encrypted at rest.** `--auth` stores it AES-256-GCM-encrypted under a key it
+> keeps in your OS keystore (Windows Credential Manager, macOS Keychain, the Secret Service on
+> Linux); the success line says `key in the OS keystore`. Nothing to set up. Where no keystore is
+> reachable — typically a Linux server without a desktop session — `--auth` says so and stores the
+> token in plaintext; set a passphrase before authorizing there,
+> `MAILWARDEN_TOKEN_PASSPHRASE=<your-passphrase>`, and the server needs the same variable at runtime.
+> This guards against a stolen *file*, not against malware running as your own user. See
+> *Security & privacy* in the README.
 
 > **Optional — a second Gmail account.** Authorize it under a name of its own:
 > `npx -y mailwarden --auth --account work`. That stores `~/.mailwarden/token.work.json` instead of
@@ -207,10 +209,12 @@ or a connection that closed at once, and nothing that said why. Four facts cover
 
 - **The authorization does not travel.** `credentials.json` and `token.json` live in
   `~/.mailwarden/` on the machine that ran `--auth`; a clone, a synced project folder or a
-  dotfiles repo does not carry them. Run `npx -y mailwarden --auth` on the new machine. If you
-  copy the directory instead (USB stick, file share), set `MAILWARDEN_TOKEN_PASSPHRASE` and
-  re-run `--auth` on the *source* first, so what leaves the machine is encrypted: a plaintext
-  `token.json` is the mailbox, for whoever holds the copy.
+  dotfiles repo does not carry them. Run `npx -y mailwarden --auth` on the new machine. A token
+  encrypted with a keystore key does not work on another machine at all — the key stays behind,
+  which is the point — and `--check` there says so. If you copy the directory instead (USB stick,
+  file share), set `MAILWARDEN_TOKEN_PASSPHRASE` and re-run `--auth` on the *source* first, so what
+  leaves the machine is encrypted with something you can bring along: a plaintext `token.json` is
+  the mailbox, for whoever holds the copy.
 - **A project-level `.mcp.json` in a synced folder must not name an absolute path.** A folder on
   Google Drive or OneDrive is the same folder on both machines, but `D:/gitwork/mailwarden/dist/
   index.js` exists on one of them; on the other, the server is registered and dies on start
@@ -278,6 +282,15 @@ environment your MCP client launches mailwarden from (or your shell/service defi
 never meant to encrypt the token, just run `--auth` again *without* the variable set and it'll be
 stored in plaintext.
 
+### "token.json is encrypted with a key that is not in this machine's OS keystore"
+
+The token was stored under a key in the OS keystore, and that key is not here: the file was copied
+from another machine or user account, or the entry (`mailwarden` / `token-key-…`) was removed from
+the keystore. The key cannot be recovered from the file. Run `--auth` again on this machine (with
+the matching `--account <name>` for a named account). A variant says *no OS keystore reachable*
+instead: on Linux the Secret Service is not running or not unlocked in this session — start or
+unlock it, or authorize again with `MAILWARDEN_TOKEN_PASSPHRASE` set.
+
 ### "Could not decrypt token.json — MAILWARDEN_TOKEN_PASSPHRASE is wrong or the file is corrupted"
 
 The passphrase in the environment doesn't match the one the token was encrypted with (or the file
@@ -311,8 +324,9 @@ you in up to three places, and which ones you get depends on what it can read ab
   `MAILWARDEN_TOKEN_PASSPHRASE` is set, so it works for an encrypted token too.
 - **The filter tools are hidden** (also with a stderr hint) when the token is *known* to lack
   `gmail.settings.basic`. That check runs while the tool surface is being built, which is
-  synchronous and cannot decrypt — so **an encrypted token keeps its filter tools on display**, and
-  the startup warning above is what tells you they will not work.
+  synchronous and cannot decrypt — so **a passphrase-encrypted token keeps its filter tools on
+  display**, and the startup warning above is what tells you they will not work. A token encrypted
+  with a keystore key carries its scopes readably, so this check works for it.
 - **At call time**, a failure with code `insufficient_scope` whose message names the same gap. This
   is the only one an assistant sees, since stderr does not reach it.
 
