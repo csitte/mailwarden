@@ -49,8 +49,9 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    as the explicit choice for headless hosts. Plaintext tokens keep loading and are encrypted at the
    next `--auth`, never rewritten silently. What it does not defend against goes into `SECURITY.md`
    as plainly: malware running as the same user can query the keystore too. Built on `main` on
-   27 October 2026 and tried against the Windows Credential Manager; still to be tried on a second
-   machine, and the MCPB bundle question in `CHANGELOG.md` is open, before it ships.
+   27 October 2026 and tried against the Windows Credential Manager; the MCPB bundle carries every
+   declared platform's binding since 28 October. Still to be tried on a second machine before it
+   ships; macOS is untried.
 2. **Drafts, never sending** — decided 25 October 2026, for the release after the keystore one. A
    separate `drafts` tier, off by default, so a deployment that does not enable it still has no
    compose tool at all, and the `read` tier keeps Google's own enforcement. It writes drafts — replies

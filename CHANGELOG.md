@@ -34,8 +34,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Every failure names its cause and fix — no keystore here, a key that is not on this machine (the
     file was copied, or the entry removed), a keystore that is locked, a file that was edited — in the
     server's error and in `--check`, which also says how the next `--auth` would store the token.
-  - Open before release: an MCPB bundle carries the binary of the platform it was built on only, so a
-    bundle built on Windows falls back to plaintext on macOS and Linux.
+  - The MCPB bundle carries the keystore binding for every platform it declares — macOS, Windows and
+    Linux (glibc and musl), each on x64 and arm64. `npm ci` installs the build machine's binary only,
+    so `npm run mcpb` adds the others from the lockfile's pinned URLs, checks each against its
+    integrity hash, and fails when a declared platform has none. Without that, a bundle built on
+    Windows could not have read a keystore-encrypted token on a Mac — the token `npx -y mailwarden
+    --auth` writes there. The bundle grows from about 5 to about 12 MiB.
 
 ## [0.24.0] - 2026-10-27
 

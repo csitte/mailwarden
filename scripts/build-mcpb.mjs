@@ -22,6 +22,12 @@
  * CI, on the release machine and next month. The server itself is untouched: the manifest starts
  * `dist/index.js` the way `npx mailwarden` would.
  *
+ * One addition to that tree: `npm ci` installs the OS-keystore binding (`@napi-rs/keyring`) for the
+ * build machine only, and a bundle is one file for every platform the manifest declares. So the
+ * other platforms' binding packages are fetched from the lockfile's `resolved` URLs, checked against
+ * its `integrity` hashes and unpacked next to it — without them the bundle would store the token in
+ * plaintext on every platform but the one it was built on. Which packages: scripts/lib/mcpb-bindings.mjs.
+ *
  * Version discipline: the bundle version is package.json's ONLY when HEAD is exactly the tag
  * `v<version>` with a clean tree (or the CI checkout of that tag). Anything else is a development
  * build and is versioned `<version>-dev.<sha>[.dirty]` — in the manifest AND the file name — so a
@@ -37,17 +43,20 @@
  *   4. `mcpb validate` accepts the strict manifest; the loose schema accepts the Smithery one;
  *   5. both bundles stay under Smithery's 25 MiB limit;
  *   6. both UNPACKED bundles boot — `mcpb pack` drops files by pattern (`*.d.ts`, `*.map`, …), and
- *      this is the check that nothing it dropped was needed at runtime; the read tier still gates.
+ *      this is the check that nothing it dropped was needed at runtime; the read tier still gates;
+ *   7. both bundles carry a keystore binary for every declared platform on x64 and arm64.
  *
  * Usage: `npm run mcpb` (from the repo root). Exits non-zero on the first failed check.
  */
 import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
-import { mkdtempSync, rmSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, rmSync, mkdirSync, readdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { zipSync } from "fflate";
+import { bindingPackages, parseIntegrity, uncoveredTargets } from "./lib/mcpb-bindings.mjs";
 import { mcpSession } from "./lib/mcp-session.mjs";
 import { npm, run } from "./lib/run.mjs";
 
@@ -113,8 +122,53 @@ function zipLikeMcpb(dir, outFile) {
   writeFileSync(outFile, zipSync(entries, { level: 9, mtime: new Date() }));
 }
 
+/** The package's directory under `root`, if it holds the expected version and a native binary. */
+function bindingPresent(root, pkg) {
+  const dir = path.join(root, "node_modules", ...pkg.name.split("/"));
+  const manifestFile = path.join(dir, "package.json");
+  if (!existsSync(manifestFile)) return false;
+  if (JSON.parse(readFileSync(manifestFile, "utf8")).version !== pkg.version) return false;
+  return readdirSync(dir).some((f) => f.endsWith(".node"));
+}
+
+/**
+ * Fetch each binding package the build machine's `npm ci` left out, exactly as the lockfile pins it,
+ * and unpack it into the staged tree. A hash mismatch is fatal: the bytes are a native library that
+ * the server loads into its own process.
+ */
+async function addBindings(stage, work, packages) {
+  const tarballs = path.join(work, "bindings");
+  mkdirSync(tarballs, { recursive: true });
+  for (const pkg of packages) {
+    if (bindingPresent(stage, pkg)) {
+      console.log(`  · ${pkg.name} — installed by npm ci`);
+      continue;
+    }
+    const res = await fetch(pkg.resolved);
+    if (!res.ok) {
+      console.error(`  ✗ ${pkg.name}: GET ${pkg.resolved} answered ${res.status}`);
+      process.exit(1);
+    }
+    const data = Buffer.from(await res.arrayBuffer());
+    const { algorithm, digest } = parseIntegrity(pkg.integrity);
+    const got = createHash(algorithm).update(data).digest("base64");
+    if (got !== digest) {
+      console.error(`  ✗ ${pkg.name}: ${algorithm} ${got} does not match the lockfile's ${digest}`);
+      process.exit(1);
+    }
+    const base = pkg.name.split("/").pop();
+    writeFileSync(path.join(tarballs, `${base}.tgz`), data);
+    const dest = path.join(stage, "node_modules", ...pkg.name.split("/"));
+    mkdirSync(dest, { recursive: true });
+    // Relative paths, as for the package tarball: GNU tar reads a `C:` prefix as a remote host.
+    const rel = path.relative(work, dest).split(path.sep).join("/");
+    run("tar", ["-xzf", `bindings/${base}.tgz`, "-C", rel, "--strip-components=1"], { cwd: work });
+    console.log(`  + ${pkg.name} — ${(data.length / 1024).toFixed(0)} KiB, ${algorithm} verified`);
+  }
+}
+
 /** Unpack a bundle and drive it through the handshake — the artifact check both variants get. */
-async function verifyBundle(label, file, expectedVersion, stagedToolNames, emptyConfig, work) {
+async function verifyBundle(label, file, expectedVersion, stagedToolNames, emptyConfig, work, bindings) {
   console.log(`\n${label}: unpack + MCP handshake`);
   const size = statSync(file).size;
   check(
@@ -139,6 +193,29 @@ async function verifyBundle(label, file, expectedVersion, stagedToolNames, empty
     .map((t) => t.name)
     .filter((t) => ["archive", "trash", "modify_labels", "create_filter", "unsubscribe"].includes(t));
   check("read tier registers no write tools in the bundle", writeTools.length === 0, writeTools.join(",") || "none");
+  const absent = bindings.filter((pkg) => !bindingPresent(unpacked, pkg)).map((pkg) => pkg.name);
+  check(
+    "bundle carries a keystore binary for every declared platform",
+    absent.length === 0,
+    absent.length ? `missing: ${absent.join(", ")}` : `${bindings.length} bindings`,
+  );
+  // The server loads the binding lazily, so the handshake above never touched it. Load it from the
+  // unpacked tree here — on this machine only, which is all a build can prove.
+  const probe = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      `const req = require("node:module").createRequire(process.argv[1]);
+       process.exit(typeof req("@napi-rs/keyring").AsyncEntry === "function" ? 0 : 1);`,
+      path.join(unpacked, "package.json"),
+    ],
+    { encoding: "utf8" },
+  );
+  check(
+    `keystore binding loads from the bundle on ${process.platform}-${process.arch}`,
+    probe.status === 0,
+    probe.status === 0 ? "" : (probe.stderr || "").trim().split(/\r?\n/)[0],
+  );
   return size;
 }
 
@@ -175,6 +252,16 @@ try {
   run("tar", ["-xzf", tarball, "-C", "stage", "--strip-components=1"], { cwd: work });
   copyFileSync(path.join(repoRoot, "package-lock.json"), path.join(stage, "package-lock.json"));
   run(npm, ["ci", "--omit=dev", "--ignore-scripts", "--no-audit", "--no-fund"], { cwd: stage });
+
+  console.log("\nKeystore bindings for every declared platform (from the lockfile):");
+  const platforms = JSON.parse(readFileSync(path.join(repoRoot, "mcpb", "manifest.json"), "utf8")).compatibility.platforms;
+  const lock = JSON.parse(readFileSync(path.join(repoRoot, "package-lock.json"), "utf8"));
+  const bindings = bindingPackages(lock, platforms);
+  const uncovered = uncoveredTargets(bindings, platforms);
+  check("the lockfile has a binding for every declared platform", uncovered.length === 0, uncovered.join(", ") || platforms.join(", "));
+  await addBindings(stage, work, bindings);
+  const unstaged = bindings.filter((pkg) => !bindingPresent(stage, pkg)).map((pkg) => pkg.name);
+  check("every binding is staged with its native binary", unstaged.length === 0, unstaged.join(", ") || `${bindings.length} bindings`);
 
   console.log("\nMCP handshake against the staged tree:");
   const staged = await mcpSession(path.join(stage, "dist", "index.js"), { MAILWARDEN_DIR: emptyConfig });
@@ -235,8 +322,8 @@ try {
   rmSync(smitheryFile, { force: true });
   zipLikeMcpb(stage, smitheryFile);
 
-  const strictSize = await verifyBundle("strict", strictFile, bundleVersion, stagedToolNames, emptyConfig, work);
-  const smitherySize = await verifyBundle("smithery", smitheryFile, bundleVersion, stagedToolNames, emptyConfig, work);
+  const strictSize = await verifyBundle("strict", strictFile, bundleVersion, stagedToolNames, emptyConfig, work, bindings);
+  const smitherySize = await verifyBundle("smithery", smitheryFile, bundleVersion, stagedToolNames, emptyConfig, work, bindings);
   const shippedSmithery = JSON.parse(readFileSync(path.join(work, "unpacked-smithery", "manifest.json"), "utf8"));
   check(
     "Smithery bundle's tools carry inputSchema",

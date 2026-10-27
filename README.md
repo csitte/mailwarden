@@ -595,7 +595,8 @@ Or install the **MCPB bundle** (`mailwarden-<version>.mcpb`, attached to
 [GitHub releases](https://github.com/csitte/mailwarden/releases) from 0.10.0 on) as a Desktop extension — Settings →
 Extensions → *Install extension…* — the same server, self-contained at run time (no `npx`; Claude
 Desktop brings the Node runtime), with the tool tiers as a setting. The bundle is built from the packed
-npm package (same file set as published; `npm run mcpb`, verified in CI: validated, unpacked and booted).
+npm package (same file set as published; `npm run mcpb`, verified in CI: validated, unpacked and booted),
+plus the OS-keystore binding for each platform it declares, pinned and hash-checked by the lockfile.
 The one-time `npx -y mailwarden --auth` still applies
 (Node needed once for that) — the bundle reads the same `~/.mailwarden/` token.
 
