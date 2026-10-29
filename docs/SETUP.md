@@ -54,7 +54,9 @@ still requires it — and one setting here matters more than all the others.
    follow your enabled tool tiers (`MAILWARDEN_TOOLS`, see the README) — the default requests both;
    a `read`-only setup asks only for `gmail.readonly`. Note that `gmail.modify` *is* a scope Gmail
    accepts for sending; mailwarden never does, because it registers no tool that could. If you want
-   that ruled out at Google's end rather than mailwarden's, authorize a `read` deployment.
+   that ruled out at Google's end rather than mailwarden's, authorize a `read` deployment. The opt-in
+   `drafts` tier also needs `gmail.modify` — `read,drafts` therefore does not keep the
+   `gmail.readonly` token of a plain `read` setup.
 5. If the console asks for **test users**, add your own Gmail address.
 6. **Now the important part — publish the app:** on the consent-screen overview, under
    **Publishing status**, click **Publish app** and confirm. The status must read
@@ -343,8 +345,9 @@ you in up to three places, and which ones you get depends on what it can read ab
 A read-only grant likewise can't run the snooze sweep (`--sweep` / `MAILWARDEN_AUTO_SWEEP`), and
 warns at startup. Fix in all cases: run
 `npx -y mailwarden --auth` with the tiers you need enabled — the default (`MAILWARDEN_TOOLS` unset)
-grants `gmail.modify` + `gmail.settings.basic` and covers everything. See the README "Tool tiers"
-section for how tiers map to tools and scopes.
+grants `gmail.modify` + `gmail.settings.basic` and covers every tier, the opt-in `drafts` tier
+included (it needs no scope of its own; it only has to be named in `MAILWARDEN_TOOLS` where the
+server runs). See the README "Tool tiers" section for how tiers map to tools and scopes.
 
 ### Authorized the wrong Google account
 

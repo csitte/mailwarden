@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Drafts, never sending — an opt-in `drafts` tier.** `create_draft` saves a reply (recipients,
+  `Re:` subject and `In-Reply-To`/`References` taken from the message it answers; `replyAll`, extra
+  `cc`/`bcc`) or a new message as a Gmail draft; `update_draft` replaces the text, and optionally the
+  subject or recipients, of a draft it wrote. Nothing is sent: the user sends the draft from Gmail.
+  - **Off unless named** in `MAILWARDEN_TOOLS`; the default stays `read,manage,filters`. The tier
+    needs `gmail.modify` (measured 29 October 2026: Google accepts it for `drafts.create`), so
+    `read,drafts` gives up the `gmail.readonly` token.
+  - **The egress guard is tier-aware.** Without the tier every draft endpoint stays refused, as
+    before. With it, exactly `drafts.create`, `drafts.update` and `drafts.get` pass, on the plain
+    `/gmail/v1` path only; `drafts.send`, `messages.send`, `drafts.delete` (a permanent delete),
+    `drafts.list` and the upload route stay refused.
+  - **Confirmation.** Any address the thread did not already contain — every recipient of a new
+    message, a stranger in `cc`/`bcc`, an address added by an update — is confirmed in the client's
+    dialog whatever `MAILWARDEN_CONFIRM` says, and refused on a client without one. A reply within
+    its thread follows `MAILWARDEN_CONFIRM`.
+  - **Header safety.** Subjects and addresses carrying a line break or control character are
+    refused, recipients are written as bare validated addresses, the body is base64 — no input can
+    add a header line such as a hidden `Bcc:`.
+  - **Only its own drafts.** A draft mailwarden wrote carries the label `MCP/Drafts`, set after
+    saving because Gmail refuses labels in `drafts.create` itself, and set again after every update
+    because Gmail drops it then. `update_draft` refuses any draft without it.
+  - See `SECURITY.md`, threat 10, for what it leaves to the user.
+
+### Changed
+- **No label tool can add `MCP/Drafts`** (`modify_labels`, `bulk_modify`, the thread wrappers,
+  `create_filter`), by name or by id — it is what lets `update_draft` overwrite a draft. Adding a raw
+  `Label_…` id now costs one `labels.list` call to check it.
+
 ## [0.25.0] - 2026-10-28
 
 ### Changed

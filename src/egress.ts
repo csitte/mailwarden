@@ -1,9 +1,10 @@
 /**
  * Egress guard — the last place an outgoing Gmail API call can be stopped.
  *
- * `mailwarden` ships no compose/reply/forward/send tool, and that is the whole
- * security promise. Until now the promise rested on the tool surface alone: no
- * tool exists that would send, so nothing calls `messages.send`. That argument
+ * `mailwarden` ships no reply/forward/send tool, and that is the whole security
+ * promise. (The opt-in `drafts` tier saves drafts; sending one is still refused
+ * here, with the tier on or off.) Until now the promise rested on the tool surface
+ * alone: no tool exists that would send, so nothing calls `messages.send`. That argument
  * is only as good as every future edit to this codebase, and it is *not* backed
  * by the OAuth scope — `gmail.modify` is a scope Google accepts for sending
  * (see SECURITY.md, threat 1). Only the `read` tier is send-proof by scope.
@@ -36,7 +37,13 @@ const OAUTH_HOSTS = new Set(["oauth2.googleapis.com", "accounts.google.com"]);
 /** `/gmail/v1/users/{userId}` — userId is `me` here, but the API accepts an address. */
 const U = "/gmail/v1/users/[^/]+";
 
-type Rule = { method?: string; path: RegExp; what: string };
+type Rule = {
+  method?: string;
+  path: RegExp;
+  what: string;
+  /** Lifted when the `drafts` tier is on — and then only for the plain `/gmail/v1` path, see below. */
+  draftsTier?: true;
+};
 
 /**
  * Never, under any circumstances. Ordered by how bad it would be: mail leaving
@@ -45,7 +52,9 @@ type Rule = { method?: string; path: RegExp; what: string };
  */
 const FORBIDDEN: Rule[] = [
   { path: new RegExp(`^${U}/(messages|drafts)/send$`), what: "sending mail" },
-  { path: new RegExp(`^${U}/drafts(/|$)`), what: "composing mail" },
+  // Shut unless the deployment named the `drafts` tier. Even then only the three calls in
+  // DRAFTS_ALLOWED pass; `drafts.send` stays behind the rule above, which no tier lifts.
+  { path: new RegExp(`^${U}/drafts(/|$)`), what: "composing mail", draftsTier: true },
   { path: new RegExp(`^${U}/messages/(import|insert)$`), what: "planting mail in the mailbox" },
   {
     path: new RegExp(`^${U}/messages/batchDelete$`),
@@ -103,6 +112,23 @@ const ALLOWED: Rule[] = [
 ];
 
 /**
+ * The draft calls the `drafts` tier makes, and only while it is enabled: save, replace, read
+ * one. Not `drafts.list` (nothing needs it), not `drafts.delete` (it deletes for good; a draft
+ * goes to the trash like any message), never `drafts.send`.
+ */
+const DRAFTS_ALLOWED: Rule[] = [
+  { method: "POST", path: new RegExp(`^${U}/drafts$`), what: "create a draft" },
+  { method: "PUT", path: new RegExp(`^${U}/drafts/[^/]+$`), what: "replace a draft" },
+  { method: "GET", path: new RegExp(`^${U}/drafts/[^/]+$`), what: "get a draft" },
+];
+
+/** What the guard is told about the deployment. Default: the narrowest. */
+export interface EgressOptions {
+  /** The `drafts` tier is enabled (`MAILWARDEN_TOOLS` names it). */
+  drafts?: boolean;
+}
+
+/**
  * The path the deny list is matched against.
  *
  * googleapis does not only build `/gmail/v1/...`. Hand a method `media` and the
@@ -128,7 +154,7 @@ function denyPath(pathname: string): string {
  * Pure, so the whole policy is testable without a network or a token: returns
  * `undefined` when the call is allowed, otherwise the reason to refuse it.
  */
-export function checkEgress(method: string, url: string): string | undefined {
+export function checkEgress(method: string, url: string, opts: EgressOptions = {}): string | undefined {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -152,10 +178,13 @@ export function checkEgress(method: string, url: string): string | undefined {
   const deny = denyPath(pathname);
   for (const rule of FORBIDDEN) {
     if (rule.method && rule.method !== verb) continue;
+    // The drafts tier lifts the compose rule for the raw path only. An upload URL normalises
+    // to the same path but is not the same request, so for it the rule still holds.
+    if (rule.draftsTier && opts.drafts && deny === pathname) continue;
     if (rule.path.test(deny)) return rule.what;
   }
 
-  if (allowRuleFor(verb, pathname)) return undefined;
+  if (allowRuleFor(verb, pathname, opts)) return undefined;
 
   return `endpoint outside mailwarden's allowlist (${verb} ${pathname})`;
 }
@@ -168,8 +197,8 @@ export function checkEgress(method: string, url: string): string | undefined {
  * A test that rebuilt the matching would be free to rebuild the deny/allow asymmetry
  * wrongly and then confirm its own mistake.
  */
-export function allowRuleFor(method: string, pathname: string): string | undefined {
-  for (const rule of ALLOWED) {
+export function allowRuleFor(method: string, pathname: string, opts: EgressOptions = {}): string | undefined {
+  for (const rule of opts.drafts ? [...ALLOWED, ...DRAFTS_ALLOWED] : ALLOWED) {
     if (rule.method === method && rule.path.test(pathname)) return rule.what;
   }
   return undefined;
@@ -177,6 +206,9 @@ export function allowRuleFor(method: string, pathname: string): string | undefin
 
 /** Every allowlist entry, by `what`. The list a coverage test holds the guard against. */
 export const ALLOW_RULES: readonly string[] = ALLOWED.map((r) => r.what);
+
+/** The allowlist entries only the `drafts` tier opens, by `what`. */
+export const DRAFTS_ALLOW_RULES: readonly string[] = DRAFTS_ALLOWED.map((r) => r.what);
 
 /** The error a refused call raises — names the endpoint and why it is shut. */
 export function egressRefusal(method: string, url: string, reason: string): Error {
@@ -196,9 +228,9 @@ export type Requester = {
 /**
  * Put the checkpoint in front of a client's `request`. Idempotent: wrapping an
  * already-wrapped client is a no-op, so repeated `getAuth()` calls cannot stack
- * guards on the cached client.
+ * guards on the cached client. `policy` is fixed at the first wrap.
  */
-export function guardEgress<T extends Requester>(client: T): T {
+export function guardEgress<T extends Requester>(client: T, policy: EgressOptions = {}): T {
   const marker = "__mailwardenEgressGuarded";
   const c = client as T & { [marker]?: boolean };
   if (c[marker]) return client;
@@ -207,7 +239,7 @@ export function guardEgress<T extends Requester>(client: T): T {
   client.request = ((opts: { url?: string | URL; method?: string }) => {
     const url = String(opts?.url ?? "");
     const method = opts?.method ?? "GET";
-    const reason = checkEgress(method, url);
+    const reason = checkEgress(method, url, policy);
     if (reason) return Promise.reject(egressRefusal(method, url, reason));
     return original(opts);
   }) as T["request"];

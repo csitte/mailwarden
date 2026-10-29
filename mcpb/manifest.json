@@ -45,7 +45,7 @@
     "tools": {
       "type": "string",
       "title": "Tool tiers",
-      "description": "Comma-separated subset of read, manage, filters. Fewer tiers = fewer tools; set the same value when authorizing (`MAILWARDEN_TOOLS=read npx -y mailwarden --auth`) and the OAuth scope narrows with it (read alone is gmail.readonly, where Google itself enforces no-send). Must not exceed what you authorized.",
+      "description": "Comma-separated subset of read, manage, filters, drafts (drafts is opt-in: it saves drafts, never sends). Fewer tiers = fewer tools; set the same value when authorizing (`MAILWARDEN_TOOLS=read npx -y mailwarden --auth`) and the OAuth scope narrows with it (read alone is gmail.readonly, where Google itself enforces no-send). Must not exceed what you authorized.",
       "default": "read,manage,filters",
       "required": false
     }

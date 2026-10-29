@@ -4,6 +4,8 @@ import {
   missingScopes,
   serverInstructions,
   ALL_TIERS,
+  DEFAULT_TIERS,
+  draftsEnabled,
   GMAIL_READONLY,
   GMAIL_MODIFY,
   GMAIL_SETTINGS_BASIC,
@@ -13,17 +15,10 @@ import {
 const tiers = (...t: ToolTier[]) => new Set(t);
 
 describe("serverInstructions — what a tool-search client reads before it ever lists our tools", () => {
-  // The whole input space: every subset of the three tiers (2^3 = 8), the empty set included.
-  const everyCombo: ToolTier[][] = [
-    [],
-    ["read"],
-    ["manage"],
-    ["filters"],
-    ["read", "manage"],
-    ["read", "filters"],
-    ["manage", "filters"],
-    [...ALL_TIERS],
-  ];
+  // The whole input space: every subset of the four tiers (2^4 = 16), the empty set included.
+  const everyCombo: ToolTier[][] = Array.from({ length: 1 << ALL_TIERS.length }, (_, mask) =>
+    ALL_TIERS.filter((_t, i) => mask & (1 << i)),
+  );
 
   it.each(everyCombo.map((c) => [c.join("+") || "(none)", c] as const))(
     "tiers %s: under 2 KB in BYTES (the text has non-ASCII dashes) and in characters",
@@ -43,16 +38,29 @@ describe("serverInstructions — what a tool-search client reads before it ever 
       expect(/Gmail filters/.test(s)).toBe(c.includes("filters"));
       expect(/get_profile/.test(s)).toBe(c.includes("read"));
       expect(/search and read mail/.test(s)).toBe(c.includes("read"));
+      expect(/draft/i.test(s)).toBe(c.includes("drafts"));
     },
   );
 
   it("always states the two invariants an agent must know: no send, no permanent delete", () => {
-    for (const t of [tiers(), tiers("read"), tiers(...ALL_TIERS)]) {
+    for (const t of [tiers(), tiers("read"), tiers(...DEFAULT_TIERS)]) {
       const s = serverInstructions(t);
       expect(s).toMatch(/NO compose\/reply\/forward\/send tools/);
       expect(s).toMatch(/no permanent delete \(trash only\)/);
       expect(s).toMatch(/nothing is cached/);
     }
+  });
+
+  it("with the drafts tier, says drafts are saved and still that nothing sends", () => {
+    for (const t of [tiers("drafts"), tiers(...ALL_TIERS)]) {
+      const s = serverInstructions(t);
+      expect(s).not.toMatch(/NO compose/);
+      expect(s).toMatch(/nothing here SENDS/);
+      expect(s).toMatch(/no send\/forward tools/);
+      expect(s).toMatch(/no permanent delete \(trash only\)/);
+      expect(s).toMatch(/write reply drafts/);
+    }
+    expect(serverInstructions(tiers(...DEFAULT_TIERS))).not.toMatch(/draft/i);
   });
 
   it("advertises only what the enabled tiers can do — a read-only deployment must not promise snooze", () => {
@@ -91,6 +99,12 @@ describe("authScopesForTiers", () => {
     expect(authScopesForTiers(tiers("manage"))).toEqual([GMAIL_MODIFY]);
   });
 
+  it("needs modify for the drafts tier, also without manage — read+drafts loses gmail.readonly", () => {
+    expect(authScopesForTiers(tiers("read", "drafts"))).toEqual([GMAIL_MODIFY]);
+    expect(authScopesForTiers(tiers("drafts"))).toEqual([GMAIL_MODIFY]);
+    expect(authScopesForTiers(tiers(...ALL_TIERS))).toEqual([GMAIL_MODIFY, GMAIL_SETTINGS_BASIC]);
+  });
+
   it("adds settings.basic only for the filters tier, over a readable base", () => {
     expect(authScopesForTiers(tiers("read", "filters"))).toEqual([GMAIL_READONLY, GMAIL_SETTINGS_BASIC]);
     // filters-only still keeps a base read scope so the post-consent smoke test works
@@ -117,5 +131,22 @@ describe("missingScopes — capability containment, not string equality", () => 
 
   it("is satisfied by an exact grant", () => {
     expect(missingScopes([GMAIL_MODIFY, GMAIL_SETTINGS_BASIC], [GMAIL_MODIFY, GMAIL_SETTINGS_BASIC])).toEqual([]);
+  });
+});
+
+describe("the drafts tier is opt-in only", () => {
+  it("is known but not a default tier", () => {
+    expect(ALL_TIERS).toContain("drafts");
+    expect(DEFAULT_TIERS).not.toContain("drafts");
+  });
+
+  it("draftsEnabled is true only when MAILWARDEN_TOOLS names it, and fails closed", () => {
+    expect(draftsEnabled({})).toBe(false);
+    expect(draftsEnabled({ MAILWARDEN_READONLY: "1" })).toBe(false);
+    expect(draftsEnabled({ MAILWARDEN_TOOLS: "read,manage,filters" })).toBe(false);
+    expect(draftsEnabled({ MAILWARDEN_TOOLS: "read, Drafts" })).toBe(true);
+    // An invalid value stops the server at startup; the egress guard must not read it as "on".
+    expect(draftsEnabled({ MAILWARDEN_TOOLS: "drafts,bogus" })).toBe(false);
+    expect(draftsEnabled({ MAILWARDEN_TOOLS: "" })).toBe(false);
   });
 });

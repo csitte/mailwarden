@@ -4,8 +4,15 @@
  */
 import { CliError } from "./cli.js";
 
-export type ToolTier = "read" | "manage" | "filters";
-export const ALL_TIERS: readonly ToolTier[] = ["read", "manage", "filters"];
+export type ToolTier = "read" | "manage" | "filters" | "drafts";
+/** Every tier `MAILWARDEN_TOOLS` accepts. */
+export const ALL_TIERS: readonly ToolTier[] = ["read", "manage", "filters", "drafts"];
+/**
+ * What a deployment gets without `MAILWARDEN_TOOLS`. `drafts` is not in it and never will be: a
+ * server nobody configured has no tool that writes a message, and the egress guard keeps every
+ * draft endpoint shut for it (src/egress.ts).
+ */
+export const DEFAULT_TIERS: readonly ToolTier[] = ["read", "manage", "filters"];
 
 export const GMAIL_READONLY = "https://www.googleapis.com/auth/gmail.readonly";
 export const GMAIL_MODIFY = "https://www.googleapis.com/auth/gmail.modify";
@@ -13,11 +20,11 @@ export const GMAIL_SETTINGS_BASIC = "https://www.googleapis.com/auth/gmail.setti
 
 /**
  * Which tool tiers to advertise, from the environment:
- *   - `MAILWARDEN_TOOLS` — comma-separated subset of read/manage/filters, authoritative
+ *   - `MAILWARDEN_TOOLS` — comma-separated subset of read/manage/filters/drafts, authoritative
  *     whenever the variable is DEFINED (a defined-but-blank value is an error, not "default",
  *     so a misconfigured `MAILWARDEN_TOOLS=${UNSET}` never silently opens the full surface);
  *   - else `MAILWARDEN_READONLY=1` — the original binary switch, = the `read` tier only;
- *   - else all tiers.
+ *   - else the default tiers (everything but `drafts`, which is only ever named).
  * `read` is the usual base (search/get_thread/…); enabling only manage/filters is allowed
  * but leaves the agent without read tools. Unknown or empty values throw at startup.
  */
@@ -35,19 +42,32 @@ export function resolveEnabledTiers(env: NodeJS.ProcessEnv): Set<ToolTier> {
     return new Set(requested as ToolTier[]);
   }
   if (env.MAILWARDEN_READONLY === "1") return new Set<ToolTier>(["read"]);
-  return new Set(ALL_TIERS);
+  return new Set(DEFAULT_TIERS);
+}
+
+/**
+ * Whether the drafts endpoints may leave this process — for the egress guard, which must not
+ * fail open. A broken `MAILWARDEN_TOOLS` stops the server at startup anyway; here it means no.
+ */
+export function draftsEnabled(env: NodeJS.ProcessEnv): boolean {
+  try {
+    return resolveEnabledTiers(env).has("drafts");
+  } catch {
+    return false;
+  }
 }
 
 /**
  * The minimal OAuth scope set covering the enabled tiers, so `--auth` requests only
  * what the deployment will use:
- *   - `manage` → `gmail.modify` (read+write); otherwise `gmail.readonly` as the base
+ *   - `manage` or `drafts` → `gmail.modify` (read+write; Google accepts it for `drafts.create`,
+ *     measured 29 Oct 2026); otherwise `gmail.readonly` as the base
  *     (also keeps the post-consent getProfile smoke test working for a filters-only grant);
  *   - `filters` → adds `gmail.settings.basic` (no send capability).
  * The default (all tiers) is `[gmail.modify, gmail.settings.basic]` — unchanged from before.
  */
 export function authScopesForTiers(tiers: Set<ToolTier>): string[] {
-  const scopes = [tiers.has("manage") ? GMAIL_MODIFY : GMAIL_READONLY];
+  const scopes = [tiers.has("manage") || tiers.has("drafts") ? GMAIL_MODIFY : GMAIL_READONLY];
   if (tiers.has("filters")) scopes.push(GMAIL_SETTINGS_BASIC);
   return scopes;
 }
@@ -80,19 +100,31 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   if (tiers.has("filters")) {
     jobs.push("list, create and delete server-side Gmail filters (auto-triage rules; label actions only)");
   }
+  if (tiers.has("drafts")) {
+    jobs.push(
+      "write reply drafts and drafts of new messages, and revise drafts it wrote — saved in Gmail's " +
+        "Drafts for the user to review and send; mailwarden itself never sends",
+    );
+  }
   const triggers = ["asks about their Gmail inbox, specific emails, newsletters or what still needs a reply"];
   if (tiers.has("manage")) triggers.push("wants to organize, defer (snooze) or clean up mail");
   if (tiers.has("filters")) triggers.push("wants Gmail to auto-triage incoming mail with rules");
+  if (tiers.has("drafts")) triggers.push("wants a reply or a new message drafted");
   const scope =
     jobs.length === 0
       ? "No tools are enabled in this deployment."
       : `Use these tools whenever the user ${triggers.join(", or ")}. They can: ${jobs.join("; ")}.`;
   const which = tiers.has("read") ? " (call get_profile to confirm which)" : "";
+  const compose = tiers.has("drafts")
+    ? " By design nothing here SENDS: drafts are saved for the user to send from Gmail, and there are no " +
+      "send/forward tools and no permanent delete (trash only); do not look for them."
+    : " By design there are NO compose/reply/forward/send tools and no permanent delete (trash only); do " +
+      "not look for them.";
   return (
     `mailwarden — live Gmail tools for the one account this server is connected to${which}. ` +
     scope +
-    " By design there are NO compose/reply/forward/send tools and no permanent delete (trash only); do " +
-    "not look for them. Every call reads the live mailbox — nothing is cached or synced."
+    compose +
+    " Every call reads the live mailbox — nothing is cached or synced."
   );
 }
 
@@ -114,7 +146,7 @@ export const scopeShort = (s: string): string => s.replace("https://www.googleap
 /** Which tools stop working when a given scope is absent — the half a user actually notices. */
 const SCOPE_COVERS: Record<string, string> = {
   [GMAIL_READONLY]: "reading anything at all (search, get_thread, read_attachment, …)",
-  [GMAIL_MODIFY]: "every write (label, archive, trash, snooze, sweep, bulk_modify)",
+  [GMAIL_MODIFY]: "every write (label, archive, trash, snooze, sweep, bulk_modify, drafts)",
   [GMAIL_SETTINGS_BASIC]: "filter management (list_filters, preview_filter, create_filter, delete_filter)",
 };
 

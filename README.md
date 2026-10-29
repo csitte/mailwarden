@@ -35,8 +35,10 @@ A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — f
 - **Small attack surface.** No send tools (no exfiltration path for prompt-injected mail),
   optional read-only mode, no telemetry, no open ports by default, symlink-safe download fencing,
   injection-fenced output. And no code path that *could* send: every Gmail request passes an egress
-  checkpoint that refuses `messages.send`, every draft endpoint, permanent deletion and forwarding
-  settings, whatever a compromised or careless caller asks for. **One deliberate exception:**
+  checkpoint that refuses `messages.send`, `drafts.send`, permanent deletion and forwarding
+  settings, whatever a compromised or careless caller asks for — and every other draft endpoint too,
+  unless you switch on the opt-in [`drafts` tier](#drafts-opt-in--written-here-sent-by-you), which
+  saves drafts for you to send yourself. **One deliberate exception:**
   `unsubscribe` / `bulk_unsubscribe` (manage tier) contact the opt-out endpoint named in a message's
   own header — the only non-Google host mailwarden ever reaches, and a `read`-tier deployment makes
   no outbound request at all. Details under
@@ -67,7 +69,7 @@ Most Gmail MCP servers cover the same read/label/send surface. Two capabilities 
 | **Unsubscribe** — per-sender overview + RFC 8058 one-click opt-out, no send scope needed | ✅ | — | ⚠️ header shown, no action | — | — | — | — | ⚠️ link shown, no action |
 | **Inbox triage overview** — one call that buckets what is waiting | ✅ sender/label/age + header signals | — | — | ✅ heuristic flags + stats | ⚠️ unread list, no buckets | — | — | ⚠️ sender stats + newsletter list, no buckets |
 | **Server-side filters** — rules that keep triaging with no assistant in the loop | ✅ never forwarding | — | ✅ | — | ✅ previewed; ⚠️ forwarding allowed unless draft-only policy | ✅ never forwarding | — | ✅ never forwarding or trash |
-| **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose at all | ⚠️ draft-only | ❌ sends | ❌ sends | ❌ sends; ⚠️ opt-in draft-only policy | ❌ sends | ❌ sends; ⚠️ per-message approval, in chat by default | ⚠️ draft-only |
+| **No send tools — by design** — a prompt-injected mail has no exfiltration path | ✅ no compose by default; ⚠️ opt-in draft-only tier | ⚠️ draft-only | ❌ sends | ❌ sends | ❌ sends; ⚠️ opt-in draft-only policy | ❌ sends | ❌ sends; ⚠️ per-message approval, in chat by default | ⚠️ draft-only |
 | **Least-privilege tool tiers** — OAuth scopes derived from the tools you enable | ✅ | ⚠️ scope split | ⚠️ `--permissions` narrows scopes per service (cumulative or `+`-union); tiers narrow tools only | — | ⚠️ per-account read/readwrite, at call time | ⚠️ inverse: tools gated by granted scopes | ⚠️ tier per mailbox picks the scopes; writes checked against the grant at call time | — |
 | **Token encryption at rest** | ✅ AES-256-GCM by default, key in the OS keystore; a passphrase where there is none | n/a (hosted) | ⚠️ file mode `0600`; bucket CMEK on GCS | — | — | — | ✅ OS keychain by default; owner-only file by choice | ✅ AES-256-GCM by default, key in the OS keystore |
 | **No vendor cloud — you operate the server** | ✅ | ❌ Google-hosted | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -84,12 +86,14 @@ from one place, a broad server like `taylorwilsdon/google_workspace_mcp` covers 
 will, and the two are not mutually exclusive. Adding both is a reasonable setup, and the reason to is
 the token, not the tool count: a suite server that can send mail holds a credential that can send
 mail, for every mailbox it is pointed at. Giving Gmail to `mailwarden` instead means the mail half of
-your setup has no compose, reply, forward or send tool at all. Where that promise rests differs by
+your setup has no compose, reply, forward or send tool at all — or, with the opt-in `drafts` tier,
+tools that save drafts and none that send them. Where that promise rests differs by
 tier, and the distinction matters: on `read` Google enforces it at the token (`gmail.readonly`,
 which the send endpoints reject), while on `manage` it rests on the tool surface — Gmail *does*
 accept `gmail.modify` for sending, so the scope alone is no guarantee. In both cases [the egress
-guard](#security--privacy) refuses `messages.send` and every draft endpoint in the server itself,
-so an injected message in your inbox has no tool to reach for and no endpoint to reach.
+guard](#security--privacy) refuses `messages.send` and `drafts.send` in the server itself, and every
+other draft endpoint unless the `drafts` tier is on, so an injected message in your inbox has no
+tool to reach for and no endpoint to reach.
 
 Practical shape: point the suite server at the services you want and disable its Gmail tools
 (`--disabled-tools`, or a tier that omits them), and run `mailwarden` alongside for mail. Keep the
@@ -239,6 +243,8 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `preview_filter` | Check a filter before creating it: how many messages its criteria match today (`currentMatches`, from the same index an `applyToExisting` sweep would use), which existing filters have exactly the same criteria (`sameCriteria`) and which share a `from`/`to`/`subject`/`query` value with it (`overlapping`, with the shared fields named), which `addLabels` names would be created, and whether the action trashes every future match. Read-only; same validation as `create_filter` |
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
+| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft. Never sent — you send it from Gmail. A new message, and any address the thread did not already contain, is always confirmed in a client dialog ([details](#drafts-opt-in--written-here-sent-by-you)) |
+| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject or recipients, of a draft `create_draft` wrote; any other draft is refused. A new address is confirmed like one in `create_draft` |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
 alongside the same JSON as fenced text — clients never have to parse prose.
@@ -406,6 +412,35 @@ Not offering an automatable option is reported as `unsubscribed:false` with the 
 error. A `read`-only deployment gets `list_unsubscribe` and `list_subscriptions`, and never makes the
 request at all.
 
+## Drafts (opt-in) — written here, sent by you
+
+The `drafts` tier saves mail as Gmail drafts and does nothing else with it: the draft waits in
+Gmail's Drafts until you open it and press Send. It is **off unless you name it** —
+`MAILWARDEN_TOOLS=read,manage,filters,drafts`, or `read,drafts` for a deployment that only reads
+and drafts — and with it off the server has no tool that writes a message and the egress guard
+refuses every draft endpoint, exactly as before. It needs `gmail.modify`, so `read,drafts` gives up
+the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier enabled.
+
+- **`create_draft`, reply:** pass a `threadId`. The recipients come from the message being answered
+  (`Reply-To`, else `From`; the original `To` when that message is yours; `replyAll` adds the other
+  `To` and `Cc`), the subject becomes `Re: …`, and `In-Reply-To`/`References` keep it in the thread.
+  `cc`/`bcc` add people.
+- **`create_draft`, new message:** omit `threadId`, pass `to` and `subject`.
+- **`update_draft`:** replaces the text of a draft `create_draft` wrote. Such drafts carry the label
+  `MCP/Drafts`; a draft without it is refused, and no label tool can add that label, so a draft you
+  wrote yourself cannot be handed to it.
+- **Who is asked.** Any address the thread did not already contain — every recipient of a new
+  message, a `cc` on a reply that names a stranger, an address added in an update — is confirmed in
+  the client's own dialog (MCP elicitation), whatever `MAILWARDEN_CONFIRM` says, and refused on a
+  client that cannot show one. A reply that stays within its thread follows `MAILWARDEN_CONFIRM`.
+  The dialog lists the recipients first and marks the new ones.
+- **What it does not do.** No sending, no attachments from your disk, no display names (addresses
+  are saved bare), no HTML — plain text only. Drafts are not deleted: Gmail's `drafts.delete`
+  deletes for good and stays refused.
+
+What it leaves to you is stated plainly in [SECURITY.md](SECURITY.md) (threat 10): a draft can carry
+what an injected mail asked for — the protection is you reading it before you press Send.
+
 ## Looking in spam
 
 **A query that does not name a place never sees spam or trash.** Gmail excludes both from any
@@ -450,7 +485,9 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   instruction inside an email has no exfiltration path through this server. `create_filter` follows
   the same rule: it can label, archive, trash, star or mark mail, but **never** creates a *forwarding*
   filter (which would be an exfiltration path). `list_filters` still surfaces any forwarding filter
-  already on the account, so you can spot one. This holds because no such tool exists and none can be
+  already on the account, so you can spot one. The opt-in `drafts` tier does not change this: it
+  saves drafts and has no way to send one — see [Drafts](#drafts-opt-in--written-here-sent-by-you).
+  This holds because no such tool exists and none can be
   registered at runtime; for the stronger variant, where *Google* refuses to send rather than
   mailwarden declining to, see **Read-only mode** below. **Read the promise as narrow, because it
   is:** it closes the route out *through this server*, not the assistant's other routes — a client
@@ -465,8 +502,9 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   [Unsubscribing](#unsubscribing--the-one-outbound-request).
 - **Tool tiers (progressive disclosure + least scope).** `MAILWARDEN_TOOLS` advertises only the tiers
   you name — `read` (the read tools), `manage` (mailbox mutations, snooze, downloads), `filters`
-  (server-side filter CRUD, the only tier whose tools need `gmail.settings.basic`). Default is all
-  three; e.g. `read,manage` gives a full triage surface without filter management. The **OAuth scopes
+  (server-side filter CRUD, the only tier whose tools need `gmail.settings.basic`), and `drafts`
+  (save and revise drafts, never send). Default is `read,manage,filters`; `drafts` is on only when
+  named. E.g. `read,manage` gives a full triage surface without filter management. The **OAuth scopes
   requested at `--auth` are derived from the enabled tiers** — a `read` deployment asks only for
   `gmail.readonly`, and `gmail.settings.basic` is requested only when the `filters` tier is on. And the
   filter tools are **hidden automatically** when the stored token doesn't carry `gmail.settings.basic`
@@ -487,7 +525,8 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   [SECURITY.md](SECURITY.md), threat 1.)
 - **Egress guard.** "Nothing to call" is no longer only a statement about the tool list. Every
   authenticated Gmail request passes one checkpoint that allows exactly the endpoints mailwarden
-  uses and refuses the rest — with `messages.send`, `drafts.*`, `messages.import`/`insert`,
+  uses and refuses the rest — with `messages.send`, `drafts.send`, every other draft endpoint
+  (unless the `drafts` tier opens exactly `drafts.create`, `drafts.update` and `drafts.get`), `messages.import`/`insert`,
   permanent deletion and every non-filter `settings` endpoint named in a deny list checked first, so
   a later edit to the allowlist cannot reopen them by accident — including through the
   `/upload/gmail/v1/...` route Google's client takes when a method is handed `media`. A request whose
@@ -658,8 +697,8 @@ backward compatible.
 
 Two entries are the easy case. Past that, two properties of this design start to matter.
 
-**Each instance brings its own tools.** The tier split is 11 `read` + 16 `manage` + 4 `filters`, so a
-full instance advertises 31 tools and four of them advertise 124. Clients that search their tool
+**Each instance brings its own tools.** The tier split is 11 `read` + 16 `manage` + 4 `filters`
+(+ 2 `drafts`, opt-in), so a default instance advertises 31 tools and four of them advertise 124. Clients that search their tool
 surface on demand absorb that; clients that hold every definition in context do not.
 
 **Several accounts in one client share one model context.** The account boundary binds a *call* to
@@ -722,9 +761,9 @@ those rules come from).
 | `MAILWARDEN_KEYSTORE` | `auto` (default): encrypt a new token under a key in the OS keystore wherever one is reachable. `off`: never store a key in the keystore — a new token is then stored with the passphrase, or in plaintext (re-authorizing over a keystore token still removes its now-unused key). Governs writing only: a token already stored with a keystore key still needs that key |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` and `export_thread` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
-| `MAILWARDEN_CONFIRM` | ask the person at the client before `create_filter`, `unsubscribe` and `bulk_unsubscribe` act, through an MCP elicitation dialog — the answer never passes through the model, so a prompt-injected mail cannot supply it. `ask`: ask where the client supports elicitation, go ahead where it does not. `require`: refuse where it does not. `off` (default): never ask — unattended runs would otherwise fail on a dialog nobody sees. A no is the error `declined_by_user`, and nothing was done. Dry runs are never asked about |
+| `MAILWARDEN_CONFIRM` | ask the person at the client before `create_filter`, `unsubscribe`, `bulk_unsubscribe` and a reply draft within its thread act (a draft to any address the thread did not contain is always asked about), through an MCP elicitation dialog — the answer never passes through the model, so a prompt-injected mail cannot supply it. `ask`: ask where the client supports elicitation, go ahead where it does not. `require`: refuse where it does not. `off` (default): never ask — unattended runs would otherwise fail on a dialog nobody sees. A no is the error `declined_by_user`, and nothing was done. Dry runs are never asked about |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/read_attachment/list_labels/list_snoozed/get_profile/what_changed/triage_digest/follow_ups/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
-| `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters` (default: all). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope |
+| `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters`, `drafts` (default: `read,manage,filters` — `drafts` only when named). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope; `read,drafts` reads and drafts, and needs `gmail.modify` |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |
 | `PORT` | HTTP port (default 8787) |
 | `MAILWARDEN_HOST` | HTTP bind address (default `127.0.0.1`; set e.g. `0.0.0.0` for remote hosting) |

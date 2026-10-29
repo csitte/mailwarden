@@ -6,7 +6,7 @@ covers what is genuinely specific to this project, and trusts you with the rest.
 ## Reporting a bug
 
 Run with `MAILWARDEN_DEBUG=1` and include the full error. Mention your Node version
-(`node -v`, needs ≥ 20), the tier you run (`MAILWARDEN_TOOLS`, default is all), and the client
+(`node -v`, needs ≥ 20), the tier you run (`MAILWARDEN_TOOLS`, default is `read,manage,filters`), and the client
 (Claude Desktop, Claude Code, VS Code, plain HTTP …).
 
 Please redact message ids, subjects and addresses — a bug that only reproduces with your real mail

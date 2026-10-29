@@ -52,7 +52,9 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    27 October 2026 and tried against the Windows Credential Manager; the MCPB bundle carries every
    declared platform's binding since 28 October. Still to be tried on a second machine before it
    ships; macOS is untried.
-2. **Drafts, never sending** — decided 25 October 2026, for the release after the keystore one. A
+2. **Drafts, never sending** — decided 25 October 2026, for the release after the keystore one;
+   built on `main` since 29 October 2026 (`create_draft`, `update_draft`; see `SECURITY.md`,
+   threat 10). A
    separate `drafts` tier, off by default, so a deployment that does not enable it still has no
    compose tool at all, and the `read` tier keeps Google's own enforcement. It writes drafts — replies
    to an existing thread with the recipients derived from that thread, and new messages with

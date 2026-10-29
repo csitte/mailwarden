@@ -188,6 +188,50 @@ describe("egress corpus — every endpoint Gmail documents", () => {
     expect(fallthrough).toEqual([]);
   });
 
+  /**
+   * The `drafts` tier lifts one deny entry for three calls. Run the whole surface again with it on:
+   * exactly those three may change their verdict, and every other dangerous endpoint, in every
+   * spelling, must still be caught by the deny list itself.
+   */
+  const DRAFTS_USED = new Set([
+    "POST /gmail/v1/users/me/drafts",
+    "PUT /gmail/v1/users/me/drafts/X",
+    "GET /gmail/v1/users/me/drafts/X",
+  ]);
+
+  it.each(ENDPOINTS)("with the drafts tier: %s %s (%s)", (method, path, _id) => {
+    const verdict = checkEgress(method, HOST + path, { drafts: true });
+    const key = `${method} ${path}`;
+    if (USED.has(key) || DRAFTS_USED.has(key)) expect(verdict).toBeUndefined();
+    else expect(verdict).toBeDefined();
+  });
+
+  it("with the drafts tier, still knows every other dangerous endpoint by name, in every spelling", () => {
+    const fallthrough: string[] = [];
+    for (const [method, path] of dangerous) {
+      for (const [label, rewrite] of SPELLINGS) {
+        const url = HOST + rewrite(path);
+        const verdict = checkEgress(method, url, { drafts: true });
+        const lifted = DRAFTS_USED.has(`${method} ${path}`) && ["canonical", "query string", "userId as an address"].includes(label);
+        if (lifted) {
+          expect(verdict, `${method} ${url}`).toBeUndefined();
+          continue;
+        }
+        expect(verdict, `${method} ${url}`).toBeDefined();
+        // The lift applies to the raw path only, so a draft path with a trailing slash falls to
+        // the allowlist (a 404 at Google anyway); every spelling Google answers stays on the deny list.
+        if (/allowlist/.test(verdict!) && !["trailing slash"].includes(label) && forbiddenClass(method, path) !== "drafts") {
+          fallthrough.push(`${label}: ${method} ${url} -> ${verdict}`);
+        }
+      }
+    }
+    expect(fallthrough).toEqual([]);
+    // drafts.list and drafts.delete stay refused, by the allowlist now that the deny entry is lifted.
+    expect(checkEgress("GET", HOST + "/gmail/v1/users/me/drafts", { drafts: true })).toMatch(/allowlist/);
+    expect(checkEgress("DELETE", HOST + "/gmail/v1/users/me/drafts/X", { drafts: true })).toMatch(/allowlist/);
+    expect(checkEgress("POST", HOST + "/gmail/v1/users/me/drafts/send", { drafts: true })).toBe("sending mail");
+  });
+
   it("does not let an upload prefix widen the allowlist", () => {
     // The deny list is normalised, the allowlist is not: an upload URL can only
     // ever be refused, never allowed — otherwise stripping the prefix would hand

@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { gmail as gmailApi } from "@googleapis/gmail";
 import { OAuth2Client } from "google-auth-library";
-import { checkEgress, guardEgress, allowRuleFor, ALLOW_RULES } from "../src/egress.js";
+import { checkEgress, guardEgress, allowRuleFor, ALLOW_RULES, DRAFTS_ALLOW_RULES } from "../src/egress.js";
 
 const GMAIL = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -99,10 +99,61 @@ describe("checkEgress — what may leave", () => {
   });
 });
 
+describe("checkEgress — the drafts tier", () => {
+  const on = { drafts: true };
+
+  it("keeps every draft endpoint shut without the tier", () => {
+    for (const [m, p] of [["POST", "/drafts"], ["PUT", "/drafts/r1"], ["GET", "/drafts/r1"], ["GET", "/drafts"]]) {
+      expect(checkEgress(m, `${GMAIL}${p}`), `${m} ${p}`).toBe("composing mail");
+      expect(checkEgress(m, `${GMAIL}${p}`, { drafts: false }), `${m} ${p}`).toBe("composing mail");
+    }
+  });
+
+  it.each([
+    ["POST", "/drafts"],
+    ["PUT", "/drafts/r-9194640850939982755"],
+    ["GET", "/drafts/r1?format=metadata"],
+  ])("opens %s %s with the tier", (m, p) => {
+    expect(checkEgress(m, `${GMAIL}${p}`, on)).toBeUndefined();
+  });
+
+  it.each([
+    ["POST", "/drafts/send", /sending mail/],
+    ["PUT", "/drafts/send", /sending mail/],
+    ["POST", "/messages/send", /sending mail/],
+    ["DELETE", "/drafts/r1", /allowlist/], // drafts.delete deletes for good
+    ["GET", "/drafts", /allowlist/], // drafts.list: nothing needs it
+    ["POST", "/drafts/r1", /allowlist/],
+    ["PATCH", "/drafts/r1", /allowlist/],
+    ["GET", "/drafts/r1/x", /allowlist/],
+    ["POST", "/messages/import", /planting/],
+  ])("still refuses %s %s with the tier", (m, p, why) => {
+    expect(checkEgress(m, `${GMAIL}${p}`, on)).toMatch(why);
+  });
+
+  it("refuses the upload path of drafts.create even with the tier — the lift is for the raw path only", () => {
+    const up = "https://gmail.googleapis.com/upload/gmail/v1/users/me/drafts";
+    expect(checkEgress("POST", up, on)).toBe("composing mail");
+    expect(checkEgress("POST", up.replace("/upload/", "/resumable/upload/"), on)).toBe("composing mail");
+    expect(checkEgress("POST", up.replace("/upload/", "/upload//"), on)).toBe("composing mail");
+    expect(checkEgress("POST", `${GMAIL}//drafts`, on)).toBe("composing mail");
+  });
+
+  it("opens nothing else with the tier", () => {
+    expect(checkEgress("GET", `${GMAIL}/messages/m1`, on)).toMatch(/allowlist/);
+    expect(checkEgress("PUT", `${GMAIL}/settings/vacation`, on)).toMatch(/mailbox settings/);
+  });
+
+  it("the tier's rules are not reachable through allowRuleFor without it", () => {
+    expect(allowRuleFor("POST", "/gmail/v1/users/me/drafts")).toBeUndefined();
+    expect(allowRuleFor("POST", "/gmail/v1/users/me/drafts", on)).toBe("create a draft");
+  });
+});
+
 // The guard is only worth anything if googleapis really routes through
 // `auth.request`. These drive the actual library, not a hand-built URL.
 describe("guardEgress — in front of the real googleapis client", () => {
-  function guardedClient() {
+  function guardedClient(policy: { drafts?: boolean } = {}) {
     const auth = new OAuth2Client({ clientId: "id", clientSecret: "secret" });
     auth.setCredentials({ access_token: "fake", expiry_date: Date.now() + 3_600_000 });
     const calls: string[] = [];
@@ -110,7 +161,7 @@ describe("guardEgress — in front of the real googleapis client", () => {
       calls.push(`${opts.method ?? "GET"} ${opts.url}`);
       return { data: {} };
     }) as typeof auth.request;
-    return { gmail: gmailApi({ version: "v1", auth: guardEgress(auth) }), calls };
+    return { gmail: gmailApi({ version: "v1", auth: guardEgress(auth, policy) }), calls };
   }
 
   it("blocks messages.send before it reaches the transport", async () => {
@@ -203,6 +254,37 @@ describe("guardEgress — in front of the real googleapis client", () => {
     );
     const dead = ALLOW_RULES.filter((rule) => !reached.has(rule));
     expect(dead).toEqual([]);
+  });
+
+  it("with the drafts tier, lets exactly the draft calls the tier makes through, and reaches every rule of it", async () => {
+    const { gmail, calls } = guardedClient({ drafts: true });
+    const raw = Buffer.from("To: a@example.com\r\n\r\nx").toString("base64url");
+    await gmail.users.drafts.create({ userId: "me", requestBody: { message: { raw, threadId: "t1" } } });
+    await gmail.users.drafts.update({ userId: "me", id: "r1", requestBody: { message: { raw } } });
+    await gmail.users.drafts.get({ userId: "me", id: "r1", format: "metadata" });
+    expect(calls).toHaveLength(3);
+    const reached = new Set(
+      calls.map((call) => {
+        const [method, url] = call.split(" ");
+        return allowRuleFor(method, new URL(url).pathname, { drafts: true });
+      }),
+    );
+    expect(DRAFTS_ALLOW_RULES.filter((r) => !reached.has(r))).toEqual([]);
+  });
+
+  it("with the drafts tier, still refuses every way of sending a draft", async () => {
+    const { gmail, calls } = guardedClient({ drafts: true });
+    await expect(gmail.users.drafts.send({ userId: "me", requestBody: { id: "r1" } })).rejects.toThrow(/sending mail/);
+    await expect(
+      gmail.users.drafts.send({ userId: "me", media: { mimeType: "message/rfc822", body: "raw" } }),
+    ).rejects.toThrow(/sending mail/);
+    await expect(
+      gmail.users.drafts.create({ userId: "me", media: { mimeType: "message/rfc822", body: "raw" } }),
+    ).rejects.toThrow(/composing mail/);
+    await expect(gmail.users.drafts.delete({ userId: "me", id: "r1" })).rejects.toThrow(/allowlist/);
+    await expect(gmail.users.drafts.list({ userId: "me" })).rejects.toThrow(/allowlist/);
+    await expect(gmail.users.messages.send({ userId: "me", requestBody: { raw: "x" } })).rejects.toThrow(/sending mail/);
+    expect(calls).toEqual([]);
   });
 
   it("wraps only once, so a cached client cannot stack guards", () => {

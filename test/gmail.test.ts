@@ -2203,6 +2203,8 @@ describe("Gmail.listMessageRefs / batchModifyMessages", () => {
     const getCalls: string[] = [];
     const api: any = {
       users: {
+        // resolveLabelIds looks a raw Label_ id up, to keep the draft mark out of label tools.
+        labels: { list: async () => ({ data: { labels: [] } }) },
         messages: { batchModify: async () => ({}) },
         threads: {
           get: async (req: any) => {
@@ -2261,6 +2263,8 @@ describe("Gmail.listMessageRefs / batchModifyMessages", () => {
   it("a thread that cannot be re-read makes its messages unverifiable, not failed", async () => {
     const api: any = {
       users: {
+        // resolveLabelIds looks a raw Label_ id up, to keep the draft mark out of label tools.
+        labels: { list: async () => ({ data: { labels: [] } }) },
         messages: { batchModify: async () => ({}) },
         threads: {
           get: async (req: any) => {
@@ -2288,6 +2292,8 @@ describe("Gmail.listMessageRefs / batchModifyMessages", () => {
     let call = 0;
     const api: any = {
       users: {
+        // resolveLabelIds looks a raw Label_ id up, to keep the draft mark out of label tools.
+        labels: { list: async () => ({ data: { labels: [] } }) },
         messages: {
           batchModify: async () => {
             call++;
@@ -2700,6 +2706,8 @@ describe("quota failures inside the multi-fetch loops", () => {
       let gets = 0;
       const api: any = {
         users: {
+          // resolveLabelIds looks a raw Label_ id up, to keep the draft mark out of label tools.
+          labels: { list: async () => ({ data: { labels: [] } }) },
           messages: { batchModify: async () => ({}) },
           threads: {
             get: async () => {

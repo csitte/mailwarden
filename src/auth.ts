@@ -7,7 +7,7 @@ import fs from "node:fs/promises";
 import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { authScopesForTiers, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
+import { authScopesForTiers, draftsEnabled, resolveEnabledTiers, GMAIL_MODIFY, GMAIL_SETTINGS_BASIC } from "./tiers.js";
 import { CliError, ToolError } from "./cli.js";
 import {
   ENC_TYPE,
@@ -424,6 +424,7 @@ async function loadSavedToken(): Promise<OAuth2Client | null> {
     // wrap stays correct.
     return guardEgress(
       googleAuth.fromJSON(parsed as Parameters<typeof googleAuth.fromJSON>[0]) as OAuth2Client,
+      { drafts: draftsEnabled(process.env) },
     );
   } catch {
     return null; // valid JSON but not an authorized_user shape → not authorized
@@ -831,6 +832,7 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
   });
   // Guarded from the moment it exists, so even the probe/persist steps of `--auth`
   // run behind the same egress checkpoint the server does.
+  // `--auth` never writes a draft, so its client keeps the drafts endpoints shut whatever the tier.
   const client = guardEgress(
     new OAuth2Client({
       clientId: cred.client_id,

@@ -158,9 +158,14 @@ export const ALLOWED = [
     why: "Same: a description of which scopes are requested per tier.",
   },
   {
+    file: "README.md",
+    excerpt: "and `drafts` (save and revise drafts, never send)",
+    why: "Tier list, a TOOL claim about the drafts tier (the egress guard refuses drafts.send). Matches because the filters entry beside it names gmail.settings.basic.",
+  },
+  {
     file: "src/tiers.ts",
-    excerpt: "By design there are NO compose/reply/forward/send tools",
-    why: "Server instructions, a TOOL claim. Matches only because the scope sentence is concatenated in front of it.",
+    excerpt: "mailwarden itself never sends",
+    why: "Server instructions for the drafts tier, a TOOL claim (drafts are saved, the user sends). Matches only because the code around it holds a variable named `scope`.",
   },
 ];
 

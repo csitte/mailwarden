@@ -6,6 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { decodeRfc2047 } from "./rfc2047.js";
+import { DRAFT_LABEL, type ReplySource } from "./draft.js";
 import { decodeCharset } from "./charset.js";
 
 export { decodeRfc2047 };
@@ -555,7 +556,44 @@ export async function withBackoff<T>(
 
 /** Read a part header value (case-insensitive name match). */
 function partHeader(p: gmail_v1.Schema$MessagePart, name: string): string | undefined {
-  return p.headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
+  return headerValue(p.headers, name);
+}
+
+function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, name: string): string | undefined {
+  return headers?.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value ?? undefined;
+}
+
+function reservedMark(): ToolError {
+  return new ToolError(
+    "forbidden_operation",
+    `${DRAFT_LABEL} marks the drafts mailwarden wrote and is set only by create_draft and update_draft. ` +
+      "No label tool may add it; nothing was changed.",
+  );
+}
+
+const toBase64Url = (raw: string) => Buffer.from(raw, "utf8").toString("base64url");
+
+/** A draft as saved: its ids, and whether the mailwarden mark went on (see `markDraft`). */
+export interface DraftRef {
+  draftId: string;
+  messageId: string;
+  threadId: string;
+  marked: boolean;
+}
+
+/** A saved draft's headers as `update_draft` needs them. Header values are raw, as Gmail holds them. */
+export interface DraftInfo {
+  draftId: string;
+  messageId: string;
+  threadId: string;
+  ownedByMailwarden: boolean;
+  trashed: boolean;
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  subject: string;
+  inReplyTo?: string;
+  references?: string;
 }
 
 /** Normalize a Content-ID header value: strip surrounding `<>`, trim, lowercase. */
@@ -1339,6 +1377,17 @@ export class Gmail {
       for (const l of await this.listLabels()) byName.set(l.name.toLowerCase(), l.id);
     }
 
+    // The draft mark is what lets update_draft overwrite a draft, so no label tool may set it:
+    // a prompt-injected "label that draft MCP/Drafts" would otherwise hand a draft the user wrote
+    // to the next update. By name here; by id below, once the id is known.
+    const markKey = DRAFT_LABEL.toLowerCase();
+    if (add.some((s) => s.trim().toLowerCase() === markKey)) throw reservedMark();
+    if (!needsLookup && add.some((s) => /^Label_/.test(s))) {
+      for (const l of await this.listLabels()) byName.set(l.name.toLowerCase(), l.id);
+    }
+    const markId = byName.get(markKey);
+    if (markId && add.includes(markId)) throw reservedMark();
+
     const addLabelIds: string[] = [];
     for (const s of add) {
       if (looksLikeLabelId(s)) addLabelIds.push(s);
@@ -1796,6 +1845,129 @@ export class Gmail {
 
   async deleteFilter(id: string): Promise<void> {
     await this.req(() => this.api.users.settings.filters.delete({ userId: "me", id }));
+  }
+
+  /**
+   * The message a reply answers, with the headers `draft.ts` derives recipients and threading from.
+   * `messageId` picks one message of the thread; without it, the newest one that is not a draft.
+   */
+  async replySource(
+    threadId: string,
+    messageId?: string,
+  ): Promise<{ messageId: string; source: ReplySource }> {
+    const res = await this.req(() =>
+      this.api.users.threads.get({
+        userId: "me",
+        id: threadId,
+        format: "metadata",
+        metadataHeaders: ["From", "Reply-To", "To", "Cc", "Subject", "Message-ID", "References"],
+      }),
+    );
+    const messages = res.data.messages ?? [];
+    const pick = messageId
+      ? messages.find((m) => m.id === messageId)
+      : [...messages].reverse().find((m) => !(m.labelIds ?? []).includes("DRAFT"));
+    if (!pick?.id) {
+      throw new ToolError(
+        "not_found",
+        messageId
+          ? `Message ${messageId} is not part of thread ${threadId}.`
+          : `Thread ${threadId} has no message to reply to (only drafts).`,
+      );
+    }
+    const h = (name: string) => headerValue(pick.payload?.headers, name);
+    return {
+      messageId: pick.id,
+      source: {
+        from: h("From"),
+        replyTo: h("Reply-To"),
+        to: h("To"),
+        cc: h("Cc"),
+        subject: decodeRfc2047(h("Subject") ?? ""),
+        messageId: h("Message-ID"),
+        references: h("References"),
+      },
+    };
+  }
+
+  /**
+   * Save a draft and mark it as mailwarden's. Gmail refuses labels in `drafts.create` itself
+   * ("Cannot set labels on drafts", measured 29 Oct 2026), so the mark goes on afterwards through
+   * the message's own `batchModify`. If that second step fails the draft exists unmarked — which
+   * only means mailwarden cannot change it later, the safe side of the two.
+   */
+  async createDraft(raw: string, threadId?: string): Promise<DraftRef> {
+    const res = await this.req(() =>
+      this.api.users.drafts.create({
+        userId: "me",
+        requestBody: { message: { raw: toBase64Url(raw), ...(threadId ? { threadId } : {}) } },
+      }),
+    );
+    return this.markDraft(res.data);
+  }
+
+  /**
+   * Replace a draft's content. Every update gives the draft a new message id and drops its user
+   * labels, and an update without `threadId` takes it out of its thread (both measured 29 Oct
+   * 2026) — so the thread is passed again and the mark is set again.
+   */
+  async updateDraft(draftId: string, raw: string, threadId?: string): Promise<DraftRef> {
+    const res = await this.req(() =>
+      this.api.users.drafts.update({
+        userId: "me",
+        id: draftId,
+        requestBody: { message: { raw: toBase64Url(raw), ...(threadId ? { threadId } : {}) } },
+      }),
+    );
+    return this.markDraft(res.data);
+  }
+
+  /** A draft's recipients, subject and threading, and whether mailwarden wrote it. */
+  async getDraft(draftId: string): Promise<DraftInfo> {
+    const [res, labels] = await Promise.all([
+      this.req(() =>
+        this.api.users.drafts.get({
+          userId: "me",
+          id: draftId,
+          // drafts.get takes no metadataHeaders; "metadata" returns every header, and these are few.
+          format: "metadata",
+        }),
+      ),
+      this.listLabels(),
+    ]);
+    const m = res.data.message ?? {};
+    const mark = labels.find((l) => l.name.toLowerCase() === DRAFT_LABEL.toLowerCase())?.id;
+    const labelIds = m.labelIds ?? [];
+    const h = (name: string) => headerValue(m.payload?.headers, name);
+    return {
+      draftId: res.data.id ?? draftId,
+      messageId: m.id ?? "",
+      threadId: m.threadId ?? "",
+      ownedByMailwarden: mark !== undefined && labelIds.includes(mark),
+      trashed: labelIds.includes("TRASH"),
+      to: h("To"),
+      cc: h("Cc"),
+      bcc: h("Bcc"),
+      subject: decodeRfc2047(h("Subject") ?? ""),
+      inReplyTo: h("In-Reply-To"),
+      references: h("References"),
+    };
+  }
+
+  private async markDraft(d: gmail_v1.Schema$Draft): Promise<DraftRef> {
+    const ref = { draftId: d.id ?? "", messageId: d.message?.id ?? "", threadId: d.message?.threadId ?? "" };
+    try {
+      const label = await this.ensureLabel(DRAFT_LABEL);
+      await this.req(() =>
+        this.api.users.messages.batchModify({
+          userId: "me",
+          requestBody: { ids: [ref.messageId], addLabelIds: [label] },
+        }),
+      );
+      return { ...ref, marked: true };
+    } catch {
+      return { ...ref, marked: false };
+    }
   }
 
   /** An attachment's raw bytes, for reading in memory (read_attachment). Nothing touches the disk. */

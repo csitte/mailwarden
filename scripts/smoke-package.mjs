@@ -106,6 +106,21 @@ try {
   // The central safety promise: no compose/reply/forward/send tool exists in the shipped artifact.
   const sendish = toolNames.filter((t) => /send|compose|reply|forward/i.test(t));
   check("no send-shaped tool is registered", sendish.length === 0, sendish.join(",") || "none");
+  // The drafts tier is opt-in: an unconfigured install must not even write a draft.
+  const draftish = toolNames.filter((t) => /draft/i.test(t));
+  check("no draft tool without the drafts tier", draftish.length === 0, draftish.join(",") || "none");
+
+  console.log("\nMCP handshake (MAILWARDEN_TOOLS=read,drafts):");
+  const drafting = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig, MAILWARDEN_TOOLS: "read,drafts" });
+  const draftingNames = drafting.tools.map((t) => t.name);
+  const draftTools = draftingNames.filter((t) => /draft/i.test(t)).sort();
+  check(
+    "drafts tier registers exactly create_draft and update_draft",
+    draftTools.join(",") === "create_draft,update_draft",
+    draftTools.join(",") || "none",
+  );
+  const draftingSendish = draftingNames.filter((t) => /send|compose|reply|forward/i.test(t));
+  check("drafts tier registers no send-shaped tool", draftingSendish.length === 0, draftingSendish.join(",") || "none");
 
   console.log("\nMCP handshake (MAILWARDEN_TOOLS=read):");
   const readOnly = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig, MAILWARDEN_TOOLS: "read" });
