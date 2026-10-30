@@ -31,6 +31,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     because Gmail drops it then. `update_draft` refuses any draft without it.
   - See `SECURITY.md`, threat 10, for what it leaves to the user.
 
+- **`alsoSignedBy` in `authentication`:** the further domains whose DKIM signature also passed,
+  besides `signedBy` — where a forwarder or mail-routing service that re-signed in transit shows.
+  At most ten.
+
+### Fixed
+- **`signedBy` and `dkimAligned` read the signature that counts, not the first one.** With several
+  DKIM signatures, the reported one is now the passing signature aligned with the `From` domain
+  wherever there is one (the one DMARC passes on), then a passing one, then the first. Through
+  0.25.0 the first was always taken, and a forwarder that re-signs puts its own signature in front:
+  a genuine message forwarded through Cloudflare Email Routing read as `signedBy: <forwarder>`,
+  `dkimAligned: false` next to `dmarc: pass`. Measured 30 October 2026 in two mailboxes, the last
+  150 threads each: 156 of 167 and 42 of 152 received messages were misreported this way, every one
+  with an aligned, passing signature further down. Reported by the `gmail-csitte` session. A
+  `dkim=fail` in front of a passing signature is now reported as `dkim: pass` with the failure in
+  `alsoReported` — it used to be the other way round.
+
 ### Changed
 - **No label tool can add `MCP/Drafts`** (`modify_labels`, `bulk_modify`, the thread wrappers,
   `create_filter`), by name or by id — it is what lets `update_draft` overwrite a draft. Adding a raw

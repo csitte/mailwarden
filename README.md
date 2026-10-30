@@ -158,11 +158,12 @@ results **the receiving server** recorded, plus the domains each check actually 
 ```jsonc
 {
   "spf": "pass",   "mailedBy":   "forwarder.example",        // envelope sender SPF checked
-  "dkim": "pass",  "signedBy":   "routing.example",           // domain whose key signed it
+  "dkim": "pass",  "signedBy":   "authority.example",         // the signature DMARC can pass on
+  "alsoSignedBy": ["forwarder.example", "esp.example"],      // further signatures that passed
   "dmarc": "pass", "headerFrom": "authority.example",        // the From domain DMARC evaluated
-  "dkimAligned": false,                                      // the signer is not the From domain
+  "dkimAligned": true,                                       // a passing signer is the From domain
   "authservId": "mx.google.com",                             // who asserts all of the above
-  "returnPath": "srs0=…=authority.example=…@forwarder.example"
+  "returnPath": "bounces+…@forwarder.example"
 }
 ```
 
@@ -170,13 +171,22 @@ results **the receiving server** recorded, plus the domains each check actually 
 address a human sees. `spf: "pass"` on its own says an envelope sender was authorised to send —
 something a lookalike domain gets in minutes.
 
-**The three domains do not have to match, and a mismatch is not a finding.** The object above is a
-real message from a public authority, forwarded through a custom domain on a mail-routing service
-before it reached the mailbox. Every domain differs from the others, and the mail is genuine:
-forwarding rewrites the envelope sender (`mailedBy` becomes the forwarder), the forwarder signs
-with its own key (`signedBy`), and only `headerFrom` still names the original sender — which is
-exactly why DMARC, not SPF, is the check that carries meaning here. Treat the domains as the
-*explanation* of a result, not as a test of their own.
+**The domains do not have to match, and a mismatch is not a finding.** The object above has the
+shape of a real receipt, forwarded through a custom domain on a mail-routing service before it
+reached the mailbox. Forwarding rewrites the envelope sender (`mailedBy` and `returnPath` become the
+forwarder) and adds the forwarder's own DKIM signature, while the sender's signature travels on
+intact behind it — so DMARC still passes, and `headerFrom` still names the original sender. That is
+why DMARC, not SPF, is the check that carries meaning here. Treat the domains as the *explanation*
+of a result, not as a test of their own.
+
+**Several signatures: the one that counts is reported.** A message often carries more than one
+DKIM signature — the sender's, its mail provider's, a forwarder's. `signedBy` is the passing one
+aligned with the `From` domain wherever there is one, because that is the one DMARC passes on;
+`alsoSignedBy` names the other domains whose signature also passed, which is where a forwarder
+shows. Through 0.25.0 the *first* signature was reported, and a re-signing forwarder puts its own in
+front: in a mailbox that receives through Cloudflare Email Routing, 156 of 167 received messages
+read as `dkimAligned: false` although each carried an aligned, passing signature further down
+(measured 30 October 2026, see `docs/measurements.json`).
 
 **What a pass does not mean.** That the mail really came from that domain — not that the domain
 deserves anything. A phisher holds perfect SPF, DKIM and DMARC on the lookalike domain he
@@ -188,9 +198,10 @@ domain they own, so `dkim: "pass"` alone says only that *someone* signed. `dkimA
 that someone is the `From` domain, or a parent or child of it. For two sibling subdomains it says
 nothing: `news.bank.example` and `mail.bank.example` are aligned, `a.co.uk` and `b.co.uk` are not,
 and without a public-suffix list the two cases look the same — so the field is absent rather than
-wrong. In the forwarded example above it is
-`false`, and correctly so: the forwarder signed. It is absent when DKIM did not pass. As with the
-domains, `false` is an explanation, not a verdict — `dmarc` remains the check to read first.
+wrong. `false` means that no passing signature belongs to the `From` domain — a forwarder that
+altered the message (a mailing list adding a footer breaks the sender's signature) leaves only its
+own. It is absent when DKIM did not pass. As with the domains, `false` is an explanation, not a
+verdict — `dmarc` remains the check to read first.
 
 **What `unchecked: true` means.** The message carried no `Authentication-Results` header from
 Gmail — nobody looked. It is not a failure, and it is not a pass. The header is written by a server that
@@ -216,7 +227,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | Tool | What it does |
 |---|---|
 | `search` | Gmail query syntax → thread summaries (from/subject/date of the first message, `lastMessageId`/`lastMessageDate`/`lastMessageFrom` of the last and `lastMessageSent` when that was you, `unread` as a boolean, `attachments` by name, type and size, labels, Gmail's snippet — which is the last message's); read-state/category predicates are re-verified against each hit's live labels; paginated via `pageToken`/`nextPageToken`. Each hit carries `signals` — `newsletter` (List-Id / List-Unsubscribe / Precedence bulk, junk or list), `automated` (Auto-Submitted, auto-reply/suppress headers, no-reply-style senders), `calendar` (text/calendar or .ics part), `replyToMismatch` (Reply-To on another domain than From; a subdomain of the same domain counts as the same), `displayNameSpoof` (the From display name shows an address or URL on another domain than the one the mail came from — `"service@paypal.com" <x@evil.example>`), `lookalikeDomain` (a label of the From domain mixes Latin with Cyrillic, Greek or Armenian letters, as homograph domains do) — read off the first message's headers/MIME, no extra call. **Spam and trash are excluded unless the query says `in:spam` / `in:trash`** — see [Looking in spam](#looking-in-spam) |
-| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `otherReports` for reports that were not read, `dkimAligned` for whether the DKIM signer is the `From` domain, and `unchecked: true` when the message carried no report from Gmail — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked; it is deprecated in favour of `bodies: "none"` (same quota, real attachment list), and combining it with `bodies` is rejected as `invalid_input`. For a long or HTML-heavy thread, shrink the answer instead: `bodies: "text"` keeps only the plaintext (an HTML-only mail is reduced to text and marked `bodyFromHtml`), `bodies: "new"` is `text` without the quoted history at the end of a reply (the trailing `>` block with its attribution line, or an Outlook *Original Message* block; inline answers, answers below a quote and forwarded messages, also an Outlook forward by its Fwd/FW/WG subject, stay whole; an answer below an Outlook plain-text header block goes with it) and marks a cut message `quotedStripped`, `bodies: "none"` keeps headers, authentication and the real attachment list without any body, `lastN` returns only the newest N messages and `afterMessageId` only those after one already read. Same quota whatever is kept; `messageCount` and `omittedMessages` always say how much of the thread the answer shows |
+| `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `alsoSignedBy` for further domains whose DKIM signature passed, `otherReports` for reports that were not read, `dkimAligned` for whether a passing DKIM signer is the `From` domain, and `unchecked: true` when the message carried no report from Gmail — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked; it is deprecated in favour of `bodies: "none"` (same quota, real attachment list), and combining it with `bodies` is rejected as `invalid_input`. For a long or HTML-heavy thread, shrink the answer instead: `bodies: "text"` keeps only the plaintext (an HTML-only mail is reduced to text and marked `bodyFromHtml`), `bodies: "new"` is `text` without the quoted history at the end of a reply (the trailing `>` block with its attribution line, or an Outlook *Original Message* block; inline answers, answers below a quote and forwarded messages, also an Outlook forward by its Fwd/FW/WG subject, stay whole; an answer below an Outlook plain-text header block goes with it) and marks a cut message `quotedStripped`, `bodies: "none"` keeps headers, authentication and the real attachment list without any body, `lastN` returns only the newest N messages and `afterMessageId` only those after one already read. Same quota whatever is kept; `messageCount` and `omittedMessages` always say how much of the thread the answer shows |
 | `read_attachment` | The text inside an attachment, without saving it: plain text (txt, csv, xml, json, ics, …), a gzip file, or the text entries of a ZIP archive — DMARC aggregate reports, exports, logs. The format is decided by the bytes, never by the declared name or type, and text that is not UTF-8 (an Excel CSV from Windows) is read as windows-1252 and marked `guessedCharset`; binary formats are refused with a pointer to `download_attachment`. Every size is capped before it is spent (5 MiB unpacked per entry, 20 MiB per archive, 50 entries), so a zip bomb stops at the limit. One answer carries at most `maxChars` characters of text across all entries (default 30,000, at most 100,000); a cut entry reports `nextOffset`, and `offset` continues it. For an archive, `list: true` shows names, sizes and text lengths first, and `entry` (a name or a pattern like `*.csv`) reads only what is needed, naming the rest in `notSelectedNames`; binary, encrypted, oversized and nested-archive entries are listed as `skipped`, not opened. Nothing is written to disk, and the text is fenced and stripped of hidden characters like a mail body |
 | `list_labels` | All labels (system + user) |
 | `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting. Also *which server* answers: `serverVersion` (bare only for a release build, otherwise with the commit, e.g. `0.23.0+a5ff4a7`), `build`, `serverPath` (the directory the running code was loaded from) and `account`, for the moment a documented tool seems missing and the question is whether the build you think is running actually is |

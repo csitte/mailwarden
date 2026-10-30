@@ -47,6 +47,8 @@
  *      is aligned and the second is not, and only a public-suffix list tells them apart;
  *    - anything else: `false`.
  *    A `false` on an aligned pair would read as suspicious, and that is the error to avoid.
+    The same holds across signatures: a message can carry several, and the one reported is
+    the passing signature aligned with `From` wherever there is one, not merely the first.
  *
  * What this cannot do: tell Gmail's report from a forged one that claims Gmail's id on a
  * message Gmail never stamped. Mail received over SMTP always carries Gmail's own report
@@ -77,7 +79,11 @@ export interface Authentication {
   dmarc?: string;
   /** Who asserts all of the above (the authserv-id, e.g. `mx.google.com`). */
   authservId?: string;
-  /** Domain whose DKIM key signed the message (`header.d`, else the `header.i` domain). */
+  /**
+   * Domain whose DKIM key signed the message (`header.d`, else the `header.i` domain). With
+   * several signatures, the passing one aligned with the `From` domain if there is one — the
+   * one DMARC can pass on — else the first passing, else the first.
+   */
   signedBy?: string;
   /** Envelope sender domain SPF was evaluated against (`smtp.mailfrom`, else `smtp.helo`). */
   mailedBy?: string;
@@ -92,9 +98,16 @@ export interface Authentication {
    */
   alsoReported?: string[];
   /**
-   * Whether a PASSING DKIM signature was made by the `From` domain or a parent or child of
-   * it. Absent when DKIM did not pass, when either domain is unknown, or when the two are
-   * sibling subdomains that only a public-suffix list could judge.
+   * Further domains whose DKIM signature also PASSED, besides `signedBy` — typically a
+   * forwarder or mail-routing service that re-signed in transit, or the sender's mail
+   * provider. At most {@link MAX_ALSO_SIGNED_BY}.
+   */
+  alsoSignedBy?: string[];
+  /**
+   * Whether ANY passing DKIM signature was made by the `From` domain or a parent or child of
+   * it — the signature reported as `signedBy`. Absent when no DKIM signature passed, when the
+   * domains are unknown, or when the best one is a sibling subdomain that only a public-suffix
+   * list could judge.
    */
   dkimAligned?: boolean;
   /**
@@ -255,6 +268,45 @@ export function dkimAlignment(signerIn: string, fromIn: string): boolean | undef
   return shared >= 2 ? undefined : false;
 }
 
+/** Cap on `alsoSignedBy`: a sender can add as many signatures as it likes. */
+export const MAX_ALSO_SIGNED_BY = 10;
+
+/** The domain a DKIM result names as its signer (`header.d`, else the `header.i` domain). */
+function signerOf(info: ResInfo): string | undefined {
+  return domainValue(info.props.get("header.d") ?? info.props.get("header.i"));
+}
+
+/**
+ * Which of several DKIM results to report. DMARC passes on ANY passing signature aligned with
+ * the `From` domain (RFC 7489 §3.1.1), so that is the one a reader needs to see: a passing
+ * aligned signature first, then a passing one the domain tree cannot judge, then any passing
+ * one, and only when none passed the first result as written.
+ *
+ * Through 0.25.0 the first result was always taken. A forwarder that re-signs (Cloudflare Email
+ * Routing, measured 30 October 2026) puts its own signature first and leaves the sender's intact
+ * behind it — so a genuine, DMARC-passing message read as `signedBy: <forwarder>`,
+ * `dkimAligned: false`, with the aligned signature nowhere in the result.
+ */
+function chooseSignature(
+  all: ResInfo[],
+  fromDomain: string | undefined,
+): { info: ResInfo; aligned?: boolean } {
+  const passing = all
+    .filter((i) => i.result === "pass")
+    .map((info) => {
+      const signer = signerOf(info);
+      return { info, aligned: signer && fromDomain ? dkimAlignment(signer, fromDomain) : undefined };
+    });
+  if (passing.length === 0) return { info: all[0] };
+  const judged = passing.filter((p) => signerOf(p.info) !== undefined && fromDomain !== undefined);
+  return (
+    judged.find((p) => p.aligned === true) ??
+    judged.find((p) => p.aligned === undefined) ??
+    judged[0] ??
+    { info: passing[0].info }
+  );
+}
+
 /** The value of the first header with this name, trimmed; `undefined` when absent or blank. */
 function headerValue(headers: Headers, name: string): string | undefined {
   const n = name.toLowerCase();
@@ -290,36 +342,41 @@ export function parseAuthentication(headers: Headers): Authentication {
   const { authservId, infos } = reports[mine];
   out.authservId = authservId;
 
+  const fromDomain = domainValue(addressOf(headerValue(headers, "From")));
   const disagreeing: string[] = [];
   for (const method of ["spf", "dkim", "dmarc"] as const) {
     const all = infos.filter((i) => i.method === method);
-    const first = all[0];
-    if (!first) continue;
-    out[method] = first.result;
+    if (all.length === 0) continue;
+    const chosen = method === "dkim" ? chooseSignature(all, fromDomain) : { info: all[0] };
+    out[method] = chosen.info.result;
 
     // A second signature or check that says something else is exactly what a caller
     // must not have hidden from them — `pass` alongside `fail` is not a `pass`.
-    for (const other of all.slice(1)) {
-      if (other.result !== first.result) disagreeing.push(`${method}=${other.result}`);
+    for (const other of all) {
+      if (other !== chosen.info && other.result !== chosen.info.result) disagreeing.push(`${method}=${other.result}`);
     }
 
     if (method === "dkim") {
-      out.signedBy = domainValue(first.props.get("header.d") ?? first.props.get("header.i"));
+      out.signedBy = signerOf(chosen.info);
+      if (chosen.aligned !== undefined) out.dkimAligned = chosen.aligned;
+      const others = [
+        ...new Set(
+          all
+            .filter((i) => i !== chosen.info && i.result === "pass")
+            .map(signerOf)
+            .filter((d): d is string => d !== undefined && d !== out.signedBy),
+        ),
+      ].slice(0, MAX_ALSO_SIGNED_BY);
+      if (others.length > 0) out.alsoSignedBy = others;
     } else if (method === "spf") {
-      out.mailedBy = domainValue(first.props.get("smtp.mailfrom") ?? first.props.get("smtp.helo"));
+      out.mailedBy = domainValue(chosen.info.props.get("smtp.mailfrom") ?? chosen.info.props.get("smtp.helo"));
     } else {
-      out.headerFrom = domainValue(first.props.get("header.from"));
+      out.headerFrom = domainValue(chosen.info.props.get("header.from"));
     }
   }
 
   const unique = [...new Set(disagreeing)];
   if (unique.length > 0) out.alsoReported = unique;
-
-  const fromDomain = domainValue(addressOf(headerValue(headers, "From")));
-  if (out.dkim === "pass" && out.signedBy && fromDomain) {
-    const aligned = dkimAlignment(out.signedBy, fromDomain);
-    if (aligned !== undefined) out.dkimAligned = aligned;
-  }
 
   // Drop the keys that came back undefined, so the object carries only what was found.
   for (const k of Object.keys(out) as (keyof Authentication)[]) {

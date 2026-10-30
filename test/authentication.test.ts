@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { dkimAlignment, parseAuthentication, type Authentication } from "../src/authentication.js";
+import { MAX_ALSO_SIGNED_BY, dkimAlignment, parseAuthentication, type Authentication } from "../src/authentication.js";
 import { parseMessage } from "../src/gmail.js";
 
 const H = (h: Record<string, string>) => Object.entries(h).map(([name, value]) => ({ name, value }));
@@ -106,9 +106,9 @@ describe("parseAuthentication — one row per real-world header shape", () => {
       },
     ],
     [
-      "two signatures agreeing: nothing to report",
+      "two signatures agreeing: no disagreement, and the second signer is named",
       { "Authentication-Results": "mx.google.com; dkim=pass header.d=a.example; dkim=pass header.d=b.example" },
-      { dkim: "pass", authservId: "mx.google.com", signedBy: "a.example" },
+      { dkim: "pass", authservId: "mx.google.com", signedBy: "a.example", alsoSignedBy: ["b.example"] },
     ],
     [
       "methods we do not model (arc, iprev) are ignored rather than guessed at",
@@ -414,11 +414,12 @@ describe("parseAuthentication — only Gmail's own report is read", () => {
   });
 
   it("reads a result written with spaces around '=' — RFC 8601 allows them", () => {
-    // Skipping `dkim = fail` would let the second, passing signature stand in for it.
+    // Skipping `dkim = fail` would hide it: the passing signature is reported (it is the one
+    // that counts), and the failed one must still show up as a disagreement.
     const a = auth({ "Authentication-Results": "mx.google.com; dkim = fail header.d = x.example; dkim=pass header.d=x.example" });
-    expect(a.dkim).toBe("fail");
+    expect(a.dkim).toBe("pass");
     expect(a.signedBy).toBe("x.example");
-    expect(a.alsoReported).toEqual(["dkim=pass"]);
+    expect(a.alsoReported).toEqual(["dkim=fail"]);
     // Inside a quoted value the spaces stay.
     expect(auth({ "Authentication-Results": 'mx.google.com; dmarc=pass header.from="a = b"' }).headerFrom).toBeUndefined();
   });
@@ -481,5 +482,113 @@ describe("parseAuthentication — dkimAligned", () => {
     expect(withFrom("a@x.example", "mx.google.com; dkim=fail header.d=x.example").dkimAligned).toBeUndefined();
     expect(withFrom("a@x.example", "mx.google.com; dkim=pass").dkimAligned).toBeUndefined();
     expect(auth({ "Authentication-Results": "mx.google.com; dkim=pass header.d=x.example" }).dkimAligned).toBeUndefined();
+  });
+});
+
+/**
+ * A forwarder that re-signs puts its own signature in front and leaves the sender's behind it.
+ * The Authentication-Results below are Gmail's, copied from a real receipt forwarded through
+ * Cloudflare Email Routing (30 October 2026; selectors and hashes shortened). Through 0.25.0 the
+ * first signature was always reported, so this genuine, DMARC-passing message read as
+ * `signedBy: csitte.com`, `dkimAligned: false` — measured the same day on 156 of 167 received
+ * messages in that mailbox, every one of them with an aligned signature further down.
+ */
+describe("parseAuthentication — several DKIM signatures", () => {
+  const FORWARDED =
+    "mx.google.com; dkim=pass header.i=@csitte.com header.s=cf2024-1 header.b=Cchz7bha; " +
+    "dkim=pass header.i=@cloudflare-email.net header.s=cf2024-1 header.b=WoSN5kU7; " +
+    "dkim=pass header.i=@mail.anthropic.com header.s=sel1 header.b=bfKL0Ieg; " +
+    "dkim=pass header.i=@amazonses.com header.s=sel2 header.b=dVqhxZ4g; " +
+    "arc=pass (i=1 spf=pass spfdomain=bounce.mail.anthropic.com dkim=pass dkdomain=mail.anthropic.com " +
+    "dmarc=pass fromdomain=mail.anthropic.com); " +
+    "spf=pass (google.com: domain of cfbounces+ndrdrop@csitte.com designates 104.30.8.122 as permitted sender) " +
+    "smtp.mailfrom=cfbounces+ndrdrop@csitte.com; " +
+    "dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=mail.anthropic.com";
+  const withFrom = (from: string, ar: string) =>
+    parseAuthentication([
+      { name: "From", value: from },
+      { name: "Authentication-Results", value: ar },
+    ]);
+
+  it("reports the signature aligned with From, not the forwarder's in front of it", () => {
+    expect(withFrom('"Anthropic, PBC" <invoice+statements@mail.anthropic.com>', FORWARDED)).toEqual({
+      authservId: "mx.google.com",
+      spf: "pass",
+      mailedBy: "csitte.com",
+      dkim: "pass",
+      signedBy: "mail.anthropic.com",
+      alsoSignedBy: ["csitte.com", "cloudflare-email.net", "amazonses.com"],
+      dkimAligned: true,
+      dmarc: "pass",
+      headerFrom: "mail.anthropic.com",
+    });
+  });
+
+  it("stays false when no passing signature is aligned — the forwarder alone signed", () => {
+    const a = withFrom(
+      "a@authority.example",
+      "mx.google.com; dkim=pass header.d=routing.example; dkim=pass header.d=relay.example",
+    );
+    expect(a.signedBy).toBe("routing.example");
+    expect(a.alsoSignedBy).toEqual(["relay.example"]);
+    expect(a.dkimAligned).toBe(false);
+  });
+
+  it("does not report an aligned signature that FAILED as aligned", () => {
+    const a = withFrom(
+      "a@bank.example",
+      "mx.google.com; dkim=pass header.d=routing.example; dkim=fail header.d=bank.example",
+    );
+    expect(a.dkim).toBe("pass");
+    expect(a.signedBy).toBe("routing.example");
+    expect(a.dkimAligned).toBe(false);
+    expect(a.alsoReported).toEqual(["dkim=fail"]);
+    expect(a.alsoSignedBy).toBeUndefined();
+  });
+
+  it("prefers a passing signature over a failed one in front of it", () => {
+    const a = withFrom("a@x.example", "mx.google.com; dkim=fail header.d=x.example; dkim=pass header.d=x.example");
+    expect(a).toMatchObject({ dkim: "pass", signedBy: "x.example", dkimAligned: true, alsoReported: ["dkim=fail"] });
+  });
+
+  it("reports the first result when none passed", () => {
+    const a = withFrom("a@x.example", "mx.google.com; dkim=fail header.d=a.example; dkim=neutral header.d=x.example");
+    expect(a).toMatchObject({ dkim: "fail", signedBy: "a.example", alsoReported: ["dkim=neutral"] });
+    expect(a.dkimAligned).toBeUndefined();
+    expect(a.alsoSignedBy).toBeUndefined();
+  });
+
+  it("prefers an undecidable sibling over a clear mismatch, and then says nothing", () => {
+    const a = withFrom(
+      "a@news.bank.example",
+      "mx.google.com; dkim=pass header.d=routing.example; dkim=pass header.d=mail.bank.example",
+    );
+    expect(a.signedBy).toBe("mail.bank.example");
+    expect(a.dkimAligned).toBeUndefined();
+    expect(a.alsoSignedBy).toEqual(["routing.example"]);
+  });
+
+  it("an attacker's extra signatures cannot displace an aligned one, nor grow the list without bound", () => {
+    const junk = Array.from({ length: 40 }, (_, i) => `dkim=pass header.d=s${i}.evil.example`).join("; ");
+    const a = withFrom("a@bank.example", `mx.google.com; ${junk}; dkim=pass header.d=bank.example`);
+    expect(a.signedBy).toBe("bank.example");
+    expect(a.dkimAligned).toBe(true);
+    expect(a.alsoSignedBy).toHaveLength(MAX_ALSO_SIGNED_BY);
+  });
+
+  it("lists each further signer once, and never the reported one again", () => {
+    const a = withFrom(
+      "a@x.example",
+      "mx.google.com; dkim=pass header.d=r.example; dkim=pass header.d=x.example; dkim=pass header.d=r.example; dkim=pass header.d=x.example",
+    );
+    expect(a.signedBy).toBe("x.example");
+    expect(a.alsoSignedBy).toEqual(["r.example"]);
+  });
+
+  it("without a From address, reports the first passing signature and no alignment", () => {
+    const a = auth({ "Authentication-Results": FORWARDED });
+    expect(a.signedBy).toBe("csitte.com");
+    expect(a.dkimAligned).toBeUndefined();
+    expect(a.alsoSignedBy).toEqual(["cloudflare-email.net", "mail.anthropic.com", "amazonses.com"]);
   });
 });

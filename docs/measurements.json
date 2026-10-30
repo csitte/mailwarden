@@ -50,6 +50,18 @@
       "source": "session-bridge thread 110-gmail-index-reverify-messung, message 2026-08-15T211036Z from the gmail-csitte session",
       "queries": [{ "query": "is:unread", "hits": 0, "stale": 0 }],
       "caution": "Zero drift here is why the claim is 'a property of a mailbox', not of Gmail. It is not a counter-example to any cause: no thread in that mailbox was ever archived while still unread, which is the only shape a stale read-state can take."
+    },
+    "dkim-first-signature-2026-10-30": {
+      "what": "Received messages (not SENT) in the newest 150 threads of each mailbox, read through threads.get metadata, and Gmail's own Authentication-Results parsed by the 0.25.0 parseAuthentication. Counted: messages with dkim=pass, how many of them came out dkimAligned=false, and how many of those carried a passing DKIM signature aligned with the From domain further down the same report.",
+      "mailbox": "business mailbox (gmail-csitte session, receives through Cloudflare Email Routing) and private mailbox (gmail session)",
+      "date": "2026-10-30",
+      "endpoint": "threads.get",
+      "source": "session-bridge thread 582-mailwarden-betriebsumfrage-postfach-sessions: the observation in message 2026-10-27T233732Z from gmail-csitte (receipt 1a1351ba5f4e9c55), measured by the mailwarden session on 2026-10-30 with a read-only scratch script",
+      "queries": [
+        { "query": "business mailbox, -in:sent -in:drafts, 150 threads", "hits": 167, "dkimPass": 167, "reportedUnaligned": 157, "alignedFurtherDown": 156 },
+        { "query": "private mailbox, -in:sent -in:drafts, 150 threads", "hits": 154, "dkimPass": 152, "reportedUnaligned": 42, "alignedFurtherDown": 42 }
+      ],
+      "caution": "`hits` is received messages checked; the misreported count is `alignedFurtherDown` (156 of 167, and 42 of the 152 with DKIM passing). The one remaining business-mailbox message had no aligned passing signature at all and stays false after the fix. A snapshot of the newest threads, not of the mailbox."
     }
   }
 }
