@@ -22,7 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Confirmation.** Any address the thread did not already contain — every recipient of a new
     message, a stranger in `cc`/`bcc`, an address added by an update — is confirmed in the client's
     dialog whatever `MAILWARDEN_CONFIRM` says, and refused on a client without one. A reply within
-    its thread follows `MAILWARDEN_CONFIRM`.
+    its thread follows `MAILWARDEN_CONFIRM`. A `Reply-To` is chosen by the sender alone, so it counts
+    as part of the thread only when the same address is also in `From`, `To` or `Cc`: a mail from
+    `boss@corp.example` with `Reply-To: attacker@evil.example` is answered to a stranger and is
+    confirmed. `Bcc` never vouches for an address.
   - **Header safety.** Subjects and addresses carrying a line break or control character are
     refused, recipients are written as bare validated addresses, the body is base64 — no input can
     add a header line such as a hidden `Bcc:`.

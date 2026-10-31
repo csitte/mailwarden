@@ -444,6 +444,8 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   message, a `cc` on a reply that names a stranger, an address added in an update — is confirmed in
   the client's own dialog (MCP elicitation), whatever `MAILWARDEN_CONFIRM` says, and refused on a
   client that cannot show one. A reply that stays within its thread follows `MAILWARDEN_CONFIRM`.
+  A `Reply-To` address counts as part of the thread only if it is also in `From`, `To` or `Cc` —
+  the sender alone picks it, so a reply to a different `Reply-To` is confirmed too.
   The dialog lists the recipients first and marks the new ones.
 - **What it does not do.** No sending, no attachments from your disk, no display names (addresses
   are saved bare), no HTML — plain text only. Drafts are not deleted: Gmail's `drafts.delete`

@@ -114,8 +114,10 @@ export async function saveReplyDraft(
     );
   }
   // Every address the thread itself supplied, whether or not this reply uses it: a reply that
-  // goes to fewer people than reply-all is no reason to ask.
-  const threadAddresses = [...addressesOf(source.from), ...addressesOf(source.replyTo), ...addressesOf(source.to), ...addressesOf(source.cc)];
+  // goes to fewer people than reply-all is no reason to ask. Reply-To is deliberately not
+  // among them: the sender alone chooses it, so a Reply-To that is not also in From/To/Cc is a
+  // stranger and the reply to it is asked about. (Bcc is never listed either.)
+  const threadAddresses = [...addressesOf(source.from), ...addressesOf(source.to), ...addressesOf(source.cc)];
   const unknown = unknownRecipients(recipients, threadAddresses);
   const content: DraftContent = {
     ...recipients,
