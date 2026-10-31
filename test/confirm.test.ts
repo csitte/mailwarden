@@ -3,7 +3,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { confirmPlan, confirmed, dialogText, resolveConfirmMode } from "../src/confirm.js";
+import { confirmPlan, confirmed, dialogText, resolveConfirmMode, resolveDraftSelfWithoutDialog } from "../src/confirm.js";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 
@@ -268,3 +268,13 @@ describe("dialogText", () => {
   });
 });
 
+
+describe("resolveDraftSelfWithoutDialog", () => {
+  it("is off unless the value is exactly 1", () => {
+    expect(resolveDraftSelfWithoutDialog({})).toBe(false);
+    for (const v of ["", "0", "true", "yes", " 1", "on"]) {
+      expect(resolveDraftSelfWithoutDialog({ MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG: v }), v).toBe(false);
+    }
+    expect(resolveDraftSelfWithoutDialog({ MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG: "1" })).toBe(true);
+  });
+});

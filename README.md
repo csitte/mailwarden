@@ -444,6 +444,12 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   message, a `cc` on a reply that names a stranger, an address added in an update — is confirmed in
   the client's own dialog (MCP elicitation), whatever `MAILWARDEN_CONFIRM` says, and refused on a
   client that cannot show one. A reply that stays within its thread follows `MAILWARDEN_CONFIRM`.
+  One opt-in relaxes this for clients that have no dialog at all: `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`
+  saves a draft without asking when every new recipient is your own address (the one the signed-in
+  account reports, compared case-insensitively; no aliases, no `+tag`, no dot folding). A client that
+  can show the dialog is still asked, an explicit `MAILWARDEN_CONFIRM=require` is still honoured, and
+  one other address in `to`, `cc` or `bcc` puts the draft back under the rule above. A draft to
+  yourself cannot reach anyone else, so an injected mail gains nothing by steering one there.
   A `Reply-To` address counts as part of the thread only if it is also in `From`, `To` or `Cc` —
   the sender alone picks it, so a reply to a different `Reply-To` is confirmed too.
   The dialog lists the recipients first and marks the new ones.
@@ -775,6 +781,7 @@ those rules come from).
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` and `export_thread` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
 | `MAILWARDEN_CONFIRM` | ask the person at the client before `create_filter`, `unsubscribe`, `bulk_unsubscribe` and a reply draft within its thread act (a draft to any address the thread did not contain is always asked about), through an MCP elicitation dialog — the answer never passes through the model, so a prompt-injected mail cannot supply it. `ask`: ask where the client supports elicitation, go ahead where it does not. `require`: refuse where it does not. `off` (default): never ask — unattended runs would otherwise fail on a dialog nobody sees. A no is the error `declined_by_user`, and nothing was done. Dry runs are never asked about |
+| `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG` | `1` → the `drafts` tier saves a draft without the confirmation dialog when every new recipient is the signed-in account's own address (the address Gmail reports for the profile; case-insensitive, exact — no aliases or `+tag`), so a client without MCP elicitation can draft notes-to-self. A client that can show the dialog is still asked; `MAILWARDEN_CONFIRM=require` is still honoured; any other recipient is refused as before. Off by default; only the value `1` enables it. Has no effect outside the `drafts` tier and sends nothing |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/read_attachment/list_labels/list_snoozed/get_profile/what_changed/triage_digest/follow_ups/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |
 | `MAILWARDEN_TOOLS` | comma-separated tool tiers to advertise: `read`, `manage`, `filters`, `drafts` (default: `read,manage,filters` — `drafts` only when named). Also derives the OAuth scopes requested at `--auth`. E.g. `read,manage` drops the filter tools and their `gmail.settings.basic` scope; `read,drafts` reads and drafts, and needs `gmail.modify` |
 | `MAILWARDEN_DEBUG` | `1` → print full errors with stack traces instead of a one-line message (for bug reports) |

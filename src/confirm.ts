@@ -34,6 +34,16 @@ export function resolveConfirmMode(env: NodeJS.ProcessEnv): ConfirmMode {
   return v as ConfirmMode;
 }
 
+/**
+ * `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`: let the drafts tier save a draft whose new recipients
+ * are all the mailbox owner's own address without a dialog, on a client that cannot show one.
+ * Only the exact string `1` turns it on, as with the other switches; anything else is off.
+ * See `modeFor` in draft-flow.ts for what it does and does not relax.
+ */
+export function resolveDraftSelfWithoutDialog(env: NodeJS.ProcessEnv): boolean {
+  return env.MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG === "1";
+}
+
 export type ConfirmPlan = "proceed" | "ask" | "refuse";
 
 /** What to do before a confirmable action, given the mode and whether this client can show a form. */

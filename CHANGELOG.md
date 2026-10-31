@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` — drafts to your own address without a dialog, for clients
+  that cannot show one.** In the `drafts` tier a new message and any recipient the thread did not
+  contain force a confirmation dialog, and a client without MCP elicitation (the Grok Bot app, for
+  one) is refused: `create_draft` there answered `declined_by_user` every time. With the switch on, a
+  draft whose new recipients are all the signed-in account's own address (the profile's address,
+  lower-cased and exact; no send-as aliases, so no new scope) is saved unasked on such a client.
+  Unchanged: off by default and only the value `1` enables it; a client that can show the dialog is
+  still asked; `MAILWARDEN_CONFIRM=require` is still honoured; any other address in `to`/`cc`/`bcc`
+  keeps the refusal. No tier, scope or egress rule changes, and nothing is sent. Applies to
+  `create_draft` (new message and reply) and `update_draft`.
+
 ## [0.26.1] - 2026-10-31
 
 ### Security

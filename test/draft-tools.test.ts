@@ -23,7 +23,7 @@ afterEach(() => {
 const MARK = { id: "Label_mark", name: DRAFT_LABEL, type: "user" };
 
 /** A mailbox with one thread and the calls a draft makes, recording what was written. */
-function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: string[] } = {}) {
+function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: string[]; threadTo?: string } = {}) {
   const calls = { created: [] as any[], updated: [] as any[], batch: [] as any[], labelCreates: 0 };
   const api: any = {
     users: {
@@ -42,7 +42,7 @@ function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: 
                 payload: {
                   headers: [
                     { name: "From", value: "Ann <ann@example.org>" },
-                    { name: "To", value: "me@example.com" },
+                    { name: "To", value: opts.threadTo ?? "me@example.com" },
                     { name: "Subject", value: "=?UTF-8?B?R3LDvMOfZQ==?=" },
                     { name: "Message-ID", value: "<m1@example.org>" },
                   ],
@@ -289,5 +289,126 @@ describe("create_draft / update_draft over MCP", () => {
     expect(res.isError).toBeFalsy();
     expect(calls.updated[0].requestBody.message.threadId).toBe("t1");
     expect(res.structuredContent).toMatchObject({ kind: "reply", messageId: "dm2", marked: true, sent: false });
+  });
+});
+
+describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own address on a client without a dialog", () => {
+  const SELF = "MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG";
+  async function setup(optIn: string | undefined, answer?: Parameters<typeof connect>[0]) {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    if (optIn !== undefined) vi.stubEnv(SELF, optIn);
+    // The thread's To is somebody else, so the owner (bcc'd, say) is not "in the thread" for a reply.
+    const { api, calls } = draftApi({ threadTo: "list@example.net" });
+    (getAuth as Mock).mockResolvedValue(api);
+    return { calls, ...(await connect(answer)) };
+  }
+  const create = (client: Awaited<ReturnType<typeof connect>>["client"], args: Record<string, unknown>) =>
+    client.callTool({ name: "create_draft", arguments: args }) as Promise<any>;
+
+  it("is off by default: a new message to the owner is still refused", async () => {
+    const { client, calls } = await setup(undefined);
+    const res = await create(client, { to: ["me@example.com"], subject: "Note", body: "x" });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/declined_by_user/);
+    expect(calls.created).toEqual([]);
+  });
+
+  it.each(["0", "true", "yes", ""])("only the value 1 turns it on (%j)", async (v) => {
+    const { client, calls } = await setup(v);
+    const res = await create(client, { to: ["me@example.com"], subject: "Note", body: "x" });
+    expect(res.isError).toBe(true);
+    expect(calls.created).toEqual([]);
+  });
+
+  it("on: a new message only to the owner is saved unasked, case variants and a display name included", async () => {
+    const { client, calls, asked } = await setup("1");
+    const res = await create(client, { to: ["Me <ME@Example.COM>"], cc: ["me@example.com"], bcc: [" Me@EXAMPLE.com "], subject: "Note", body: "x" });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toEqual([]);
+    expect(res.structuredContent).toMatchObject({ kind: "new", to: ["me@example.com"], sent: false, confirmedByUser: false, draftId: "r1" });
+    expect(calls.created).toHaveLength(1);
+  });
+
+  it.each([
+    ["to", { to: ["me@example.com", "zoe@example.com"] }],
+    ["cc", { to: ["me@example.com"], cc: ["zoe@example.com"] }],
+    ["bcc", { to: ["me@example.com"], bcc: ["zoe@example.com"] }],
+    ["a +tag variant", { to: ["me+x@example.com"] }],
+    ["a lookalike domain", { to: ["me@example.com.evil.test"] }],
+    ["a lookalike local part", { to: ["me@example.com"], cc: ["m.e@example.com"] }],
+  ])("on: a foreign address in %s still refuses the whole draft", async (_n, rcpt) => {
+    const { client, calls } = await setup("1");
+    const res = await create(client, { ...rcpt, subject: "Note", body: "x" });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/declined_by_user/);
+    expect(calls.created).toEqual([]);
+  });
+
+  it("on: a client that can show the dialog is still asked, and a no still writes nothing", async () => {
+    const yes = await setup("1", { action: "accept", content: { confirm: true } });
+    const ok = await create(yes.client, { to: ["me@example.com"], subject: "Note", body: "x" });
+    expect(yes.asked).toHaveLength(1);
+    expect(ok.structuredContent).toMatchObject({ confirmedByUser: true });
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    const no = await setup("1", { action: "decline" });
+    const refused = await create(no.client, { to: ["me@example.com"], subject: "Note", body: "x" });
+    expect(no.asked).toHaveLength(1);
+    expect(text(refused)).toMatch(/declined_by_user/);
+    expect(no.calls.created).toEqual([]);
+  });
+
+  it("on: an explicit MAILWARDEN_CONFIRM=require is not relaxed", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "require");
+    const { client, calls } = await setup("1");
+    const res = await create(client, { to: ["me@example.com"], subject: "Note", body: "x" });
+    expect(res.isError).toBe(true);
+    expect(calls.created).toEqual([]);
+  });
+
+  it("on: a reply in its thread with the owner added as cc/bcc is saved unasked", async () => {
+    const { client, calls, asked } = await setup("1");
+    const res = await create(client, { threadId: "t1", cc: ["ME@example.com"], bcc: ["me@example.com"], body: "x" });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toEqual([]);
+    expect(res.structuredContent).toMatchObject({ kind: "reply", to: ["ann@example.org"], cc: ["me@example.com"], bcc: ["me@example.com"], newRecipients: ["me@example.com"] });
+    expect(calls.created[0].message.threadId).toBe("t1");
+  });
+
+  it("off: the same reply with the owner as cc is refused", async () => {
+    const { client, calls } = await setup(undefined);
+    const res = await create(client, { threadId: "t1", cc: ["me@example.com"], body: "x" });
+    expect(res.isError).toBe(true);
+    expect(calls.created).toEqual([]);
+  });
+
+  it("on: a reply that adds a foreign cc next to the owner is refused", async () => {
+    const { client, calls } = await setup("1");
+    const res = await create(client, { threadId: "t1", cc: ["me@example.com", "zoe@example.com"], body: "x" });
+    expect(res.isError).toBe(true);
+    expect(calls.created).toEqual([]);
+  });
+
+  it("update_draft: adding only the owner is saved unasked when on, refused when off, refused with a stranger", async () => {
+    const on = await setup("1");
+    const saved: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["Me@Example.com"], body: "Neu" } });
+    expect(saved.isError).toBeFalsy();
+    expect(on.asked).toEqual([]);
+    expect(on.calls.updated).toHaveLength(1);
+    const stranger: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["me@example.com", "zoe@example.com"], body: "Neu" } });
+    expect(text(stranger)).toMatch(/declined_by_user/);
+    expect(on.calls.updated).toHaveLength(1);
+    vi.unstubAllEnvs();
+    vi.clearAllMocks();
+    const off = await setup(undefined);
+    const refused: any = await off.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["me@example.com"], body: "Neu" } });
+    expect(text(refused)).toMatch(/declined_by_user/);
+    expect(off.calls.updated).toEqual([]);
+  });
+
+  it("changes no tier: the tool set is the same with the switch on", async () => {
+    const { client } = await setup("1");
+    const names = (await client.listTools()).tools.map((t) => t.name).filter((n) => /draft|send/.test(n)).sort();
+    expect(names).toEqual(["create_draft", "update_draft"]);
   });
 });

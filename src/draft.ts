@@ -161,6 +161,27 @@ export function unknownRecipients(r: Recipients, known: readonly string[]): stri
   return dedupe([...r.to, ...r.cc, ...r.bcc]).filter((a) => !k.has(a));
 }
 
+/**
+ * Whether every address in `unknown` is one of the mailbox owner's own (`own`: the authenticated
+ * profile's address, compared lower-cased and bare). False for an empty `unknown`, and an `own`
+ * entry that is blank or does not parse is ignored, never matched. Exact match only: no
+ * `+tag` stripping, no Gmail dot folding — an address that merely looks like the owner's is a
+ * stranger. This is all `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG` looks at (see `selfOnly` in
+ * draft-flow.ts): a draft whose only new recipients are the owner's own cannot reach anyone
+ * else, so a prompt-injected instruction gains nothing by aiming it there.
+ */
+export function onlyOwnAddresses(unknown: readonly string[], own: readonly string[]): boolean {
+  const mine = new Set<string>();
+  for (const a of own) {
+    try {
+      mine.add(normalizeRecipient(a));
+    } catch {
+      // not an address: never matches
+    }
+  }
+  return unknown.length > 0 && unknown.every((a) => mine.has(a.toLowerCase()));
+}
+
 export function checkRecipients(r: Recipients): void {
   const n = r.to.length + r.cc.length + r.bcc.length;
   if (n === 0) {

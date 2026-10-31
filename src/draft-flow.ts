@@ -14,6 +14,7 @@ import {
   buildMime,
   draftDialog,
   normalizeRecipients,
+  onlyOwnAddresses,
   replyRecipients,
   replySubject,
   replyThreading,
@@ -84,9 +85,32 @@ export interface UpdateInput {
   body: string;
 }
 
-/** The confirmation mode that applies: `require` once any recipient is new, else the configured one. */
-function modeFor(configured: ConfirmMode, unknown: readonly string[]): ConfirmMode {
-  return unknown.length ? "require" : configured;
+/**
+ * The confirmation mode that applies: `require` once any recipient is new, else the configured one.
+ *
+ * The one exception is the opt-in `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (`selfWithoutDialog`):
+ * when every new recipient is the mailbox owner's own address, the draft cannot reach a third
+ * party, so `require` relaxes to `ask` — a client that can show the dialog still shows it, a client
+ * that cannot (no MCP elicitation) saves the draft. An explicit `MAILWARDEN_CONFIRM=require` is
+ * never relaxed. Anything with a foreign new recipient stays `require`, opt-in or not.
+ */
+function modeFor(configured: ConfirmMode, unknown: readonly string[], selfOnly: boolean): ConfirmMode {
+  if (!unknown.length) return configured;
+  if (selfOnly) return configured === "require" ? "require" : "ask";
+  return "require";
+}
+
+/**
+ * Whether the opt-in applies to these new recipients. Reads the owner's address only when the
+ * opt-in is on, so with it off nothing extra is called.
+ */
+async function selfOnly(
+  optIn: boolean,
+  unknown: readonly string[],
+  own: () => Promise<readonly string[]>,
+): Promise<boolean> {
+  if (!optIn || unknown.length === 0) return false;
+  return onlyOwnAddresses(unknown, await own());
 }
 
 export async function saveReplyDraft(
@@ -94,6 +118,7 @@ export async function saveReplyDraft(
   input: ReplyInput,
   configured: ConfirmMode,
   confirm: Confirm,
+  selfWithoutDialog = false,
 ): Promise<DraftResult> {
   const [{ emailAddress }, { source }] = await Promise.all([
     gmail.getProfile(),
@@ -126,7 +151,8 @@ export async function saveReplyDraft(
     ...replyThreading(source),
   };
   const raw = buildMime(content);
-  const confirmedByUser = await confirm(modeFor(configured, unknown), draftDialog("reply", content, unknown));
+  const self = await selfOnly(selfWithoutDialog, unknown, async () => [emailAddress]);
+  const confirmedByUser = await confirm(modeFor(configured, unknown, self), draftDialog("reply", content, unknown));
   const ref = await gmail.createDraft(raw, input.threadId);
   return result(ref, "reply", content, unknown, confirmedByUser);
 }
@@ -135,6 +161,7 @@ export async function saveNewDraft(
   gmail: DraftGmail,
   input: NewInput,
   confirm: Confirm,
+  opts: { configured?: ConfirmMode; selfWithoutDialog?: boolean } = {},
 ): Promise<DraftResult> {
   const recipients: Recipients = {
     to: normalizeRecipients(input.to),
@@ -144,8 +171,10 @@ export async function saveNewDraft(
   const content: DraftContent = { ...recipients, subject: input.subject, body: input.body };
   const raw = buildMime(content);
   const unknown = unknownRecipients(recipients, []);
-  // A new message has no thread to vouch for anyone: always asked, never written unasked.
-  const confirmedByUser = await confirm("require", draftDialog("new", content, unknown));
+  // A new message has no thread to vouch for anyone: always asked, never written unasked — unless
+  // the opt-in is on and every recipient is the owner's own address (see `modeFor`).
+  const self = await selfOnly(opts.selfWithoutDialog ?? false, unknown, async () => [(await gmail.getProfile()).emailAddress]);
+  const confirmedByUser = await confirm(modeFor(opts.configured ?? "off", unknown, self), draftDialog("new", content, unknown));
   const ref = await gmail.createDraft(raw);
   return result(ref, "new", content, unknown, confirmedByUser);
 }
@@ -155,6 +184,7 @@ export async function reviseDraft(
   input: UpdateInput,
   configured: ConfirmMode,
   confirm: Confirm,
+  selfWithoutDialog = false,
 ): Promise<DraftResult> {
   const before = await gmail.getDraft(input.draftId);
   if (!before.ownedByMailwarden) {
@@ -186,7 +216,8 @@ export async function reviseDraft(
     ...threading,
   };
   const raw = buildMime(content);
-  const confirmedByUser = await confirm(modeFor(configured, unknown), draftDialog("update", content, unknown));
+  const self = await selfOnly(selfWithoutDialog, unknown, async () => [(await gmail.getProfile()).emailAddress]);
+  const confirmedByUser = await confirm(modeFor(configured, unknown, self), draftDialog("update", content, unknown));
   // A draft that answers a thread is passed its thread again — without it Gmail moves the
   // updated draft into a thread of its own (measured 29 Oct 2026).
   const ref = await gmail.updateDraft(input.draftId, raw, threading.inReplyTo ? before.threadId : undefined);

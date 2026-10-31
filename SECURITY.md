@@ -341,6 +341,18 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
   the draft wait for the person's yes in the client's own dialog (MCP elicitation), regardless of
   `MAILWARDEN_CONFIRM`; a client that cannot show one is refused. The answer never passes through the
   model, so an injected mail cannot supply it. A reply within its thread follows `MAILWARDEN_CONFIRM`.
+- **The one opt-out, for the owner's own address.** `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (off by
+  default; only `1` counts) lets a draft be saved without the dialog when *every* new recipient is the
+  account's own address, as the profile reports it, compared case-insensitively and exactly — an
+  alias, a `+tag` or a dot variant is a stranger. It exists for clients that cannot show a dialog at
+  all. A client that can still gets asked, `MAILWARDEN_CONFIRM=require` is still honoured, and one
+  foreign address anywhere in `to`/`cc`/`bcc` (or added by `update_draft`) restores the rule. The
+  reasoning: a prompt-injected mail cannot make a draft reach a third party through this path, because
+  the only addresses it unlocks are the owner's. What it does not prevent: injected text in the
+  body of a draft to yourself, which you then read in Gmail like any draft; and, if you forward or
+  auto-forward your own mailbox elsewhere, a draft to yourself is only as private as that forwarding.
+  The list of own addresses is the profile address only; Gmail's send-as aliases are not read, so no
+  further API call and no further OAuth grant are involved, and the tiers and the egress guard are untouched.
 - **No hidden recipient.** Every header value is checked for line breaks and control characters
   before a byte is written, recipients are re-emitted as bare, validated addresses rather than copied
   from the thread, and the body is base64-encoded — so neither a subject nor a body nor a hostile

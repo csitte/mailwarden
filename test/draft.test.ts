@@ -6,6 +6,7 @@ import {
   encodeHeaderText,
   normalizeRecipient,
   normalizeRecipients,
+  onlyOwnAddresses,
   replyRecipients,
   replySubject,
   replyThreading,
@@ -456,6 +457,35 @@ describe("saveNewDraft", () => {
   });
 });
 
+describe("saveNewDraft — the self opt-in picks the mode", () => {
+  const own = (gmail: DraftGmail) => vi.spyOn(gmail, "getProfile");
+  it("asks with ask (not require) when the opt-in is on and only the owner is addressed", async () => {
+    const { gmail } = fakeGmail();
+    const confirm = vi.fn(async () => false);
+    await saveNewDraft(gmail, { to: ["ME@example.com"], subject: "Hi", body: "x" }, confirm, { selfWithoutDialog: true });
+    expect(confirm).toHaveBeenCalledWith("ask", expect.any(String));
+  });
+  it("keeps require for an explicit MAILWARDEN_CONFIRM=require, for a foreign address, and when the opt-in is off", async () => {
+    for (const [input, opts] of [
+      [{ to: ["me@example.com"] }, { selfWithoutDialog: true, configured: "require" as const }],
+      [{ to: ["me@example.com", "zoe@example.com"] }, { selfWithoutDialog: true }],
+      [{ to: ["me@example.com"] }, { selfWithoutDialog: false }],
+      [{ to: ["me@example.com"] }, {}],
+    ] as const) {
+      const { gmail } = fakeGmail();
+      const confirm = vi.fn(async () => true);
+      await saveNewDraft(gmail, { ...input, subject: "Hi", body: "x" }, confirm, opts);
+      expect(confirm).toHaveBeenCalledWith("require", expect.any(String));
+    }
+  });
+  it("does not read the profile at all with the opt-in off", async () => {
+    const { gmail } = fakeGmail();
+    const spy = own(gmail);
+    await saveNewDraft(gmail, { to: ["me@example.com"], subject: "Hi", body: "x" }, vi.fn(async () => true));
+    expect(spy).not.toHaveBeenCalled();
+  });
+});
+
 describe("reviseDraft", () => {
   it("refuses a draft mailwarden did not write, without asking or writing", async () => {
     const { gmail, updated } = fakeGmail({ draft: { ownedByMailwarden: false } });
@@ -508,5 +538,19 @@ describe("reviseDraft", () => {
     const r = await reviseDraft(gmail, { draftId: "r1", body: "x" }, "off", vi.fn(async () => false));
     expect(r.marked).toBe(false);
     expect(r.note).toMatch(/update_draft will refuse/);
+  });
+});
+
+describe("onlyOwnAddresses — what the self opt-in matches", () => {
+  it("is true only when every new address is the owner's, compared lower-cased", () => {
+    expect(onlyOwnAddresses(["me@example.com"], ["Me@Example.com"])).toBe(true);
+    expect(onlyOwnAddresses(["me@example.com", "zoe@example.com"], ["me@example.com"])).toBe(false);
+  });
+  it("is false for nothing to match, for a blank or unparsable own address, and for near misses", () => {
+    expect(onlyOwnAddresses([], ["me@example.com"])).toBe(false);
+    expect(onlyOwnAddresses(["me@example.com"], [])).toBe(false);
+    expect(onlyOwnAddresses(["me@example.com"], ["", "not an address"])).toBe(false);
+    expect(onlyOwnAddresses(["me+x@example.com"], ["me@example.com"])).toBe(false);
+    expect(onlyOwnAddresses(["m.e@example.com"], ["me@example.com"])).toBe(false);
   });
 });
