@@ -7,10 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.26.1] - 2026-10-31
+
 ### Security
 - **`@hono/node-server` 2.0.11 to 2.1.5 (moderate, GHSA-rmxm-3fg6-px4f).** `npm audit` reported it on
-  31 October 2026, after 0.26.0 was out; it covers 1.19.10 through 2.1.2: `serveStatic` decoded the request path a second
-  time, so middleware mounted on a static prefix could be skipped. The package arrives through the
+  31 October 2026, after 0.26.0 was out; it covers 1.19.10 through 2.1.2. `serveStatic` decoded the
+  request path a second time, so middleware mounted on a static prefix could be skipped. The package arrives through the
   MCP SDK's HTTP transport and mailwarden never calls `serveStatic` (no hit in `src/` or in the
   installed SDK), so there was no path here. The `overrides` floor moves from `^2.0.5` to `^2.1.3`,
   the first fixed version, so a later lockfile cannot fall back below the fix. `npm audit
@@ -2269,7 +2271,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.26.1...HEAD
+[0.26.1]: https://github.com/csitte/mailwarden/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/csitte/mailwarden/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/csitte/mailwarden/compare/v0.24.0...v0.25.0
 [0.24.0]: https://github.com/csitte/mailwarden/compare/v0.23.0...v0.24.0
