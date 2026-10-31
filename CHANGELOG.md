@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **`@hono/node-server` 2.0.11 to 2.1.5 (moderate, GHSA-rmxm-3fg6-px4f).** `npm audit` reported it on
+  31 October 2026, after 0.26.0 was out; it covers 1.19.10 through 2.1.2: `serveStatic` decoded the request path a second
+  time, so middleware mounted on a static prefix could be skipped. The package arrives through the
+  MCP SDK's HTTP transport and mailwarden never calls `serveStatic` (no hit in `src/` or in the
+  installed SDK), so there was no path here. The `overrides` floor moves from `^2.0.5` to `^2.1.3`,
+  the first fixed version, so a later lockfile cannot fall back below the fix. `npm audit
+  --omit=dev` reports nothing again. Not closed: `node-forge` and `zod` under `@anthropic-ai/mcpb`
+  (dev only, no fix published for `zod`).
+
 ## [0.26.0] - 2026-10-31
 
 ### Added
