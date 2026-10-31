@@ -341,6 +341,71 @@ describe("saveReplyDraft", () => {
     }
   });
 
+  describe("a Reply-To the sender chose is not an address the thread vouches for", () => {
+    const withReplyTo = (replyTo: string, from = "Boss <boss@corp.example>") =>
+      fakeGmail({
+        replySource: async () => ({
+          messageId: "m2",
+          source: { from, replyTo, to: "me@example.com", subject: "Wire", messageId: "<m2@corp.example>" },
+        }),
+      });
+
+    it("forces a confirmation when the reply goes to a Reply-To that is not From/To/Cc", async () => {
+      const { gmail, created } = withReplyTo("attacker@evil.example");
+      const confirm = vi.fn(async () => true);
+      const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x" }, "off", confirm);
+      expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("attacker@evil.example (new)"));
+      expect(r).toMatchObject({ to: ["attacker@evil.example"], newRecipients: ["attacker@evil.example"], confirmedByUser: true });
+      expect(created).toHaveLength(1);
+    });
+
+    it("writes nothing when that confirmation is declined", async () => {
+      const { gmail, created } = withReplyTo("attacker@evil.example");
+      // Declines whenever it is actually asked; under the configured "off" it would wave it through.
+      const confirm = vi.fn(async (mode: string) => {
+        if (mode === "require") throw new ToolError("declined_by_user", "no");
+        return false;
+      });
+      await expect(saveReplyDraft(gmail, { threadId: "t1", body: "x" }, "off", confirm)).rejects.toThrow(/no/);
+      expect(created).toEqual([]);
+    });
+
+    it("does not let cc or bcc smuggle in the Reply-To address unasked either", async () => {
+      for (const extra of [{ cc: ["attacker@evil.example"] }, { bcc: ["attacker@evil.example"] }]) {
+        const { gmail } = withReplyTo("attacker@evil.example");
+        const confirm = vi.fn(async () => true);
+        await saveReplyDraft(gmail, { threadId: "t1", body: "x", ...extra }, "off", confirm);
+        expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("(new)"));
+      }
+    });
+
+    it.each([
+      ["the same address as From", "boss@corp.example", "Boss <boss@corp.example>"],
+      ["also the From address with a display name", "Boss <BOSS@corp.example>", "boss@corp.example"],
+    ])("still follows MAILWARDEN_CONFIRM when Reply-To is %s", async (_n, replyTo, from) => {
+      const { gmail } = withReplyTo(replyTo, from);
+      const confirm = vi.fn(async () => false);
+      const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x" }, "off", confirm);
+      expect(confirm).toHaveBeenCalledWith("off", expect.any(String));
+      expect(r.newRecipients).toEqual([]);
+    });
+
+    it("still follows MAILWARDEN_CONFIRM when Reply-To is also named in To or Cc", async () => {
+      for (const field of ["to", "cc"] as const) {
+        const { gmail } = fakeGmail({
+          replySource: async () => ({
+            messageId: "m2",
+            source: { from: "list@example.org", replyTo: "ann@example.org", to: "me@example.com", [field]: "me@example.com, ann@example.org" },
+          }),
+        });
+        const confirm = vi.fn(async () => false);
+        const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x" }, "off", confirm);
+        expect(confirm).toHaveBeenCalledWith("off", expect.any(String));
+        expect(r).toMatchObject({ to: ["ann@example.org"], newRecipients: [] });
+      }
+    });
+  });
+
   it("does not ask for a cc that is already in the thread", async () => {
     const { gmail } = fakeGmail();
     const confirm = vi.fn(async () => false);
