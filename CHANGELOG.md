@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **`MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` now asks nobody, so it also works on clients that
+  advertise elicitation but cannot show it.** 0.27.0 relaxed the confirmation for a draft to the
+  owner's own address from `require` to `ask`: a client without MCP elicitation saved the draft, a
+  client with it was still asked. The Grok Bot app is a third kind, which advertises elicitation and
+  then declines every request, and `create_draft` kept answering `declined_by_user` there: the
+  opt-in changed nothing for the one client it was written for. With the switch on and every new
+  recipient the signed-in account's own address (the profile's, lower-cased and exact; no aliases),
+  the draft is now saved without any question, whatever the client advertises, and
+  `confirmedByUser` is `false`. A decline or cancel is never read as a yes, since no question is put.
+  Unchanged: off by default and only the value `1` enables it; any other address in `to`/`cc`/`bcc`
+  keeps the confirmation (or the refusal on a client without a dialog); an explicit
+  `MAILWARDEN_CONFIRM=require` is still honoured, with the dialog; no tier, scope or egress rule
+  changes, and nothing is sent. The 0.27.0 entry below described the `ask` behaviour; it was never
+  right for a client that advertises a dialog it does not show.
+
 ## [0.27.0] - 2026-10-31
 
 ### Added

@@ -459,11 +459,14 @@ describe("saveNewDraft", () => {
 
 describe("saveNewDraft — the self opt-in picks the mode", () => {
   const own = (gmail: DraftGmail) => vi.spyOn(gmail, "getProfile");
-  it("asks with ask (not require) when the opt-in is on and only the owner is addressed", async () => {
-    const { gmail } = fakeGmail();
-    const confirm = vi.fn(async () => false);
-    await saveNewDraft(gmail, { to: ["ME@example.com"], subject: "Hi", body: "x" }, confirm, { selfWithoutDialog: true });
-    expect(confirm).toHaveBeenCalledWith("ask", expect.any(String));
+  it("does not ask at all (mode off) when the opt-in is on and only the owner is addressed", async () => {
+    for (const configured of [undefined, "off", "ask"] as const) {
+      const { gmail } = fakeGmail();
+      const confirm = vi.fn(async () => false);
+      const r = await saveNewDraft(gmail, { to: ["ME@example.com"], subject: "Hi", body: "x" }, confirm, { selfWithoutDialog: true, configured });
+      expect(confirm, String(configured)).toHaveBeenCalledWith("off", expect.any(String));
+      expect(r.confirmedByUser, String(configured)).toBe(false);
+    }
   });
   it("keeps require for an explicit MAILWARDEN_CONFIRM=require, for a foreign address, and when the opt-in is off", async () => {
     for (const [input, opts] of [

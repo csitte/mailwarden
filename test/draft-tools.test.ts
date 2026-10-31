@@ -344,13 +344,43 @@ describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own add
     expect(calls.created).toEqual([]);
   });
 
-  it("on: a client that can show the dialog is still asked, and a no still writes nothing", async () => {
+  it("on: a self-only draft is saved without a dialog even on a client that advertises elicitation", async () => {
+    // The Grok client advertises elicitation and then silently declines. An answer that would be a
+    // yes, a no or a cancel must make no difference, because nothing is asked.
+    for (const answer of [
+      { action: "accept", content: { confirm: true } },
+      { action: "decline" },
+      { action: "cancel" },
+    ] as const) {
+      vi.unstubAllEnvs();
+      vi.clearAllMocks();
+      const { client, calls, asked } = await setup("1", answer);
+      const res = await create(client, { to: ["me@example.com"], subject: "Note", body: "x" });
+      expect(res.isError, answer.action).toBeFalsy();
+      expect(asked, answer.action).toEqual([]);
+      expect(res.structuredContent, answer.action).toMatchObject({ kind: "new", sent: false, confirmedByUser: false });
+      expect(calls.created, answer.action).toHaveLength(1);
+    }
+  });
+
+  it("on: a foreign recipient on a client with a dialog is still asked, and a no writes nothing", async () => {
     const yes = await setup("1", { action: "accept", content: { confirm: true } });
-    const ok = await create(yes.client, { to: ["me@example.com"], subject: "Note", body: "x" });
+    const ok = await create(yes.client, { to: ["me@example.com", "zoe@example.com"], subject: "Note", body: "x" });
     expect(yes.asked).toHaveLength(1);
     expect(ok.structuredContent).toMatchObject({ confirmedByUser: true });
-    vi.unstubAllEnvs();
-    vi.clearAllMocks();
+    for (const answer of [{ action: "decline" }, { action: "cancel" }, { action: "accept", content: { confirm: false } }] as const) {
+      vi.unstubAllEnvs();
+      vi.clearAllMocks();
+      const no = await setup("1", answer);
+      const refused = await create(no.client, { to: ["me@example.com", "zoe@example.com"], subject: "Note", body: "x" });
+      expect(no.asked, answer.action).toHaveLength(1);
+      expect(text(refused), answer.action).toMatch(/declined_by_user/);
+      expect(no.calls.created, answer.action).toEqual([]);
+    }
+  });
+
+  it("on: MAILWARDEN_CONFIRM=require is still asked on a client with a dialog, and a no writes nothing", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "require");
     const no = await setup("1", { action: "decline" });
     const refused = await create(no.client, { to: ["me@example.com"], subject: "Note", body: "x" });
     expect(no.asked).toHaveLength(1);
@@ -366,8 +396,8 @@ describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own add
     expect(calls.created).toEqual([]);
   });
 
-  it("on: a reply in its thread with the owner added as cc/bcc is saved unasked", async () => {
-    const { client, calls, asked } = await setup("1");
+  it("on: a reply in its thread with the owner added as cc/bcc is saved unasked, even with a dialog available", async () => {
+    const { client, calls, asked } = await setup("1", { action: "decline" });
     const res = await create(client, { threadId: "t1", cc: ["ME@example.com"], bcc: ["me@example.com"], body: "x" });
     expect(res.isError).toBeFalsy();
     expect(asked).toEqual([]);
@@ -390,7 +420,7 @@ describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own add
   });
 
   it("update_draft: adding only the owner is saved unasked when on, refused when off, refused with a stranger", async () => {
-    const on = await setup("1");
+    const on = await setup("1", { action: "decline" });
     const saved: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["Me@Example.com"], body: "Neu" } });
     expect(saved.isError).toBeFalsy();
     expect(on.asked).toEqual([]);

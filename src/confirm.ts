@@ -36,7 +36,8 @@ export function resolveConfirmMode(env: NodeJS.ProcessEnv): ConfirmMode {
 
 /**
  * `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`: let the drafts tier save a draft whose new recipients
- * are all the mailbox owner's own address without a dialog, on a client that cannot show one.
+ * are all the mailbox owner's own address without any dialog, whether or not the client says it can
+ * show one: some clients advertise elicitation and decline every request.
  * Only the exact string `1` turns it on, as with the other switches; anything else is off.
  * See `modeFor` in draft-flow.ts for what it does and does not relax.
  */

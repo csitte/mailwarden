@@ -90,13 +90,16 @@ export interface UpdateInput {
  *
  * The one exception is the opt-in `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (`selfWithoutDialog`):
  * when every new recipient is the mailbox owner's own address, the draft cannot reach a third
- * party, so `require` relaxes to `ask` — a client that can show the dialog still shows it, a client
- * that cannot (no MCP elicitation) saves the draft. An explicit `MAILWARDEN_CONFIRM=require` is
- * never relaxed. Anything with a foreign new recipient stays `require`, opt-in or not.
+ * party, so `require` relaxes to `off` — nobody is asked, whatever the client can do. `ask` was
+ * the first cut (0.27.0), and it left the switch without effect on a client that advertises MCP
+ * elicitation but cannot show the dialog: it still got a question, and its silent decline was a no.
+ * `off` means `confirmPlan` proceeds and `confirmedByUser` is false — a decline or cancel is never
+ * read as a yes, because no question is put. An explicit `MAILWARDEN_CONFIRM=require` is never
+ * relaxed. Anything with a foreign new recipient stays `require`, opt-in or not.
  */
 function modeFor(configured: ConfirmMode, unknown: readonly string[], selfOnly: boolean): ConfirmMode {
   if (!unknown.length) return configured;
-  if (selfOnly) return configured === "require" ? "require" : "ask";
+  if (selfOnly) return configured === "require" ? "require" : "off";
   return "require";
 }
 

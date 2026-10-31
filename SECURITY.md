@@ -344,8 +344,10 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
 - **The one opt-out, for the owner's own address.** `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (off by
   default; only `1` counts) lets a draft be saved without the dialog when *every* new recipient is the
   account's own address, as the profile reports it, compared case-insensitively and exactly — an
-  alias, a `+tag` or a dot variant is a stranger. It exists for clients that cannot show a dialog at
-  all. A client that can still gets asked, `MAILWARDEN_CONFIRM=require` is still honoured, and one
+  alias, a `+tag` or a dot variant is a stranger. It exists for clients that have no usable dialog:
+  none at all, or one that advertises MCP elicitation and declines every request (the Grok Bot app
+  does). Nobody is asked on this path, whatever the client can show, and a decline is never read as
+  a yes because no question is put. `MAILWARDEN_CONFIRM=require` is still honoured, and one
   foreign address anywhere in `to`/`cc`/`bcc` (or added by `update_draft`) restores the rule. The
   reasoning: a prompt-injected mail cannot make a draft reach a third party through this path, because
   the only addresses it unlocks are the owner's. What it does not prevent: injected text in the
