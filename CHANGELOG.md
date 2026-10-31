@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.0] - 2026-10-31
+
 ### Added
 - **`MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` — drafts to your own address without a dialog, for clients
   that cannot show one.** In the `drafts` tier a new message and any recipient the thread did not
@@ -2283,7 +2285,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.26.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/csitte/mailwarden/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/csitte/mailwarden/compare/v0.26.0...v0.26.1
 [0.26.0]: https://github.com/csitte/mailwarden/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/csitte/mailwarden/compare/v0.24.0...v0.25.0
