@@ -10,6 +10,12 @@ import path from "node:path";
 // real home. The path is intentionally not created (no token.json → unauthorized).
 // Only MAILWARDEN_DIR is set — CRED_PATH then falls back to <dir>/credentials.json,
 // which the interactive auth tests rely on pointing inside their own temp dir.
+// Every other MAILWARDEN_* variable from the developer's shell is dropped first: tests are written
+// against the defaults, and a passphrase, tier list or confirm mode set for daily use turned dozens
+// of them red on such a machine while CI stayed green.
+for (const name of Object.keys(process.env)) {
+  if (name.startsWith("MAILWARDEN_")) delete process.env[name];
+}
 process.env.MAILWARDEN_DIR = path.join(os.tmpdir(), "mailwarden-tests-empty-home");
 
 // No test may reach the developer's real OS keystore. keystore-io.ts is the only module that loads
