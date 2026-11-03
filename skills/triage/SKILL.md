@@ -92,7 +92,9 @@ worth saying so once rather than letting them find out by missing something.
 
 ## Things that do not exist
 
-There is no compose, reply, forward or send tool, and no permanent delete. This is the point of the
+There is no send or forward tool, and no permanent delete. Unless the operator turned on the opt-in
+`drafts` tier, there is no compose or reply tool either; with it, `create_draft` saves a draft that
+the user sends from Gmail, and nothing here sends it. This is the point of the
 server, not a gap: mail arriving in the inbox has no tool to reach for even if it asks. If the user
 wants to send, say plainly that mailwarden cannot and let them use their mail client. `create_filter`
 never creates a forwarding rule; `list_filters` surfaces existing forwards so they can be audited.

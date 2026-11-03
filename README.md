@@ -502,12 +502,13 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   `MAILWARDEN_ALLOW_NO_TOKEN=1` to override on a trusted, isolated network. On a loopback bind it
   also validates the `Host` header (DNS-rebinding defense). For remote hosting, set `MAILWARDEN_HOST`
   and front it with TLS.
-- **No send tools — by design.** mailwarden cannot compose, reply, or forward. A prompt-injected
+- **No send tools — by design.** mailwarden cannot send, reply, or forward, and by default it cannot
+  compose either; only the opt-in `drafts` tier writes drafts, which you send yourself. A prompt-injected
   instruction inside an email has no exfiltration path through this server. `create_filter` follows
   the same rule: it can label, archive, trash, star or mark mail, but **never** creates a *forwarding*
   filter (which would be an exfiltration path). `list_filters` still surfaces any forwarding filter
-  already on the account, so you can spot one. The opt-in `drafts` tier does not change this: it
-  saves drafts and has no way to send one — see [Drafts](#drafts-opt-in--written-here-sent-by-you).
+  already on the account, so you can spot one. The `drafts` tier has no way to send what it saves —
+  see [Drafts](#drafts-opt-in--written-here-sent-by-you).
   This holds because no such tool exists and none can be
   registered at runtime; for the stronger variant, where *Google* refuses to send rather than
   mailwarden declining to, see **Read-only mode** below. **Read the promise as narrow, because it

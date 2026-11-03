@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that can put a plaintext token there instead. Existing tokens are unaffected, since mailwarden
   always wrote 16 bytes. Reported in the Grok review of 0.25.0 (L10).
 
+### Fixed
+- **The README and the triage skill no longer say mailwarden cannot compose.** Since 0.26.0 that is
+  true only without the opt-in `drafts` tier. The "No send tools" bullet now says it cannot send,
+  reply or forward, and by default cannot compose either; the triage skill says the same and names
+  `create_draft` for a deployment with the tier. The server's own instructions already made that
+  distinction. Reported in the Grok review of 0.25.0 (N25).
+
 ## [0.27.1] - 2026-10-31
 
 ### Fixed
