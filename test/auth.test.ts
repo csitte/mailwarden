@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { OAuth2Client } from "google-auth-library";
 import { checkCredentials, encryptToken, decryptToken, tokenOverwriteVerdict } from "../src/auth.js";
 import type { OverwriteCheck } from "../src/auth.js";
 
@@ -70,6 +71,50 @@ describe("getAuth (non-interactive)", () => {
     await fs.writeFile(path.join(tmp, "token.json"), "{ not json");
     const { getAuth } = await freshAuth(tmp);
     await expect(getAuth(false)).rejects.toThrow(/--auth/);
+  });
+
+  // The egress tests build their own policy; this is where the server derives it from
+  // MAILWARDEN_TOOLS. Replacing that with `{ drafts: true }` or `{}` must turn one case red.
+  describe("hands the drafts tier to the egress guard", () => {
+    const draftsCreate = { method: "POST", url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts" };
+
+    async function clientFor(tools: string | undefined) {
+      tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-auth-"));
+      await fs.writeFile(
+        path.join(tmp, "token.json"),
+        JSON.stringify({ type: "authorized_user", client_id: "cid", client_secret: "cs", refresh_token: "rt-123" }),
+      );
+      if (tools !== undefined) vi.stubEnv("MAILWARDEN_TOOLS", tools);
+      // The guard binds the transport when it wraps the client, so the stub goes in first.
+      const transport = vi.spyOn(OAuth2Client.prototype, "request").mockResolvedValue({ data: {} } as never);
+      const { getAuth } = await freshAuth(tmp);
+      return { client: await getAuth(false), transport };
+    }
+
+    afterEach(() => vi.restoreAllMocks());
+
+    it.each([
+      ["the default tiers", undefined],
+      ["read,manage", "read,manage"],
+    ])("keeps drafts.create shut with %s", async (_name, tools) => {
+      const { client, transport } = await clientFor(tools);
+      await expect(client.request(draftsCreate)).rejects.toThrow(/composing mail/);
+      expect(transport).not.toHaveBeenCalled();
+    });
+
+    it("lets drafts.create through with MAILWARDEN_TOOLS=read,drafts", async () => {
+      const { client, transport } = await clientFor("read,drafts");
+      await expect(client.request(draftsCreate)).resolves.toEqual({ data: {} });
+      expect(transport).toHaveBeenCalledTimes(1);
+    });
+
+    it("keeps drafts.send shut even with the drafts tier", async () => {
+      const { client, transport } = await clientFor("read,drafts");
+      await expect(
+        client.request({ method: "POST", url: "https://gmail.googleapis.com/gmail/v1/users/me/drafts/send" }),
+      ).rejects.toThrow(/sending mail/);
+      expect(transport).not.toHaveBeenCalled();
+    });
   });
 });
 
