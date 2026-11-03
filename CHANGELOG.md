@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+- **An encrypted token is opened only with its full 16-byte GCM tag.** Both envelopes (the
+  keystore one and the passphrase one) set no tag length when decrypting, and on Node 20 and 22
+  that accepts the true tag cut down to as little as 4 bytes; Node 26 refuses it on its own. The
+  length is now fixed on encrypt and decrypt, and a shorter tag is refused. Hardening rather than
+  a reachable hole: forging an envelope still needs write access to `token.json`, and whoever has
+  that can put a plaintext token there instead. Existing tokens are unaffected, since mailwarden
+  always wrote 16 bytes. Reported in the Grok review of 0.25.0 (L10).
+
 ## [0.27.1] - 2026-10-31
 
 ### Fixed

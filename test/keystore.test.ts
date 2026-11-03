@@ -65,6 +65,20 @@ describe("keystore envelope (pure)", () => {
     expect(() => openWithKey(edit(env) as typeof env, key)).toThrow();
   });
 
+  // GCM checks a shortened tag against the same prefix of the real one, so a decipher without a
+  // fixed tag length opens the token with only 4 of its 16 bytes.
+  it.each([4, 8, 12, 15])("rejects the true tag cut to %i bytes", (bytes) => {
+    const { keyId, key } = newKey();
+    const env = sealWithKey(payload, key, keyId, MODIFY);
+    const tag = Buffer.from(env.tag, "base64").subarray(0, bytes).toString("base64");
+    expect(() => openWithKey({ ...env, tag }, key)).toThrow();
+  });
+
+  it("writes a 16-byte tag", () => {
+    const { keyId, key } = newKey();
+    expect(Buffer.from(sealWithKey(payload, key, keyId).tag, "base64")).toHaveLength(16);
+  });
+
   it("tells the two envelopes and plaintext apart", () => {
     const { keyId, key } = newKey();
     expect(isKeystoreEnvelope(sealWithKey(payload, key, keyId))).toBe(true);

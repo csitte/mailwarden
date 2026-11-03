@@ -19,6 +19,7 @@ import {
   openWithKey,
   parseKeystoreSetting,
   sealWithKey,
+  TAG_BYTES,
   type KeystoreEnvelope,
 } from "./keystore.js";
 import { openKeyStore } from "./keystore-io.js";
@@ -193,7 +194,7 @@ function deriveKey(passphrase: string, salt: Buffer): Buffer {
 export function encryptToken(plaintext: string, passphrase: string): EncryptedToken {
   const salt = crypto.randomBytes(16);
   const iv = crypto.randomBytes(12); // 96-bit nonce, the GCM standard
-  const cipher = crypto.createCipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", deriveKey(passphrase, salt), iv, { authTagLength: TAG_BYTES });
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   return {
     type: ENC_TYPE,
@@ -213,7 +214,7 @@ export function encryptToken(plaintext: string, passphrase: string): EncryptedTo
  */
 export function decryptToken(enc: EncryptedToken, passphrase: string): string {
   const key = deriveKey(passphrase, Buffer.from(enc.salt, "base64"));
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(enc.iv, "base64"));
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(enc.iv, "base64"), { authTagLength: TAG_BYTES });
   decipher.setAuthTag(Buffer.from(enc.tag, "base64"));
   return Buffer.concat([
     decipher.update(Buffer.from(enc.ciphertext, "base64")),

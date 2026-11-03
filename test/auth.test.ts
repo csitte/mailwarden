@@ -260,6 +260,15 @@ describe("token encryption (pure encrypt/decrypt)", () => {
     expect(() => decryptToken({ ...enc, tag: tag.toString("base64") }, "hunter2")).toThrow();
   });
 
+  // GCM checks a shortened tag against the same prefix of the real one: without a fixed tag
+  // length the true tag cut to 4 bytes still opens the token.
+  it.each([4, 8, 12, 15])("rejects the true auth tag cut to %i bytes", (bytes) => {
+    const enc = encryptToken(secret, "hunter2");
+    const tag = Buffer.from(enc.tag, "base64").subarray(0, bytes).toString("base64");
+    expect(Buffer.from(enc.tag, "base64")).toHaveLength(16);
+    expect(() => decryptToken({ ...enc, tag }, "hunter2")).toThrow();
+  });
+
   it("rejects a tampered salt (key no longer derives)", () => {
     const enc = encryptToken(secret, "hunter2");
     const salt = Buffer.from(enc.salt, "base64");

@@ -23,6 +23,12 @@ export const ENC_TYPE = "mailwarden-encrypted";
 /** The keystore "service" every mailwarden key is filed under. */
 export const KEYSTORE_SERVICE = "mailwarden";
 const KEYLEN = 32; // AES-256
+/**
+ * GCM tag length, fixed on both sides. Without it the decipher on Node 20 and 22 accepts the tag
+ * cut down to as little as 4 bytes (Node 26 refuses that on its own), so a forged envelope would
+ * need far fewer guesses than the 16 bytes we write.
+ */
+export const TAG_BYTES = 16;
 
 export interface KeystoreEnvelope {
   type: typeof ENC_TYPE;
@@ -71,7 +77,7 @@ function additionalData(keyId: string, scope: string | undefined): Buffer {
 /** Encrypt a token JSON string with a keystore key. Pure; exported for tests. */
 export function sealWithKey(plaintext: string, key: Buffer, keyId: string, scope?: string): KeystoreEnvelope {
   const iv = crypto.randomBytes(12); // 96-bit nonce, the GCM standard
-  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
+  const cipher = crypto.createCipheriv("aes-256-gcm", key, iv, { authTagLength: TAG_BYTES });
   cipher.setAAD(additionalData(keyId, scope));
   const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
   return {
@@ -88,7 +94,7 @@ export function sealWithKey(plaintext: string, key: Buffer, keyId: string, scope
 
 /** Decrypt a keystore envelope. Throws on a wrong key, an edited scope, or a tampered ciphertext. */
 export function openWithKey(env: KeystoreEnvelope, key: Buffer): string {
-  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(env.iv, "base64"));
+  const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(env.iv, "base64"), { authTagLength: TAG_BYTES });
   decipher.setAAD(additionalData(env.keyId, env.scope));
   decipher.setAuthTag(Buffer.from(env.tag, "base64"));
   return Buffer.concat([decipher.update(Buffer.from(env.ciphertext, "base64")), decipher.final()]).toString("utf8");
