@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.27.2] - 2026-11-03
+
 ### Security
 - **An encrypted token is opened only with its full 16-byte GCM tag.** Both envelopes (the
   keystore one and the passphrase one) set no tag length when decrypting, and on Node 20 and 22
@@ -2319,7 +2321,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.27.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.27.2...HEAD
+[0.27.2]: https://github.com/csitte/mailwarden/compare/v0.27.1...v0.27.2
 [0.27.1]: https://github.com/csitte/mailwarden/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/csitte/mailwarden/compare/v0.26.1...v0.27.0
 [0.26.1]: https://github.com/csitte/mailwarden/compare/v0.26.0...v0.26.1
