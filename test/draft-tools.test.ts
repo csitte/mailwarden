@@ -26,7 +26,7 @@ afterEach(() => {
 const MARK = { id: "Label_mark", name: DRAFT_LABEL, type: "user" };
 
 /** A mailbox with one thread and the calls a draft makes, recording what was written. */
-function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: string[]; threadTo?: string } = {}) {
+function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: string[]; threadTo?: string; aliases?: string[] } = {}) {
   const calls = { created: [] as any[], updated: [] as any[], batch: [] as any[], labelCreates: 0 };
   const api: any = {
     users: {
@@ -63,6 +63,14 @@ function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: 
           return {};
         },
       },
+      settings: { sendAs: { list: async () => ({
+            data: {
+              sendAs: [
+                { sendAsEmail: "me@example.com", isPrimary: true },
+                ...(opts.aliases ?? []).map((a) => ({ sendAsEmail: a, verificationStatus: "accepted" })),
+              ],
+            },
+          }) } },
       drafts: {
         create: async (r: any) => (calls.created.push(r.requestBody), { data: { id: "r1", message: { id: "dm1", threadId: r.requestBody.message.threadId ?? "tn" } } }),
         update: async (r: any) => (calls.updated.push(r), { data: { id: r.id, message: { id: "dm2", threadId: r.requestBody.message.threadId ?? "tn2" } } }),
@@ -247,6 +255,31 @@ describe("create_draft / update_draft over MCP", () => {
     expect(asked).toEqual([]);
     expect(res.structuredContent).toMatchObject({ kind: "reply", to: ["ann@example.org"], subject: "Re: Grüße", confirmedByUser: false });
     expect(calls.created[0].message.threadId).toBe("t1");
+  });
+
+  it("saves a reply from an alias only after the dialog, which names the sender, and the result says from", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const { api, calls } = draftApi({ aliases: ["contact@band.example"] });
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client, asked } = await connect({ action: "accept", content: { confirm: true } });
+    const res: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x", from: "contact@band.example" } });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("From: contact@band.example (not your main address)");
+    expect(res.structuredContent).toMatchObject({ from: "contact@band.example", confirmedByUser: true });
+    expect(Buffer.from(calls.created[0].message.raw, "base64url").toString()).toMatch(/^From: contact@band\.example\r$/m);
+  });
+
+  it("refuses a sender that is not a send-as address, and names the main one in every result", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client } = await connect({ action: "accept", content: { confirm: true } });
+    const bad: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x", from: "boss@evil.example" } });
+    expect(text(bad)).toMatch(/not an address this account may send from/);
+    expect(calls.created).toEqual([]);
+    const good: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x" } });
+    expect(good.structuredContent.from).toBe("me@example.com");
   });
 
   it("asks for a reply when MAILWARDEN_CONFIRM=ask", async () => {

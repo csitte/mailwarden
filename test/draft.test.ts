@@ -299,6 +299,7 @@ function fakeGmail(over: Partial<DraftGmail> & { draft?: Partial<DraftInfo> } = 
     }),
     threadAttachments: async () => [],
     attachmentBytes: async () => Buffer.alloc(0),
+    sendAsAddresses: async () => [{ address: "me@example.com", primary: true }],
     ...over,
   };
   return { gmail, created, updated };
@@ -527,11 +528,14 @@ describe("saveNewDraft — the self opt-in picks the mode", () => {
       expect(confirm).toHaveBeenCalledWith("require", expect.any(String));
     }
   });
-  it("does not read the profile at all with the opt-in off", async () => {
+  it("reads the profile once, to name the sender, and the send-as list not at all", async () => {
     const { gmail } = fakeGmail();
     const spy = own(gmail);
-    await saveNewDraft(gmail, { to: ["me@example.com"], subject: "Hi", body: "x" }, vi.fn(async () => true));
-    expect(spy).not.toHaveBeenCalled();
+    const list = vi.spyOn(gmail, "sendAsAddresses");
+    const r = await saveNewDraft(gmail, { to: ["me@example.com"], subject: "Hi", body: "x" }, vi.fn(async () => true));
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(list).not.toHaveBeenCalled();
+    expect(r.from).toBe("me@example.com");
   });
 });
 
@@ -601,5 +605,137 @@ describe("onlyOwnAddresses — what the self opt-in matches", () => {
     expect(onlyOwnAddresses(["me@example.com"], ["", "not an address"])).toBe(false);
     expect(onlyOwnAddresses(["me+x@example.com"], ["me@example.com"])).toBe(false);
     expect(onlyOwnAddresses(["m.e@example.com"], ["me@example.com"])).toBe(false);
+  });
+});
+
+// ---- the sender: the main address or a verified send-as alias ----
+
+const BAND = "contact@band.example";
+const withAliases = (over: Partial<DraftGmail> & { draft?: Partial<DraftInfo> } = {}) =>
+  fakeGmail({
+    sendAsAddresses: async () => [
+      { address: "me@example.com", primary: true },
+      { address: "Contact@Band.example", primary: false },
+    ],
+    ...over,
+  });
+
+describe("from", () => {
+  it("writes no From for the main address, so Gmail puts it with the account's name, and the result names it", async () => {
+    for (const from of [undefined, "ME@example.com", "Me <me@example.com>"]) {
+      const { gmail, created } = withAliases();
+      const confirm = vi.fn(async () => true);
+      const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", from }, "off", confirm);
+      expect(decodeRaw(created[0].raw).head, String(from)).not.toMatch(/^From:/m);
+      expect(r.from).toBe("me@example.com");
+      expect(confirm).toHaveBeenCalledWith("off", expect.not.stringContaining("From:"));
+    }
+  });
+
+  it("writes an alias as a bare From and asks, even in a reply to the thread's own people with MAILWARDEN_CONFIRM off", async () => {
+    const { gmail, created } = withAliases();
+    const confirm = vi.fn(async () => true);
+    const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", from: "Band <contact@band.example>" }, "off", confirm);
+    expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining(`From: ${BAND} (not your main address)`));
+    expect(decodeRaw(created[0].raw).head).toMatch(new RegExp(`^From: ${BAND}\r?$`, "m"));
+    expect(r).toMatchObject({ from: BAND, newRecipients: [], confirmedByUser: true });
+    expect(r.suggestedFrom).toBeUndefined();
+  });
+
+  it("does not save a draft from an alias when the dialog is declined", async () => {
+    const { gmail, created } = withAliases();
+    const confirm = vi.fn(async () => {
+      throw new ToolError("declined_by_user", "no");
+    });
+    await expect(saveNewDraft(gmail, { to: ["zoe@example.com"], subject: "Hi", body: "x", from: BAND }, confirm)).rejects.toThrow(/no/);
+    expect(created).toEqual([]);
+  });
+
+  it("refuses an address that is not on the send-as list, before asking or writing, and names the ones allowed", async () => {
+    for (const from of ["someone@example.com", "contact+x@band.example", "me@example.com.evil.example"]) {
+      const { gmail, created } = withAliases();
+      const confirm = vi.fn(async () => true);
+      const err = await saveNewDraft(gmail, { to: ["zoe@example.com"], subject: "Hi", body: "x", from }, confirm).catch((e) => e);
+      expect(err, from).toBeInstanceOf(ToolError);
+      expect(err.message).toContain(`may send from: me@example.com, ${BAND}`);
+      expect(confirm).not.toHaveBeenCalled();
+      expect(created).toEqual([]);
+    }
+  });
+
+  it("refuses a sender with a line break before anything is read from the list", async () => {
+    const { gmail } = withAliases();
+    const list = vi.spyOn(gmail, "sendAsAddresses");
+    await expect(
+      saveNewDraft(gmail, { to: ["zoe@example.com"], subject: "Hi", body: "x", from: `${BAND}\r\nBcc: x@evil.example` }, vi.fn()),
+    ).rejects.toThrow(/line break/);
+    expect(list).not.toHaveBeenCalled();
+  });
+
+  it("an alias is not covered by the self opt-in unless every recipient is the main address", async () => {
+    const { gmail } = withAliases();
+    const confirm = vi.fn(async () => true);
+    await saveReplyDraft(gmail, { threadId: "t1", body: "x", from: BAND }, "off", confirm, true);
+    expect(confirm).toHaveBeenCalledWith("require", expect.any(String));
+    const own = withAliases();
+    const confirmOwn = vi.fn(async () => false);
+    await saveNewDraft(own.gmail, { to: ["me@example.com"], subject: "Hi", body: "x", from: BAND }, confirmOwn, { selfWithoutDialog: true });
+    expect(confirmOwn).toHaveBeenCalledWith("off", expect.any(String));
+    // An alias as recipient is not the main address: the opt-in does not cover it.
+    const alias = withAliases();
+    const confirmAlias = vi.fn(async () => true);
+    await saveNewDraft(alias.gmail, { to: [BAND], subject: "Hi", body: "x" }, confirmAlias, { selfWithoutDialog: true });
+    expect(confirmAlias).toHaveBeenCalledWith("require", expect.any(String));
+  });
+
+  it("leaves every send-as address out of a reply-all, and offers the alias the mail went to", async () => {
+    const { gmail } = withAliases({
+      replySource: async () => ({
+        messageId: "m2",
+        source: { from: "Sabine <sabine@example.org>", to: "Contact@Band.example", cc: "bob@example.net", subject: "Gig", messageId: "<m2@example.org>" },
+      }),
+    });
+    const r = await saveReplyDraft(gmail, { threadId: "t1", replyAll: true, body: "x" }, "off", vi.fn(async () => true));
+    expect(r.to).toEqual(["sabine@example.org"]);
+    expect(r.cc).toEqual(["bob@example.net"]);
+    expect(r).toMatchObject({ from: "me@example.com", suggestedFrom: BAND });
+  });
+
+  it("answers its own mail sent from an alias to that mail's recipients, not to itself", async () => {
+    const { gmail } = withAliases({
+      replySource: async () => ({
+        messageId: "m2",
+        source: { from: `Band <${BAND}>`, to: "sabine@example.org", subject: "Gig", messageId: "<m2@example.org>" },
+      }),
+    });
+    const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", from: BAND }, "off", vi.fn(async () => true));
+    expect(r.to).toEqual(["sabine@example.org"]);
+  });
+
+  it("update_draft keeps the alias a draft has without asking again, checks it is still allowed, and asks for a new one", async () => {
+    const kept = withAliases({ draft: { from: `Band <${BAND}>` } });
+    const confirm = vi.fn(async () => true);
+    const r = await reviseDraft(kept.gmail, { draftId: "r1", body: "y" }, "off", confirm);
+    expect(confirm).toHaveBeenCalledWith("off", expect.stringContaining(`From: ${BAND}`));
+    expect(decodeRaw(kept.updated[0].raw).head).toMatch(new RegExp(`^From: ${BAND}\r?$`, "m"));
+    expect(r.from).toBe(BAND);
+
+    const fresh = withAliases({ draft: { from: "Me Myself <me@example.com>" } });
+    const confirmFresh = vi.fn(async () => true);
+    await reviseDraft(fresh.gmail, { draftId: "r1", body: "y", from: BAND }, "off", confirmFresh);
+    expect(confirmFresh).toHaveBeenCalledWith("require", expect.any(String));
+
+    const back = withAliases({ draft: { from: BAND } });
+    const confirmBack = vi.fn(async () => true);
+    const rb = await reviseDraft(back.gmail, { draftId: "r1", body: "y", from: "me@example.com" }, "off", confirmBack);
+    expect(confirmBack).toHaveBeenCalledWith("off", expect.any(String));
+    expect(decodeRaw(back.updated[0].raw).head).not.toMatch(/^From:/m);
+    expect(rb.from).toBe("me@example.com");
+
+    const gone = fakeGmail({ draft: { from: BAND } });
+    await expect(reviseDraft(gone.gmail, { draftId: "r1", body: "y" }, "off", vi.fn(async () => true))).rejects.toThrow(
+      /not an address this account may send from/,
+    );
+    expect(gone.updated).toEqual([]);
   });
 });

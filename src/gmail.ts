@@ -602,6 +602,7 @@ export interface DraftInfo {
   threadId: string;
   ownedByMailwarden: boolean;
   trashed: boolean;
+  from?: string;
   to?: string;
   cc?: string;
   bcc?: string;
@@ -1962,6 +1963,7 @@ export class Gmail {
       threadId: m.threadId ?? "",
       ownedByMailwarden: mark !== undefined && labelIds.includes(mark),
       trashed: labelIds.includes("TRASH"),
+      from: h("From"),
       to: h("To"),
       cc: h("Cc"),
       bcc: h("Bcc"),
@@ -1973,16 +1975,26 @@ export class Gmail {
   }
 
   /**
-   * Every real attachment in a thread, by message, as the thread is now. The attachment ids are
-   * fresh from this read: Gmail issues a new one for the same part on every fetch (measured
-   * 4 Nov 2026, three reads, three ids), so a draft names a thread attachment by message and
-   * filename and the id is looked up here.
+   * The send-as addresses a draft may name as its sender: the primary one and every alias Gmail has
+   * verified (`verificationStatus: accepted`), lower-cased. Read live on every call that needs it;
+   * a list kept from earlier would still allow an alias removed since. `gmail.modify` suffices
+   * (measured 4 Nov 2026 with a token narrowed to that one scope), and only the drafts tier may make
+   * the call (src/egress.ts).
    */
+  async sendAsAddresses(): Promise<{ address: string; primary: boolean }[]> {
+    const res = await this.req(() => this.api.users.settings.sendAs.list({ userId: "me" }));
+    return (res.data.sendAs ?? [])
+      .filter((s) => s.sendAsEmail && (s.isPrimary || s.verificationStatus === "accepted"))
+      .map((s) => ({ address: (s.sendAsEmail ?? "").toLowerCase(), primary: s.isPrimary === true }));
+  }
+
   /**
    * The attachments a reply in this thread may take, each with whom its message went between. A
    * Gmail thread is a conversation, not a group of recipients: it also holds the owner's forwards to
    * others (measured 4 Nov 2026: a sent forward sits in the thread of the mail it forwards), drafts
-   * and trashed mail. Drafts, trash and spam are left out; who a message reached travels along.
+   * and trashed mail. Drafts, trash and spam are left out; who a message reached travels along. The
+   * attachment ids are fresh from this read: Gmail issues a new one for the same part on every fetch
+   * (measured 4 Nov 2026, three reads, three ids), so a draft names one by message and filename.
    */
   async threadAttachments(threadId: string): Promise<ThreadAttachment[]> {
     const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));

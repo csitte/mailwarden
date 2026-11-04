@@ -189,14 +189,15 @@ describe("egress corpus — every endpoint Gmail documents", () => {
   });
 
   /**
-   * The `drafts` tier lifts one deny entry for three calls. Run the whole surface again with it on:
-   * exactly those three may change their verdict, and every other dangerous endpoint, in every
+   * The `drafts` tier lifts one deny entry for three calls, and one read out of the settings entry
+   * (the send-as list). Run the whole surface again with it on: exactly those four may change their verdict, and every other dangerous endpoint, in every
    * spelling, must still be caught by the deny list itself.
    */
   const DRAFTS_USED = new Set([
     "POST /gmail/v1/users/me/drafts",
     "PUT /gmail/v1/users/me/drafts/X",
     "GET /gmail/v1/users/me/drafts/X",
+    "GET /gmail/v1/users/me/settings/sendAs",
   ]);
 
   it.each(ENDPOINTS)("with the drafts tier: %s %s (%s)", (method, path, _id) => {

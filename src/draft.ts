@@ -415,6 +415,11 @@ export function fileParameter(param: string, filename: string): string[] {
 }
 
 export interface DraftContent extends Recipients {
+  /**
+   * A send-as alias to write as `From`, bare and already checked against the account's list.
+   * Omitted for the main address: Gmail then writes it itself, with the account's name.
+   */
+  from?: string;
   subject: string;
   body: string;
   inReplyTo?: string;
@@ -440,6 +445,7 @@ export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes
   const attachments = d.attachments ?? [];
   checkAttachments(attachments);
   const lines: string[] = [];
+  if (d.from !== undefined) lines.push(`From: ${normalizeRecipient(d.from)}`);
   if (d.to.length) lines.push(`To: ${d.to.join(", ")}`);
   if (d.cc.length) lines.push(`Cc: ${d.cc.join(", ")}`);
   if (d.bcc.length) lines.push(`Bcc: ${d.bcc.join(", ")}`);
@@ -505,7 +511,10 @@ function keepEnds(s: string, max: number): string {
   return cps.length <= max ? s : `${cps.slice(0, max - 21).join("")}\u2026${cps.slice(-20).join("")}`;
 }
 
-/** What the confirmation dialog says: the recipients first, new ones marked, the attachments, then the content. */
+/**
+ * What the confirmation dialog says: the sender when it is an alias, the recipients, new ones
+ * marked, the attachments, then the content.
+ */
 export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, unknown: readonly string[]): string {
   const origin = (a: DraftAttachment) =>
     a.source === "file"
@@ -526,6 +535,7 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
         : "mailwarden wants to change a draft it wrote.";
   return [
     `${head} It is not sent; you send it yourself from Gmail.`,
+    ...(d.from !== undefined ? [`From: ${dialogText(d.from, 80)} (not your main address)`] : []),
     ...list("To", d.to),
     ...list("Cc", d.cc),
     ...list("Bcc", d.bcc),

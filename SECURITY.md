@@ -67,7 +67,9 @@ mailbox content).
   every draft endpoint, `messages.import`/`insert`, permanent deletion and every `settings` branch
   except filters are *additionally* named in a deny list that is checked first (the `drafts` tier
   lifts the draft entry for exactly `drafts.create`, `drafts.update` and `drafts.get` on the plain
-  `/gmail/v1` path — `drafts.send` keeps its own entry, which no tier lifts), so a careless future
+  `/gmail/v1` path — `drafts.send` keeps its own entry, which no tier lifts — and takes one read out
+  of the settings entry: `GET settings/sendAs`, the list of addresses a draft may go out from;
+  creating, changing, verifying or deleting one stays refused), so a careless future
   addition to the allowlist cannot quietly re-open one. This is what turns "no tool would do that"
   into "no code path in this server can", whatever a prompt-injected mail talks a model into asking
   for. The deny list matches a *normalized* path, because `/gmail/v1/...` is not the only spelling
@@ -355,8 +357,21 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
   the only addresses it unlocks are the owner's. What it does not prevent: injected text in the
   body of a draft to yourself, which you then read in Gmail like any draft; and, if you forward or
   auto-forward your own mailbox elsewhere, a draft to yourself is only as private as that forwarding.
-  The list of own addresses is the profile address only; Gmail's send-as aliases are not read, so no
-  further API call and no further OAuth grant are involved, and the tiers and the egress guard are untouched.
+  The list of own addresses for this switch is the profile address only. Gmail's send-as aliases are
+  read since 0.29.0 (see the next point), but they do not count here: an alias may forward to someone
+  else, so a draft addressed to one is asked about like any other address.
+- **A sender other than the main address is asked about.** `from` on `create_draft` and
+  `update_draft` may name the main address or a send-as alias Gmail has verified for the account,
+  read live from `settings.sendAs.list` on each call (`gmail.modify` suffices, measured 4 Nov 2026
+  with a token narrowed to that one scope, so no further grant is involved; the egress guard admits
+  that one read, and only with the `drafts` tier). Any other address is refused — Gmail would not keep
+  it either: it replaces a `From` it does not accept with the main address when a draft is saved
+  (measured the same day). An alias counts like a file from the disk: the draft waits for the person's
+  yes, also in a reply to the thread's own people, because an injected mail must not get a draft
+  prepared in the name of a band or a firm unseen; the self switch above covers it only when every
+  recipient is the main address. A sender the draft already had is not asked about again on
+  `update_draft`, but checked against the list again. The aliases also count as the owner's own when
+  a reply's recipients are derived, so a reply-all to a mail sent to an alias does not copy the alias.
 - **No hidden recipient.** Every header value is checked for line breaks and control characters
   before a byte is written, recipients are re-emitted as bare, validated addresses rather than copied
   from the thread, and the body is base64-encoded — so neither a subject nor a body nor a hostile

@@ -2824,3 +2824,30 @@ describe("Gmail.threadAttachments — what a reply may take, and whom it reached
     ]);
   });
 });
+
+describe("Gmail.sendAsAddresses — who a draft may go out from", () => {
+  it("keeps the primary address and verified aliases, lower-cased, and drops pending or empty entries", async () => {
+    const api: any = {
+      users: {
+        settings: {
+          sendAs: {
+            list: async () => ({
+              data: {
+                sendAs: [
+                  { sendAsEmail: "Me@Example.com", isPrimary: true, isDefault: true },
+                  { sendAsEmail: "Contact@Band.example", verificationStatus: "accepted" },
+                  { sendAsEmail: "pending@band.example", verificationStatus: "pending" },
+                  { sendAsEmail: "", verificationStatus: "accepted" },
+                ],
+              },
+            }),
+          },
+        },
+      },
+    };
+    expect(await new Gmail(api as gmail_v1.Gmail).sendAsAddresses()).toEqual([
+      { address: "me@example.com", primary: true },
+      { address: "contact@band.example", primary: false },
+    ]);
+  });
+});

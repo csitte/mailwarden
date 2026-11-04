@@ -254,8 +254,8 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `preview_filter` | Check a filter before creating it: how many messages its criteria match today (`currentMatches`, from the same index an `applyToExisting` sweep would use), which existing filters have exactly the same criteria (`sameCriteria`) and which share a `from`/`to`/`subject`/`query` value with it (`overlapping`, with the shared fields named), which `addLabels` names would be created, and whether the action trashes every future match. Read-only; same validation as `create_filter` |
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
-| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. A new message, any address the thread did not already contain, and any file from the disk is confirmed in a client dialog; the one exception is a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` ([details](#drafts-opt-in--written-here-sent-by-you)) |
-| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused. Attachments not mentioned are kept. A new address or a new file is confirmed like one in `create_draft` |
+| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. `from` picks one of the account's send-as addresses. A new message, any address the thread did not already contain, any file from the disk and any sender other than the main address is confirmed in a client dialog; the one exception is a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` ([details](#drafts-opt-in--written-here-sent-by-you)) |
+| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused. Attachments not mentioned, and the sender, are kept. A new address, a new file or a new alias sender is confirmed like one in `create_draft` |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
 alongside the same JSON as fenced text — clients never have to parse prose.
@@ -440,6 +440,14 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
 - **`update_draft`:** replaces the text of a draft `create_draft` wrote. Such drafts carry the label
   `MCP/Drafts`; a draft without it is refused, and no label tool can add that label, so a draft you
   wrote yourself cannot be handed to it.
+- **Sender** (`from`, both tools): your main address or one of the account's verified Gmail send-as
+  addresses, such as a band's or a firm's; any other is refused, and a new one is added and verified in
+  Gmail's settings, not here. Without `from` a new draft goes from your main address and
+  `update_draft` keeps the sender the draft has. The result always names `from`; a reply to a mail that
+  was sent to one of your aliases offers that alias as `suggestedFrom`, which is only used when it is
+  passed as `from`. The list is read live from Gmail on each call, with the permission the tier
+  already has: no new grant, no new sign-in. A reply-all leaves every one of your send-as addresses
+  out, so a band does not write to itself.
 - **Attachments** (`attachments`, at most 10 files and 25 MB together) come from exactly two places.
   A **file** only from the folder named in `MAILWARDEN_ATTACH_DIR` — a path relative to it or an
   absolute path inside it; `..`, symlinks and junctions that lead out, hard links and (on Windows)
@@ -480,10 +488,15 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   **A file from the disk is confirmed like a new address**, also in a reply to someone already in
   the thread: it reaches a place it was not before, and the sender of an injected mail is always a
   known recipient of their own thread. `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` covers a file only
-  when every recipient is your own address. An attachment taken from the thread goes back to that
-  thread and follows the rule for its recipients; one already in the draft is not asked about again.
-  The dialog lists the recipients first and marks the new ones, then each attachment with its size
-  and origin.
+  when every recipient is your own address. An attachment taken from the thread follows the rule for
+  its recipients only when every recipient of the draft is someone that mail went between; otherwise
+  it is confirmed like a file. One already in the draft is not asked about again.
+  **A sender other than your main address is confirmed the same way**, in a reply to the thread's own
+  people too, so an injected mail cannot get a draft prepared in a band's or a firm's name unseen;
+  `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` covers it only when every recipient is your main address.
+  A sender the draft already had is not asked about again.
+  The dialog shows an alias sender first, then lists the recipients and marks the new ones, then each
+  attachment with its size and origin.
 - **What it does not do.** No sending, no files from anywhere but `MAILWARDEN_ATTACH_DIR`, no
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
   HTML — plain text only. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
@@ -579,7 +592,8 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   authenticated Gmail request passes one checkpoint that allows exactly the endpoints mailwarden
   uses and refuses the rest — with `messages.send`, `drafts.send`, every other draft endpoint
   (unless the `drafts` tier opens exactly `drafts.create`, `drafts.update` and `drafts.get`), `messages.import`/`insert`,
-  permanent deletion and every non-filter `settings` endpoint named in a deny list checked first, so
+  permanent deletion and every non-filter `settings` endpoint (the `drafts` tier reads one: the send-as
+  list, nothing that changes it) named in a deny list checked first, so
   a later edit to the allowlist cannot reopen them by accident — including through the
   `/upload/gmail/v1/...` route Google's client takes when a method is handed `media`. A request whose
   host was rewritten (`GOOGLE_CLOUD_UNIVERSE_DOMAIN`, a `rootUrl` option) is refused before the token

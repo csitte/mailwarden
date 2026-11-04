@@ -43,6 +43,8 @@ type Rule = {
   what: string;
   /** Lifted when the `drafts` tier is on — and then only for the plain `/gmail/v1` path, see below. */
   draftsTier?: true;
+  /** The one read inside this rule the `drafts` tier may make: a GET on exactly this raw path. */
+  draftsTierRead?: RegExp;
 };
 
 /**
@@ -66,11 +68,14 @@ const FORBIDDEN: Rule[] = [
     what: "permanently deleting mail (mailwarden only ever trashes)",
   },
   {
-    // Filters are the one settings branch mailwarden uses; forwarding, send-as,
+    // Filters are the one settings branch mailwarden changes; forwarding, send-as,
     // delegation, IMAP/POP and vacation replies are all exfiltration or
-    // auto-reply paths and stay shut.
+    // auto-reply paths and stay shut. The drafts tier reads one list here, the
+    // send-as addresses, to check a draft's `from`: GET on the collection, nothing
+    // else — creating, changing or verifying an address stays behind this rule.
     path: new RegExp(`^${U}/settings/(?!filters(/|$))`),
     what: "changing mailbox settings (forwarding, send-as, delegation, IMAP/POP, vacation)",
+    draftsTierRead: new RegExp(`^${U}/settings/sendAs$`),
   },
 ];
 
@@ -112,14 +117,16 @@ const ALLOWED: Rule[] = [
 ];
 
 /**
- * The draft calls the `drafts` tier makes, and only while it is enabled: save, replace, read
- * one. Not `drafts.list` (nothing needs it), not `drafts.delete` (it deletes for good; a draft
- * goes to the trash like any message), never `drafts.send`.
+ * The calls the `drafts` tier makes, and only while it is enabled: save, replace, read one
+ * draft, and read the send-as addresses a draft's `from` may name. Not `drafts.list` (nothing
+ * needs it), not `drafts.delete` (it deletes for good; a draft goes to the trash like any
+ * message), never `drafts.send`, and no send-as call that changes anything.
  */
 const DRAFTS_ALLOWED: Rule[] = [
   { method: "POST", path: new RegExp(`^${U}/drafts$`), what: "create a draft" },
   { method: "PUT", path: new RegExp(`^${U}/drafts/[^/]+$`), what: "replace a draft" },
   { method: "GET", path: new RegExp(`^${U}/drafts/[^/]+$`), what: "get a draft" },
+  { method: "GET", path: new RegExp(`^${U}/settings/sendAs$`), what: "list send-as addresses" },
 ];
 
 /** What the guard is told about the deployment. Default: the narrowest. */
@@ -181,6 +188,9 @@ export function checkEgress(method: string, url: string, opts: EgressOptions = {
     // The drafts tier lifts the compose rule for the raw path only. An upload URL normalises
     // to the same path but is not the same request, so for it the rule still holds.
     if (rule.draftsTier && opts.drafts && deny === pathname) continue;
+    if (rule.draftsTierRead && opts.drafts && verb === "GET" && deny === pathname && rule.draftsTierRead.test(pathname)) {
+      continue;
+    }
     if (rule.path.test(deny)) return rule.what;
   }
 

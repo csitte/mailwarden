@@ -262,7 +262,8 @@ describe("guardEgress — in front of the real googleapis client", () => {
     await gmail.users.drafts.create({ userId: "me", requestBody: { message: { raw, threadId: "t1" } } });
     await gmail.users.drafts.update({ userId: "me", id: "r1", requestBody: { message: { raw } } });
     await gmail.users.drafts.get({ userId: "me", id: "r1", format: "metadata" });
-    expect(calls).toHaveLength(3);
+    await gmail.users.settings.sendAs.list({ userId: "me" });
+    expect(calls).toHaveLength(4);
     const reached = new Set(
       calls.map((call) => {
         const [method, url] = call.split(" ");
@@ -284,6 +285,31 @@ describe("guardEgress — in front of the real googleapis client", () => {
     await expect(gmail.users.drafts.delete({ userId: "me", id: "r1" })).rejects.toThrow(/allowlist/);
     await expect(gmail.users.drafts.list({ userId: "me" })).rejects.toThrow(/allowlist/);
     await expect(gmail.users.messages.send({ userId: "me", requestBody: { raw: "x" } })).rejects.toThrow(/sending mail/);
+    expect(calls).toEqual([]);
+  });
+
+  it("with the drafts tier, reads the send-as list and changes nothing in it", async () => {
+    const { gmail, calls } = guardedClient({ drafts: true });
+    await gmail.users.settings.sendAs.list({ userId: "me" });
+    expect(calls).toHaveLength(1);
+    const body = { sendAsEmail: "band@example.com" };
+    await expect(gmail.users.settings.sendAs.create({ userId: "me", requestBody: body })).rejects.toThrow(/mailbox settings/);
+    await expect(gmail.users.settings.sendAs.get({ userId: "me", sendAsEmail: "band@example.com" })).rejects.toThrow(/mailbox settings/);
+    await expect(
+      gmail.users.settings.sendAs.patch({ userId: "me", sendAsEmail: "band@example.com", requestBody: body }),
+    ).rejects.toThrow(/mailbox settings/);
+    await expect(gmail.users.settings.sendAs.verify({ userId: "me", sendAsEmail: "band@example.com" })).rejects.toThrow(
+      /mailbox settings/,
+    );
+    await expect(gmail.users.settings.sendAs.delete({ userId: "me", sendAsEmail: "band@example.com" })).rejects.toThrow(
+      /mailbox settings/,
+    );
+    expect(calls).toHaveLength(1);
+  });
+
+  it("without the drafts tier, does not read the send-as list", async () => {
+    const { gmail, calls } = guardedClient();
+    await expect(gmail.users.settings.sendAs.list({ userId: "me" })).rejects.toThrow(/mailbox settings/);
     expect(calls).toEqual([]);
   });
 

@@ -4,8 +4,9 @@
  * so every path here runs in a test against fakes.
  *
  * Nothing in this file sends. The Gmail calls it can reach are `drafts.create`, `drafts.update`
- * and `drafts.get` (plus the read and label calls the rest of mailwarden uses, and
- * `messages.attachments.get` for an attachment taken from the thread or kept from the draft);
+ * and `drafts.get` (plus the read and label calls the rest of mailwarden uses,
+ * `messages.attachments.get` for an attachment taken from the thread or kept from the draft, and
+ * `settings.sendAs.list` to check a sender and to know the account's own addresses);
  * `drafts.send` and `messages.send` stay refused in src/egress.ts whatever is enabled.
  */
 
@@ -21,6 +22,7 @@ import {
   draftDialog,
   isMimeType,
   mimeTypeFor,
+  normalizeRecipient,
   normalizeRecipients,
   onlyOwnAddresses,
   replyRecipients,
@@ -45,6 +47,13 @@ export interface DraftGmail {
   getDraft(draftId: string): Promise<DraftInfo>;
   threadAttachments(threadId: string): Promise<ThreadAttachment[]>;
   attachmentBytes(messageId: string, attachmentId: string): Promise<Buffer>;
+  sendAsAddresses(): Promise<SendAs[]>;
+}
+
+/** One address the account may send from: the primary one, or an alias Gmail has verified. */
+export interface SendAs {
+  address: string;
+  primary: boolean;
 }
 
 /** Reads one file from MAILWARDEN_ATTACH_DIR (`readAttachmentFile` in attach.ts, a fake in tests). */
@@ -86,6 +95,10 @@ export interface DraftResult extends Recipients {
   messageId: string;
   threadId: string;
   kind: "reply" | "new";
+  /** The address the draft goes out from: the main one, or the alias it names. */
+  from: string;
+  /** For a reply: an alias the answered mail was sent to, when the draft does not use it already. */
+  suggestedFrom?: string;
   subject: string;
   /** Addresses that were not in the thread (reply) or in the draft before (update). */
   newRecipients: string[];
@@ -104,6 +117,7 @@ export interface DraftResult extends Recipients {
 export interface ReplyInput {
   threadId: string;
   messageId?: string;
+  from?: string;
   replyAll?: boolean;
   cc?: string[];
   bcc?: string[];
@@ -113,6 +127,7 @@ export interface ReplyInput {
 }
 
 export interface NewInput {
+  from?: string;
   to: string[];
   cc?: string[];
   bcc?: string[];
@@ -123,6 +138,8 @@ export interface NewInput {
 
 export interface UpdateInput {
   draftId: string;
+  /** Omitted: the draft keeps the sender it has. */
+  from?: string;
   to?: string[];
   cc?: string[];
   bcc?: string[];
@@ -147,7 +164,9 @@ export interface UpdateInput {
  * A file from the disk (`newFiles`) counts like a new recipient: it reaches a place it was not
  * before, and the sender of an injected mail is a known recipient of their own thread. So does an
  * attachment from a mail that some recipient of the draft never received (`reachesNew`). The
- * opt-in covers either only when the draft goes to the owner alone (see `selfOnly`).
+ * opt-in covers either only when the draft goes to the owner alone (see `selfOnly`). A sender
+ * other than the main address counts the same way: an injected mail must not get a draft prepared
+ * in the name of a band or a firm without the person seeing it.
  */
 function modeFor(configured: ConfirmMode, unknown: readonly string[], selfOnly: boolean, newFiles = false): ConfirmMode {
   if (!unknown.length && !newFiles) return configured;
@@ -310,6 +329,47 @@ async function markNewReach(list: DraftAttachment[], recipients: Recipients, own
 /** Something attached reaches a place it was not before: a file from the disk, or a mail's attachment going further. */
 const reachesNew = (list: readonly DraftAttachment[]) => list.some((a) => a.source === "file" || (a.newTo?.length ?? 0) > 0);
 
+/** The account's send-as list, read once per call and only when something needs it. */
+function sendAsOnce(gmail: DraftGmail): () => Promise<SendAs[]> {
+  let list: Promise<SendAs[]> | undefined;
+  const read = async () => {
+    const out: SendAs[] = [];
+    for (const s of await gmail.sendAsAddresses()) {
+      try {
+        out.push({ address: normalizeRecipient(s.address), primary: s.primary });
+      } catch {
+        // not an address mailwarden can write: never offered, never matched
+      }
+    }
+    return out;
+  };
+  return () => (list ??= read());
+}
+
+/** The aliases: every send-as address but the main one. */
+async function aliasesOf(sendAs: () => Promise<SendAs[]>, main: string): Promise<string[]> {
+  return (await sendAs()).filter((s) => !s.primary && s.address !== main).map((s) => s.address);
+}
+
+/**
+ * The sender a caller asked for, checked: the main address (returned as `undefined`, so no `From`
+ * is written and Gmail puts it with the account's name), or an alias on the account's send-as list.
+ * Anything else is refused. Gmail would not keep it either — it replaces a `From` it does not
+ * accept with the main address when the draft is saved (measured 4 Nov 2026) — but then the result
+ * would name a sender the draft does not have.
+ */
+async function checkFrom(requested: string, main: string, sendAs: () => Promise<SendAs[]>): Promise<string | undefined> {
+  const from = normalizeRecipient(requested);
+  if (from === main) return undefined;
+  const aliases = await aliasesOf(sendAs, main);
+  if (aliases.includes(from)) return from;
+  throw new ToolError(
+    "invalid_input",
+    `${from} is not an address this account may send from. It may send from: ${[main, ...aliases].join(", ")} ` +
+      "(Gmail's send-as addresses; a new one is added and verified in Gmail's settings). Nothing was written.",
+  );
+}
+
 export async function saveReplyDraft(
   gmail: DraftGmail,
   input: ReplyInput,
@@ -318,11 +378,19 @@ export async function saveReplyDraft(
   selfWithoutDialog = false,
   readFile: ReadFile = noFiles,
 ): Promise<DraftResult> {
+  const sendAs = sendAsOnce(gmail);
   const [{ emailAddress }, { source }] = await Promise.all([
     gmail.getProfile(),
     gmail.replySource(input.threadId, input.messageId),
+    sendAs(),
   ]);
-  const derived = replyRecipients(source, [emailAddress], input.replyAll ?? false);
+  const main = emailAddress.toLowerCase();
+  const aliases = await aliasesOf(sendAs, main);
+  const from = input.from === undefined ? undefined : await checkFrom(input.from, main, sendAs);
+  // Every send-as address is the owner's own here: a mail to the band's alias is not answered to
+  // the band. Only here — the self opt-in below still knows the main address alone, since an alias
+  // may well forward to someone else.
+  const derived = replyRecipients(source, [main, ...aliases], input.replyAll ?? false);
   const extraCc = normalizeRecipients(input.cc).filter((a) => !derived.to.includes(a) && !derived.cc.includes(a));
   const recipients: Recipients = {
     to: derived.to,
@@ -348,6 +416,7 @@ export async function saveReplyDraft(
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
   const content: DraftContent = {
     ...recipients,
+    from,
     subject: input.subject ?? replySubject(source.subject),
     body: input.body,
     ...replyThreading(source),
@@ -355,11 +424,15 @@ export async function saveReplyDraft(
   };
   const raw = buildMime(content);
   await markNewReach(attachments, recipients, async () => [emailAddress]);
-  const files = reachesNew(attachments);
-  const self = await selfOnly(selfWithoutDialog, unknown, async () => [emailAddress], recipients, files);
-  const confirmedByUser = await confirm(modeFor(configured, unknown, self, files), draftDialog("reply", content, unknown));
+  const widens = reachesNew(attachments) || from !== undefined;
+  const self = await selfOnly(selfWithoutDialog, unknown, async () => [emailAddress], recipients, widens);
+  const confirmedByUser = await confirm(modeFor(configured, unknown, self, widens), draftDialog("reply", content, unknown));
   const ref = await gmail.createDraft(raw, input.threadId);
-  return result(ref, "reply", content, unknown, confirmedByUser);
+  // The alias the answered mail went to, offered rather than set: the caller decides, and a sender
+  // other than the main address is confirmed in the dialog.
+  const addressed = [...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
+  const suggestedFrom = aliases.find((a) => addressed.includes(a) && a !== from);
+  return { ...result(ref, "reply", content, unknown, confirmedByUser, main), ...(suggestedFrom ? { suggestedFrom } : {}) };
 }
 
 export async function saveNewDraft(
@@ -373,23 +446,19 @@ export async function saveNewDraft(
     cc: normalizeRecipients(input.cc),
     bcc: normalizeRecipients(input.bcc),
   };
+  const main = (await gmail.getProfile()).emailAddress.toLowerCase();
+  const from = input.from === undefined ? undefined : await checkFrom(input.from, main, sendAsOnce(gmail));
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { readFile: opts.readFile ?? noFiles });
-  const content: DraftContent = { ...recipients, subject: input.subject, body: input.body, attachments };
+  const content: DraftContent = { ...recipients, from, subject: input.subject, body: input.body, attachments };
   const raw = buildMime(content);
   const unknown = unknownRecipients(recipients, []);
   // A new message has no thread to vouch for anyone: always asked, never written unasked — unless
   // the opt-in is on and every recipient is the owner's own address (see `modeFor`).
-  const files = reachesNew(attachments);
-  const self = await selfOnly(
-    opts.selfWithoutDialog ?? false,
-    unknown,
-    async () => [(await gmail.getProfile()).emailAddress],
-    recipients,
-    files,
-  );
-  const confirmedByUser = await confirm(modeFor(opts.configured ?? "off", unknown, self, files), draftDialog("new", content, unknown));
+  const widens = reachesNew(attachments) || from !== undefined;
+  const self = await selfOnly(opts.selfWithoutDialog ?? false, unknown, async () => [main], recipients, widens);
+  const confirmedByUser = await confirm(modeFor(opts.configured ?? "off", unknown, self, widens), draftDialog("new", content, unknown));
   const ref = await gmail.createDraft(raw);
-  return result(ref, "new", content, unknown, confirmedByUser);
+  return result(ref, "new", content, unknown, confirmedByUser, main);
 }
 
 export async function reviseDraft(
@@ -422,6 +491,13 @@ export async function reviseDraft(
     bcc: input.bcc ? normalizeRecipients(input.bcc) : old.bcc,
   };
   const unknown = unknownRecipients(recipients, [...old.to, ...old.cc, ...old.bcc]);
+  const main = (await gmail.getProfile()).emailAddress.toLowerCase();
+  // The sender the draft has now. Gmail writes a `From` into every draft it saves: the main address,
+  // with the account's name, when mailwarden wrote none.
+  const had = normalizeLenient(before.from)[0] ?? main;
+  // Omitted keeps it — checked again all the same, so an alias removed since is not written back
+  // as if it still held.
+  const from = await checkFrom(input.from ?? had, main, sendAsOnce(gmail));
   const threading = threadingOf(before);
   // Omitted keeps what the draft carries: an update replaces the whole message, so without this
   // every correction to the text would drop the files without a word.
@@ -434,26 +510,22 @@ export async function reviseDraft(
     : await keepAll(gmail, before);
   const content: DraftContent = {
     ...recipients,
+    from,
     subject: input.subject ?? before.subject,
     body: input.body,
     ...threading,
     attachments,
   };
   const raw = buildMime(content);
-  await markNewReach(attachments, recipients, async () => [(await gmail.getProfile()).emailAddress]);
-  const files = reachesNew(attachments);
-  const self = await selfOnly(
-    selfWithoutDialog,
-    unknown,
-    async () => [(await gmail.getProfile()).emailAddress],
-    recipients,
-    files,
-  );
-  const confirmedByUser = await confirm(modeFor(configured, unknown, self, files), draftDialog("update", content, unknown));
+  await markNewReach(attachments, recipients, async () => [main]);
+  // A sender the draft already had was confirmed when it was set; a new alias is asked about.
+  const widens = reachesNew(attachments) || (from !== undefined && from !== had);
+  const self = await selfOnly(selfWithoutDialog, unknown, async () => [main], recipients, widens);
+  const confirmedByUser = await confirm(modeFor(configured, unknown, self, widens), draftDialog("update", content, unknown));
   // A draft that answers a thread is passed its thread again — without it Gmail moves the
   // updated draft into a thread of its own (measured 29 Oct 2026).
   const ref = await gmail.updateDraft(input.draftId, raw, threading.inReplyTo ? before.threadId : undefined);
-  return result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser);
+  return result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main);
 }
 
 /** Every attachment the draft carries, re-read so the update can write it again. */
@@ -490,12 +562,14 @@ function result(
   content: DraftContent,
   unknown: string[],
   confirmedByUser: boolean,
+  main: string,
 ): DraftResult {
   return {
     draftId: ref.draftId,
     messageId: ref.messageId,
     threadId: ref.threadId,
     kind,
+    from: content.from ?? main,
     to: content.to,
     cc: content.cc,
     bcc: content.bcc,

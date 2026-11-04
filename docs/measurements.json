@@ -159,6 +159,18 @@
         }
       ],
       "caution": "Three threads, all of the same shape: the received original and the owner's sent forward in one thread. Enough to show that a thread is not a group of recipients; not a rate."
+    },
+    "draft-from-and-send-as-scope-2026-11-04": {
+      "what": "(1) settings.sendAs.list called with an access token narrowed by the refresh grant to one scope each, gmail.modify and gmail.settings.basic. (2) Two drafts saved through drafts.create, one with a From that is not a send-as address of the account and one with the main address and a display name, each read back with drafts.get and trashed. `hits` is calls or drafts made, `ok` how many answered 200, `fromKept` how many kept the From as written.",
+      "mailbox": "taktum test mailbox (no send-as alias)",
+      "date": "2026-11-04",
+      "endpoint": "settings.sendAs.list, drafts.create, drafts.get",
+      "source": "mailwarden session on 2026-11-04 for session-bridge thread 644-mailwarden-draft-absender-waehlbar, scratch scripts probe-sendas.mjs and probe-sendas-scope.mjs",
+      "queries": [
+        { "query": "sendAs.list with a token of one scope each", "hits": 2, "ok": 2 },
+        { "query": "drafts.create with a foreign From, and with the main address", "hits": 2, "fromKept": 1 }
+      ],
+      "caution": "gmail.modify alone answers sendAs.list, so the drafts tier needs no new grant. The foreign From (someone@example.com) came back as the main address with the account's name; the main address with a display name stayed as written. Not measured: a draft from a real alias, its display name, signature and Reply-To when sent; the taktum mailbox has no alias."
     }
   }
 }

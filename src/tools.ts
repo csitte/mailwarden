@@ -1843,11 +1843,20 @@ const ATTACH_NOTE =
   "and a client without one is refused (the operator's MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1 covers it only when every recipient is the user's own address). " +
   "Large files take time: a 24 MB attachment took about 40 seconds to save. ";
 
+const FROM_NOTE =
+  "FROM (optional): the address the draft goes out from — the user's main address or one of the account's verified Gmail send-as addresses; any other is refused. " +
+  "Omitted, a new draft goes from the main address. A sender other than the main address is confirmed by the user in the dialog, like a new recipient. " +
+  "The result always names `from`; for a reply to a mail sent to one of the aliases it offers that alias as `suggestedFrom` — pass it as `from` only when the user wants it. ";
+
+const fromAddress = z.string().max(320);
+
 const draftOutput = {
   draftId: z.string(),
   messageId: z.string(),
   threadId: z.string(),
   kind: z.enum(["reply", "new"]),
+  from: z.string(),
+  suggestedFrom: z.string().optional(),
   to: z.array(z.string()),
   cc: z.array(z.string()),
   bcc: z.array(z.string()),
@@ -1888,7 +1897,7 @@ function registerDraftTools(
       message,
       mode === confirmMode
         ? undefined
-        : "A draft to an address the thread did not contain, or with a file from the disk attached, always needs the user's yes in a confirmation dialog, " +
+        : "A draft to an address the thread did not contain, with a file from the disk attached, or from an address other than the main one always needs the user's yes in a confirmation dialog, " +
             "and this client cannot show one (no elicitation support). Nothing was written. " +
             "(A draft addressed only to the mailbox owner's own address can be allowed without a dialog by the operator: MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1.)",
     );
@@ -1904,6 +1913,7 @@ function registerDraftTools(
         "NEW MESSAGE: omit threadId, pass to and subject. " +
         "Plain text body only. Addresses are saved bare (no display names). " +
         ATTACH_NOTE +
+        FROM_NOTE +
         "CONFIRMATION: a new message, and any reply that goes to, or whose cc/bcc names, someone not already in the thread (a Reply-To counts only if it is also in From/To/Cc), is ALWAYS confirmed by the user in a client dialog " +
         "(MCP elicitation) and refused on a client without one; other replies follow MAILWARDEN_CONFIRM. A declined dialog returns declined_by_user and saves nothing. " +
         "Exception, set by the operator (MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1): a draft whose new recipients are all the user's own address is saved without any dialog, whatever the client can show (a client may advertise dialogs and still not display them), and nobody is asked; any other address is confirmed or refused as before. " +
@@ -1914,6 +1924,7 @@ function registerDraftTools(
         threadId: z.string().optional(),
         messageId: z.string().optional(),
         replyAll: z.boolean().default(false),
+        from: fromAddress.optional(),
         to: recipientList.optional(),
         cc: recipientList.optional(),
         bcc: recipientList.optional(),
@@ -1924,7 +1935,7 @@ function registerDraftTools(
       outputSchema: draftOutput,
       annotations: { title: "Create draft", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ threadId, messageId, replyAll, to, cc, bcc, subject, body, attachments }) => {
+    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, attachments }) => {
       const gmail = await client();
       if (threadId) {
         if (to?.length) {
@@ -1936,7 +1947,7 @@ function registerDraftTools(
         return ok(
           await saveReplyDraft(
             gmail,
-            { threadId, messageId, replyAll, cc, bcc, subject, body, attachments },
+            { threadId, messageId, replyAll, from, cc, bcc, subject, body, attachments },
             confirmMode,
             confirm,
             selfWithoutDialog,
@@ -1951,7 +1962,7 @@ function registerDraftTools(
         throw new ToolError("invalid_input", "A new message needs `to` and `subject` (or pass threadId to reply).");
       }
       return ok(
-        await saveNewDraft(gmail, { to, cc, bcc, subject, body, attachments }, confirm, {
+        await saveNewDraft(gmail, { from, to, cc, bcc, subject, body, attachments }, confirm, {
           configured: confirmMode,
           selfWithoutDialog,
           readFile,
@@ -1970,11 +1981,14 @@ function registerDraftTools(
         "attachments: omitted keeps every file the draft carries; a list replaces them all — name one to keep as {kept: filename}; [] removes them. " +
         ATTACH_NOTE +
         "A file kept from the draft is not asked about again; a new file from the disk is. " +
+        FROM_NOTE +
+        "from omitted keeps the draft's sender. " +
         "CONFIRMATION: adding an address the draft did not already have is ALWAYS confirmed by the user in a client dialog (unless the operator set MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1 and the added addresses are all the user's own: then nobody is asked); otherwise MAILWARDEN_CONFIRM applies. " +
         "USE WHEN: the user wants changes to a draft you wrote (draftId from create_draft). " +
         "SIDE EFFECTS: overwrites the draft — the previous text is not kept. Gmail gives the draft a new messageId. Nothing is sent.",
       inputSchema: {
         draftId: z.string(),
+        from: fromAddress.optional(),
         to: recipientList.optional(),
         cc: recipientList.optional(),
         bcc: recipientList.optional(),
@@ -1985,11 +1999,11 @@ function registerDraftTools(
       outputSchema: draftOutput,
       annotations: { title: "Update draft", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ draftId, to, cc, bcc, subject, body, attachments }) =>
+    async ({ draftId, from, to, cc, bcc, subject, body, attachments }) =>
       ok(
         await reviseDraft(
           await client(),
-          { draftId, to, cc, bcc, subject, body, attachments },
+          { draftId, from, to, cc, bcc, subject, body, attachments },
           confirmMode,
           confirm,
           selfWithoutDialog,

@@ -272,6 +272,7 @@ function fake(over: Partial<DraftGmail> & { draft?: Partial<DraftInfo> } = {}) {
     }),
     threadAttachments: async () => THREAD_FILES,
     attachmentBytes: async (messageId, attachmentId) => (fetched.push(`${messageId}/${attachmentId}`), Buffer.from(attachmentId)),
+    sendAsAddresses: async () => [{ address: "me@example.com", primary: true }],
     ...over,
   };
   return { gmail, created, updated, fetched };

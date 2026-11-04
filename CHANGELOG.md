@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **A draft can go out from a send-as address.** `create_draft` and `update_draft` take `from`: the
+  account's main address or one of its Gmail send-as aliases with `verificationStatus: accepted`,
+  read live from `settings.sendAs.list` on each call; any other address is refused and the message
+  names the allowed ones. An alias is confirmed in the dialog like a file from the disk, also in a
+  reply to the thread's own people, and the dialog shows it first; the self switch covers it only when
+  every recipient is the main address. `update_draft` keeps the draft's sender when `from` is omitted,
+  checks it against the list again, and does not ask again for a sender the draft already had. The
+  result always names `from`, and a reply to a mail sent to an alias offers that alias as
+  `suggestedFrom` without setting it. For the main address no `From` is written, as before, so Gmail
+  keeps putting the account's name. Asked for by the gmail deployment, for a band's alias.
+- **The egress guard admits one read more, with the `drafts` tier only:** `GET settings/sendAs`.
+  The settings deny rule carves out exactly that call on the plain path; creating, changing,
+  verifying and deleting a send-as address stay refused, as does every other settings branch.
+  `gmail.modify` suffices for it (measured with a token narrowed to that one scope), so no new
+  OAuth grant and no new sign-in.
+
+### Fixed
+- **A reply-all to a mail sent to one of the account's aliases no longer copies the alias.** Only the
+  main address counted as the owner's own when a reply's recipients were derived, so a band answering
+  a mail to its alias put that alias in `Cc`. Every verified send-as address counts now; the self
+  switch still knows the main address alone.
+
 ## [0.28.1] - 2026-11-04
 
 ### Fixed
