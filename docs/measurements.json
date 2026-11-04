@@ -144,6 +144,21 @@
         }
       ],
       "caution": "Gmail sent both, so its 25 MB limit counts the files, not the encoded message: the 24 MiB one was 32.8 MB as a message. Not measured: exactly 25 MiB, and a recipient outside Gmail, whose server may refuse a message of that size by its encoded length."
+    },
+    "forward-in-thread-2026-11-04": {
+      "what": "Whether a forward the owner sent stays in the Gmail thread of the mail it forwards. threads.list for sent mail with a forward-like subject (fwd, fw, wg), then threads.get metadata of each thread with more than one message until three were found; only labels and whether a subject starts with a forward prefix were read, no address or text. `hits` is threads examined, `forwardInThread` how many held the original and the sent forward together.",
+      "mailbox": "main mailbox of the PC (default account)",
+      "date": "2026-11-04",
+      "endpoint": "threads.list, threads.get",
+      "source": "mailwarden session on 2026-11-04 for the Grok review of 0.28.0 (session-bridge thread 620-mailwarden-review-0-25, finding M7)",
+      "queries": [
+        {
+          "query": "in:sent subject:(fwd OR wg OR fw), first three threads with two or more messages",
+          "hits": 3,
+          "forwardInThread": 3
+        }
+      ],
+      "caution": "Three threads, all of the same shape: the received original and the owner's sent forward in one thread. Enough to show that a thread is not a group of recipients; not a rate."
     }
   }
 }

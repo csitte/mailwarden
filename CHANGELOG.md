@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **An attachment taken from a mail in the thread is asked about unless every recipient got that very
+  mail.** 0.28.0 only checked that the mail was in the reply's thread, but a Gmail thread also holds
+  the owner's forwards to others (measured: a sent forward sits in the thread it forwards), drafts and
+  trashed mail. A payslip forwarded to a lawyer could go unasked into a reply to the other side, and
+  `update_draft` did not ask again for an address already in the draft. Now an attachment from a mail
+  needs the dialog when any recipient is outside that mail's `From`/`To`/`Cc` (the account's own
+  address aside), the dialog names who never got it, and drafts, trash and spam are not taken from at
+  all. Reported in the Grok review of 0.28.0 (M7).
+- **A FIFO in `MAILWARDEN_ATTACH_DIR` no longer hangs the call.** The file is opened non-blocking and
+  refused as not a regular file at once; before, each such call held one of the four threads the
+  process shares for file, DNS and crypto work. (L16)
+- **The dialog keeps the end of a long path**, where the file's real name is, and shortens the middle;
+  a renamed file behind a long folder showed no trace of what it really was. (L17)
+- The size limit is checked against the sizes Gmail reports before the bytes of a mail's attachment
+  are fetched, not after (N31); "1 byte" instead of "1 bytes" (N32); a comment on case sensitivity
+  corrected (N33).
+- **The hard-link refusal names the case of a synced drive.** Google Drive for desktop reports a
+  second link for a fresh copy for a few seconds while it uploads; the message now says to try again
+  shortly. The check itself is unchanged. Reported by the gmail deployment.
+
 ## [0.28.0] - 2026-11-04
 
 ### Added

@@ -2781,3 +2781,46 @@ describe("summarizeAttachments", () => {
     expect(s.attachmentCount).toBe(SEARCH_ATTACHMENT_CAP + 5);
   });
 });
+
+describe("Gmail.threadAttachments — what a reply may take, and whom it reached", () => {
+  const part = (id: string, filename: string) => ({
+    filename,
+    mimeType: "application/pdf",
+    body: { attachmentId: `a-${id}`, size: 3 },
+  });
+  const msg = (id: string, labelIds: string[], headers: Record<string, string>) => ({
+    id,
+    labelIds,
+    payload: {
+      mimeType: "multipart/mixed",
+      headers: Object.entries(headers).map(([name, value]) => ({ name, value })),
+      parts: [{ mimeType: "text/plain", body: { data: "" } }, part(id, `${id}.pdf`)],
+    },
+  });
+
+  it("leaves out drafts, trash and spam, and carries From/To/Cc of each message", async () => {
+    // Grok review of 0.28.0, M7: a draft was never sent, trash and spam are not the conversation.
+    const api: any = {
+      users: {
+        threads: {
+          get: async () => ({
+            data: {
+              messages: [
+                msg("m1", ["INBOX"], { From: "Ann <ann@example.org>", To: "me@example.com", Cc: "bob@example.org" }),
+                msg("m2", ["SENT"], { From: "me@example.com", To: "lawyer@example.net" }),
+                msg("m3", ["DRAFT"], { From: "me@example.com", To: "eve@example.org" }),
+                msg("m4", ["TRASH"], { From: "x@example.org", To: "me@example.com" }),
+                msg("m5", ["SPAM"], { From: "y@example.org", To: "me@example.com" }),
+              ],
+            },
+          }),
+        },
+      },
+    };
+    const got = await new Gmail(api as gmail_v1.Gmail).threadAttachments("t1");
+    expect(got.map((a) => [a.messageId, a.filename, a.from, a.to, a.cc])).toEqual([
+      ["m1", "m1.pdf", "Ann <ann@example.org>", "me@example.com", "bob@example.org"],
+      ["m2", "m2.pdf", "me@example.com", "lawyer@example.net", undefined],
+    ]);
+  });
+});

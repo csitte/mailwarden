@@ -403,13 +403,18 @@ receives it once the person presses Send without looking at the attachment list.
   in the folder, also when the caller gave it another name for the mail.
   `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` covers a file only when every recipient is the account's own
   address. A file the draft already carries is not asked about again when the draft is revised.
-- **A mail's attachment stays in its thread.** An attachment can be taken from a mail only if that mail
-  is in the reply's own thread. Taking one from elsewhere in the mailbox — the accountant's PDF into a
-  reply to a stranger — is refused; it would be a new way out of the mailbox. It is not asked about
-  beyond the rule for the recipients, so it goes to the thread's own people unasked, and to anyone
-  else only after the dialog for that address — with one gap: `update_draft` compares addresses with
-  the draft as it stood, so an address already confirmed for that draft is not asked about again when
-  a thread attachment is added later.
+- **A mail's attachment stays in its thread, and with the people it reached.** An attachment can be
+  taken from a mail only if that mail is in the reply's own thread and is not a draft, in the trash or
+  in spam. Taking one from elsewhere in the mailbox — the accountant's PDF into a reply to a stranger
+  — is refused; it would be a new way out of the mailbox. Within the thread it goes unasked only to
+  people that very mail went between (its `From`, `To` and `Cc`, the account's own address aside); a
+  draft to anyone else is confirmed like a file from the disk. A Gmail thread is a conversation, not a
+  group of recipients: it also holds the owner's own forwards (measured 4 November 2026 — a sent
+  forward sits in the thread of the mail it forwards). Before 0.28.1 the check was only "in the
+  thread", so a payslip forwarded to a lawyer could go back to the other side unasked when an
+  injected mail asked for it, and `update_draft` did not ask again for an address already confirmed
+  for that draft when a thread attachment was added later; both found in the Grok review of 0.28.0.
+  The rule is per mail, so it also closes that `update_draft` gap.
 - **No new way out of the process.** The draft travels in the same `drafts.create` / `drafts.update`
   request body as before (Gmail accepted drafts with up to 35 MB of attachments that way, measured
   4 November 2026), so the egress guard gained no endpoint; the upload endpoint stays refused. Reading an

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { execFileSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +9,7 @@ import {
   buildMime,
   checkAttachments,
   checkFilename,
+  dialogPath,
   draftDialog,
   fileParameter,
   isMimeType,
@@ -17,7 +19,7 @@ import {
 } from "../src/draft.js";
 import { reviseDraft, saveNewDraft, saveReplyDraft, type DraftGmail, type ReadFile } from "../src/draft-flow.js";
 import { attachDirProblem, readAttachmentFile, resolveAttachDir } from "../src/attach.js";
-import type { Attachment, DraftInfo } from "../src/gmail.js";
+import type { DraftInfo, ThreadAttachment } from "../src/gmail.js";
 
 const CR = String.fromCharCode(13);
 const LF = String.fromCharCode(10);
@@ -180,6 +182,27 @@ describe("mimeTypeFor / isMimeType", () => {
   });
 });
 
+describe("dialogPath — a long path loses its middle, never the file's name", () => {
+  it("keeps a short path whole", () => {
+    expect(dialogPath("scans/IMG_0001.jpg")).toBe("scans/IMG_0001.jpg");
+  });
+
+  it("keeps the real name of a renamed file behind a long folder", () => {
+    // Grok review of 0.28.0, L17: the end was cut, and with it the only trace of the real file.
+    const p = `fotos/urlaub-2026/${"a".repeat(110)}/Steuererklaerung-2025.pdf`;
+    const shown = dialogPath(p);
+    expect(shown.endsWith("…/Steuererklaerung-2025.pdf")).toBe(true);
+    expect(shown.startsWith("fotos/urlaub-2026/")).toBe(true);
+    expect([...shown].length).toBeLessThanOrEqual(120);
+  });
+
+  it("keeps the end of an overlong name, where its extension is", () => {
+    const shown = dialogPath(`${"b".repeat(150)}.exe.pdf`);
+    expect(shown.endsWith("bbbbbbbbbbbb.exe.pdf")).toBe(true);
+    expect([...shown].length).toBe(80);
+  });
+});
+
 describe("draftDialog with attachments", () => {
   it("names each file with size and origin, after the recipients", () => {
     const d = draftDialog(
@@ -200,18 +223,23 @@ describe("draftDialog with attachments", () => {
     );
     const lines = d.split("\n");
     expect(lines[2]).toBe(
-      "Attachments: a.jpg (1.5 MB, new, from the file scans/IMG_0001.jpg on this computer); b.pdf (1 bytes, from a mail in the thread); c.txt (2 bytes, already in the draft)",
+      "Attachments: a.jpg (1.5 MB, new, from the file scans/IMG_0001.jpg on this computer); b.pdf (1 byte, from a mail in the thread); c.txt (2 bytes, already in the draft)",
     );
   });
 });
 
 // ---- the flow, against a fake mailbox ----
 
-const THREAD_FILES: Attachment[] = [
-  { messageId: "m1", attachmentId: "fresh-1", filename: "Foto.jpg", mimeType: "image/jpeg", size: 3 },
-  { messageId: "m1", attachmentId: "fresh-2", filename: "dup.pdf", mimeType: "application/pdf", size: 1 },
-  { messageId: "m1", attachmentId: "fresh-3", filename: "dup.pdf", mimeType: "application/pdf", size: 1 },
-  { messageId: "m2", attachmentId: "fresh-4", filename: "odd.bin", mimeType: "not a type", size: 1 },
+// m1 and m2 went from Ann to the owner; m3 is the owner's forward of Ann's mail to a lawyer, which
+// Gmail keeps in the same thread (measured 4 Nov 2026).
+const FROM_ANN = { from: "Ann <ann@example.org>", to: "me@example.com" };
+const THREAD_FILES: ThreadAttachment[] = [
+  { messageId: "m1", attachmentId: "fresh-1", filename: "Foto.jpg", mimeType: "image/jpeg", size: 3, ...FROM_ANN },
+  { messageId: "m1", attachmentId: "fresh-2", filename: "dup.pdf", mimeType: "application/pdf", size: 1, ...FROM_ANN },
+  { messageId: "m1", attachmentId: "fresh-3", filename: "dup.pdf", mimeType: "application/pdf", size: 1, ...FROM_ANN },
+  { messageId: "m2", attachmentId: "fresh-4", filename: "odd.bin", mimeType: "not a type", size: 1, ...FROM_ANN },
+  { messageId: "m3", attachmentId: "fresh-5", filename: "Gehaltszettel.pdf", mimeType: "application/pdf", size: 4, from: "me@example.com", to: "Lawyer <lawyer@example.net>" },
+  { messageId: "m4", attachmentId: "fresh-6", filename: "huge.bin", mimeType: "application/octet-stream", size: MAX_ATTACHMENT_BYTES + 1, ...FROM_ANN },
 ];
 
 function fake(over: Partial<DraftGmail> & { draft?: Partial<DraftInfo> } = {}) {
@@ -297,6 +325,38 @@ describe("saveReplyDraft with attachments", () => {
     expect(r.attachments).toEqual([{ filename: "Foto.jpg", mimeType: "image/jpeg", bytes: 7, source: "message" }]);
   });
 
+  it("an attachment the draft's recipients never received needs the dialog: a forward to a lawyer is in the thread too", async () => {
+    // Grok review of 0.28.0, M7: an injected mail from Ann asks for the payslip from the owner's forward.
+    const { gmail } = fake();
+    const confirm = vi.fn(async () => true);
+    await saveReplyDraft(gmail, { threadId: "t1", body: "x", attachments: [{ fromMessage: "m3", filename: "Gehaltszettel.pdf" }] }, "off", confirm);
+    expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("from a mail in the thread that never went to ann@example.org"));
+  });
+
+  it("the owner's own address does not count as one the mail never reached, and the self opt-in does not cover Ann", async () => {
+    const { gmail } = fake();
+    const confirm = vi.fn(async () => true);
+    await saveReplyDraft(
+      gmail,
+      { threadId: "t1", body: "x", bcc: ["me@example.com"], attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] },
+      "off",
+      confirm,
+    );
+    expect(confirm).toHaveBeenCalledWith("off", expect.not.stringContaining("never went"));
+    const optedIn = vi.fn(async () => true);
+    await saveReplyDraft(gmail, { threadId: "t1", body: "x", attachments: [{ fromMessage: "m3", filename: "Gehaltszettel.pdf" }] }, "off", optedIn, true);
+    expect(optedIn).toHaveBeenCalledWith("require", expect.any(String));
+  });
+
+  it("stops at the size limit before fetching the bytes of a mail's attachment", async () => {
+    const { gmail, fetched, created } = fake();
+    await expect(
+      saveReplyDraft(gmail, { threadId: "t1", body: "x", attachments: [{ fromMessage: "m4", filename: "huge.bin" }] }, "off", vi.fn(async () => true)),
+    ).rejects.toThrow(/more than Gmail's limit/);
+    expect(fetched).toEqual([]);
+    expect(created).toEqual([]);
+  });
+
   it("replaces a type the sender wrote that is not a bare type/subtype", async () => {
     const { gmail } = fake();
     const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", attachments: [{ fromMessage: "m2", filename: "odd.bin" }] }, "off", vi.fn(async () => false));
@@ -304,7 +364,7 @@ describe("saveReplyDraft with attachments", () => {
   });
 
   it.each([
-    [{ fromMessage: "m9", filename: "Foto.jpg" }, /not in this draft's thread, or has no attachments/],
+    [{ fromMessage: "m9", filename: "Foto.jpg" }, /not in this draft's thread, has no attachments, or is a draft or in the trash/],
     [{ fromMessage: "m1", filename: "nope.jpg" }, /no attachment named "nope.jpg"; it has: "Foto.jpg", "dup.pdf", "dup.pdf"/],
     [{ fromMessage: "m1", filename: "dup.pdf" }, /carries 2 attachments named "dup.pdf"/],
   ])("refuses %j without writing", async (input, why) => {
@@ -422,6 +482,14 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
     const { gmail } = fake();
     const r = await reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", vi.fn(async () => false));
     expect(r.attachments[0].source).toBe("message");
+  });
+
+  it("asks when a thread attachment is added for an address its mail never reached, also one confirmed for the draft before", async () => {
+    // The gap SECURITY.md named for 0.28.0: an address already in the draft was not asked about again.
+    const { gmail } = fake({ draft: { to: "ann@example.org", cc: "lawyer@example.net" } });
+    const confirm = vi.fn(async () => true);
+    await reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", confirm);
+    expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("never went to lawyer@example.net"));
   });
 
   it("refuses an unknown `kept` name and lists what the draft has", async () => {
@@ -581,6 +649,17 @@ describe("readAttachmentFile — only files inside the folder", () => {
     await expect(readAttachmentFile(root, "Foto 1.jpg::$DATA")).rejects.toThrow(/file stream/);
     expect((await readAttachmentFile(root, "FOTO 1.JPG")).filename).toBe("Foto 1.jpg");
   });
+
+  it.skipIf(process.platform === "win32")("refuses a FIFO at once instead of waiting for a writer", async () => {
+    // Grok review of 0.28.0, L16: a blocking open held the call, and four of them the whole server.
+    const fifo = path.join(root, "pipe.pdf");
+    execFileSync("mkfifo", [fifo]);
+    try {
+      await expect(readAttachmentFile(root, "pipe.pdf")).rejects.toThrow(/not a regular file/);
+    } finally {
+      await fs.rm(fifo);
+    }
+  }, 2000);
 
   it("refuses the folder itself, a directory, and a missing file", async () => {
     await expect(readAttachmentFile(root, ".")).rejects.toThrow(/outside MAILWARDEN_ATTACH_DIR/);

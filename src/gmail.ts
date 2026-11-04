@@ -87,6 +87,19 @@ export interface Attachment {
   size: number;
 }
 
+/** An attachment of a message in a thread, with the header fields that say whom that message reached. */
+export interface ThreadAttachment extends Attachment {
+  from?: string;
+  to?: string;
+  cc?: string;
+}
+
+/**
+ * Messages of a thread whose attachments a draft may not take: a draft was never sent to anyone, and
+ * a message in the trash or in spam is not part of the conversation the person sees.
+ */
+const NOT_ATTACHABLE = new Set(["DRAFT", "TRASH", "SPAM"]);
+
 /** An attachment as `search` lists it: enough to judge it, not enough to fetch it. */
 export interface AttachmentSummary {
   filename: string;
@@ -1965,9 +1978,20 @@ export class Gmail {
    * 4 Nov 2026, three reads, three ids), so a draft names a thread attachment by message and
    * filename and the id is looked up here.
    */
-  async threadAttachments(threadId: string): Promise<Attachment[]> {
+  /**
+   * The attachments a reply in this thread may take, each with whom its message went between. A
+   * Gmail thread is a conversation, not a group of recipients: it also holds the owner's forwards to
+   * others (measured 4 Nov 2026: a sent forward sits in the thread of the mail it forwards), drafts
+   * and trashed mail. Drafts, trash and spam are left out; who a message reached travels along.
+   */
+  async threadAttachments(threadId: string): Promise<ThreadAttachment[]> {
     const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));
-    return (res.data.messages ?? []).flatMap((m) => (m.id ? collectAttachments(m) : []));
+    return (res.data.messages ?? [])
+      .filter((m) => m.id && !(m.labelIds ?? []).some((l) => NOT_ATTACHABLE.has(l)))
+      .flatMap((m) => {
+        const h = (name: string) => headerValue(m.payload?.headers, name);
+        return collectAttachments(m).map((a) => ({ ...a, from: h("From"), to: h("To"), cc: h("Cc") }));
+      });
   }
 
   private async markDraft(d: gmail_v1.Schema$Draft): Promise<DraftRef> {

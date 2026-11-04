@@ -17,6 +17,7 @@ import {
   buildMime,
   checkAttachments,
   checkFilename,
+  checkTotalBytes,
   draftDialog,
   isMimeType,
   mimeTypeFor,
@@ -33,7 +34,7 @@ import {
   type ReplySource,
 } from "./draft.js";
 import { addressesOf } from "./signals.js";
-import type { Attachment, DraftInfo, DraftRef } from "./gmail.js";
+import type { Attachment, DraftInfo, DraftRef, ThreadAttachment } from "./gmail.js";
 
 /** The slice of `Gmail` a draft needs. */
 export interface DraftGmail {
@@ -42,7 +43,7 @@ export interface DraftGmail {
   createDraft(raw: string, threadId?: string): Promise<DraftRef>;
   updateDraft(draftId: string, raw: string, threadId?: string): Promise<DraftRef>;
   getDraft(draftId: string): Promise<DraftInfo>;
-  threadAttachments(threadId: string): Promise<Attachment[]>;
+  threadAttachments(threadId: string): Promise<ThreadAttachment[]>;
   attachmentBytes(messageId: string, attachmentId: string): Promise<Buffer>;
 }
 
@@ -144,8 +145,9 @@ export interface UpdateInput {
  * relaxed. Anything with a foreign new recipient stays `require`, opt-in or not.
  *
  * A file from the disk (`newFiles`) counts like a new recipient: it reaches a place it was not
- * before, and the sender of an injected mail is a known recipient of their own thread. The opt-in
- * covers it only when the draft goes to the owner alone (see `selfOnly`).
+ * before, and the sender of an injected mail is a known recipient of their own thread. So does an
+ * attachment from a mail that some recipient of the draft never received (`reachesNew`). The
+ * opt-in covers either only when the draft goes to the owner alone (see `selfOnly`).
  */
 function modeFor(configured: ConfirmMode, unknown: readonly string[], selfOnly: boolean, newFiles = false): ConfirmMode {
   if (!unknown.length && !newFiles) return configured;
@@ -189,13 +191,16 @@ async function resolveAttachments(
       `A draft may carry at most ${MAX_ATTACHMENTS} attachments (got ${inputs.length}); nothing was written.`,
     );
   }
-  let inThread: Attachment[] | undefined;
+  let inThread: ThreadAttachment[] | undefined;
   const out: DraftAttachment[] = [];
+  // What is known so far, so the size limit stops before bytes of a mail are fetched, not after.
+  let known = 0;
   for (const input of inputs) {
     if ("path" in input) {
       if (input.filename !== undefined) checkFilename(input.filename);
       const file = await ctx.readFile(input.path);
       const filename = input.filename ?? file.filename;
+      checkTotalBytes((known += file.data.length));
       out.push({ filename, mimeType: mimeTypeFor(filename), data: file.data, source: "file", origin: file.relative ?? input.path });
     } else if ("fromMessage" in input) {
       if (!ctx.threadId) {
@@ -210,15 +215,19 @@ async function resolveAttachments(
       const hits = ofMessage.filter((a) => a.filename === input.filename);
       if (hits.length !== 1) throw threadAttachmentError(input, ofMessage, hits.length);
       const hit = hits[0];
+      checkTotalBytes((known += hit.size));
       out.push({
         filename: hit.filename,
         // The sender wrote the type; one that is not a plain type/subtype is replaced, not trusted.
         mimeType: isMimeType(hit.mimeType) ? hit.mimeType : mimeTypeFor(hit.filename),
         data: await gmail.attachmentBytes(hit.messageId, hit.attachmentId),
         source: "message",
+        receivedBy: [...normalizeLenient(hit.from), ...normalizeLenient(hit.to), ...normalizeLenient(hit.cc)],
       });
     } else {
-      out.push(await keptAttachment(gmail, ctx.draft, input.kept));
+      const kept = await keptAttachment(gmail, ctx.draft, input.kept);
+      checkTotalBytes((known += kept.data.length));
+      out.push(kept);
     }
   }
   return out;
@@ -239,8 +248,8 @@ function threadAttachmentError(
   if (!ofMessage.length) {
     return new ToolError(
       "not_found",
-      `Message ${input.fromMessage} is not in this draft's thread, or has no attachments. An attachment from a mail can only ` +
-        "come from the thread the reply belongs to. Nothing was written.",
+      `Message ${input.fromMessage} is not in this draft's thread, has no attachments, or is a draft or in the trash or spam. ` +
+        "An attachment from a mail can only come from a mail of the thread the reply belongs to. Nothing was written.",
     );
   }
   return new ToolError(
@@ -281,7 +290,25 @@ async function keep(gmail: DraftGmail, a: Attachment): Promise<DraftAttachment> 
   };
 }
 
-const hasNewFiles = (list: readonly DraftAttachment[]) => list.some((a) => a.source === "file");
+/**
+ * Mark each attachment taken from a mail with the draft's recipients that mail never reached, the
+ * owner's own address aside. A thread holds the owner's forwards to others too: a file forwarded to
+ * a lawyer is in the thread, and a reply to the other side must not carry it there unasked. Reads
+ * the owner's address only when some recipient is outside a mail.
+ */
+async function markNewReach(list: DraftAttachment[], recipients: Recipients, own: () => Promise<readonly string[]>): Promise<void> {
+  const all = [...recipients.to, ...recipients.cc, ...recipients.bcc];
+  let mine: readonly string[] | undefined;
+  for (const a of list) {
+    if (a.source !== "message") continue;
+    const outside = all.filter((r) => !(a.receivedBy ?? []).includes(r));
+    if (outside.length) mine ??= await own();
+    a.newTo = outside.filter((r) => !onlyOwnAddresses([r], mine ?? []));
+  }
+}
+
+/** Something attached reaches a place it was not before: a file from the disk, or a mail's attachment going further. */
+const reachesNew = (list: readonly DraftAttachment[]) => list.some((a) => a.source === "file" || (a.newTo?.length ?? 0) > 0);
 
 export async function saveReplyDraft(
   gmail: DraftGmail,
@@ -327,7 +354,8 @@ export async function saveReplyDraft(
     attachments,
   };
   const raw = buildMime(content);
-  const files = hasNewFiles(attachments);
+  await markNewReach(attachments, recipients, async () => [emailAddress]);
+  const files = reachesNew(attachments);
   const self = await selfOnly(selfWithoutDialog, unknown, async () => [emailAddress], recipients, files);
   const confirmedByUser = await confirm(modeFor(configured, unknown, self, files), draftDialog("reply", content, unknown));
   const ref = await gmail.createDraft(raw, input.threadId);
@@ -351,7 +379,7 @@ export async function saveNewDraft(
   const unknown = unknownRecipients(recipients, []);
   // A new message has no thread to vouch for anyone: always asked, never written unasked — unless
   // the opt-in is on and every recipient is the owner's own address (see `modeFor`).
-  const files = hasNewFiles(attachments);
+  const files = reachesNew(attachments);
   const self = await selfOnly(
     opts.selfWithoutDialog ?? false,
     unknown,
@@ -412,7 +440,8 @@ export async function reviseDraft(
     attachments,
   };
   const raw = buildMime(content);
-  const files = hasNewFiles(attachments);
+  await markNewReach(attachments, recipients, async () => [(await gmail.getProfile()).emailAddress]);
+  const files = reachesNew(attachments);
   const self = await selfOnly(
     selfWithoutDialog,
     unknown,
@@ -429,6 +458,7 @@ export async function reviseDraft(
 
 /** Every attachment the draft carries, re-read so the update can write it again. */
 async function keepAll(gmail: DraftGmail, draft: DraftInfo): Promise<DraftAttachment[]> {
+  checkTotalBytes(draft.attachments.reduce((n, a) => n + a.size, 0));
   const kept: DraftAttachment[] = [];
   for (const a of draft.attachments) kept.push(await keep(gmail, a));
   checkAttachments(kept);

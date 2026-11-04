@@ -1838,7 +1838,8 @@ const updateAttachments = z.array(z.union([fileAttachment, mailAttachment, keptA
 const ATTACH_NOTE =
   `ATTACHMENTS (optional, at most ${MAX_ATTACHMENTS}, 25 MB together): {path} takes a file from MAILWARDEN_ATTACH_DIR, the one folder the operator lets mail attach from — ` +
   "without that setting, files are refused; nothing outside it can be attached. {fromMessage, filename} takes an attachment of a message in the reply's own thread (not for a new message; " +
-  "the attachmentId of get_thread changes on every read, so the filename names it). A file from the disk counts like a new recipient: the user confirms it in the dialog, " +
+  "the attachmentId of get_thread changes on every read, so the filename names it; not from a draft, trash or spam). A file from the disk counts like a new recipient: the user confirms it in the dialog, " +
+  "and so does a mail's attachment when the draft goes to anyone that mail did not go between; " +
   "and a client without one is refused (the operator's MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1 covers it only when every recipient is the user's own address). " +
   "Large files take time: a 24 MB attachment took about 40 seconds to save. ";
 

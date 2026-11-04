@@ -448,7 +448,9 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   contains it — also when reached through a link — and on Windows any path that does not start with a
   drive letter are refused at startup. mailwarden never writes into
   that folder — `download_attachment` and `export_thread` refuse it — so only you put files there. An **attachment of a mail**
-  only from a message in the reply's own thread, named by `fromMessage` and `filename` (Gmail issues
+  only from a message in the reply's own thread — not a draft, not in the trash or spam — and without
+  the dialog only to people that message went between (a sent forward sits in the same thread, so the
+  thread alone says too little), named by `fromMessage` and `filename` (Gmail issues
   a new `attachmentId` on every read, so the id cannot name it), and never for a new message. In
   `update_draft`, leaving `attachments` out keeps every file the draft carries, a list replaces them
   (`{ "kept": "<filename>" }` keeps one), `[]` removes them. The result lists every attachment of the

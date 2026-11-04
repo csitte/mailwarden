@@ -14,13 +14,17 @@
  * come from the reply's own thread.
  */
 
-import { promises as fs, realpathSync } from "node:fs";
+import { constants, promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CliError, ToolError } from "./cli.js";
 import { MAX_ATTACHMENT_BYTES, formatBytes } from "./draft.js";
 
-/** Whether `target` is `root` itself or lies below it. Lexical; case-insensitive where the OS is. */
+/**
+ * Whether `target` is `root` itself or lies below it. Lexical, and only as case-insensitive as
+ * `path.relative`: on Windows it is, on macOS it is not, so there the real path (`realpath`) carries
+ * the check.
+ */
 function within(root: string, target: string): boolean {
   return !escapes(path.relative(root, target)) || path.relative(root, target) === "";
 }
@@ -142,7 +146,10 @@ export async function readAttachmentFile(
   }
   // …and again after every symlink is resolved: a link inside the folder may point anywhere.
   if (escapes(path.relative(fence, real))) throw outside();
-  const handle = await fs.open(real, "r");
+  // Non-blocking: a FIFO would otherwise hold the open until a writer comes, and with it one of the
+  // four threads all file, DNS and crypto work of the process shares. It is refused below as not a
+  // regular file. Windows has no such flag and no FIFOs a path can name.
+  const handle = await fs.open(real, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
   try {
     const stat = await handle.stat();
     // The path was checked, the handle is what is read: if the file was swapped for a link between
@@ -156,12 +163,15 @@ export async function readAttachmentFile(
       throw new ToolError("invalid_input", `"${given}" is not a regular file; nothing was written.`);
     }
     // A hard link is the same file under a second name, and that name may be anywhere: no path
-    // check can tell. A file with more than one link is refused rather than guessed about.
+    // check can tell. A file with more than one link is refused rather than guessed about. Google
+    // Drive for desktop reports nlink 2 for a fresh copy while it uploads (gmail deployment,
+    // 4 Nov 2026), which the message names rather than this check giving way.
     if (stat.nlink > 1) {
       throw new ToolError(
         "forbidden_operation",
         `"${given}" has more than one hard link, so it may be a file from outside MAILWARDEN_ATTACH_DIR. ` +
-          "Copy the file into the folder instead. Nothing was written.",
+          "Copy the file into the folder instead. A synced drive (Google Drive for desktop) can report a second " +
+          "link for a few seconds after a copy, while it uploads: then try again shortly. Nothing was written.",
       );
     }
     if (stat.size > MAX_ATTACHMENT_BYTES) {

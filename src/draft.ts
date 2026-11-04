@@ -239,6 +239,10 @@ export interface DraftAttachment {
   source: AttachmentSource;
   /** For a file: its path inside MAILWARDEN_ATTACH_DIR, so the dialog names the real file. */
   origin?: string;
+  /** For an attachment from a mail: the addresses that mail went between (From/To/Cc), normalized. */
+  receivedBy?: readonly string[];
+  /** For an attachment from a mail: the draft's recipients that mail never reached, the owner aside. */
+  newTo?: readonly string[];
 }
 
 /**
@@ -356,7 +360,11 @@ export function checkAttachments(list: readonly DraftAttachment[]): void {
     );
   }
   for (const a of list) checkFilename(a.filename);
-  const total = attachmentBytes(list);
+  checkTotalBytes(attachmentBytes(list));
+}
+
+/** The size limit alone, so a caller can apply it to sizes it knows before fetching any bytes. */
+export function checkTotalBytes(total: number): void {
   if (total > MAX_ATTACHMENT_BYTES) {
     throw new ToolError(
       "invalid_input",
@@ -373,7 +381,7 @@ export function attachmentBytes(list: readonly DraftAttachment[]): number {
 export function formatBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   if (n >= 1024) return `${Math.round(n / 1024)} KB`;
-  return `${n} bytes`;
+  return n === 1 ? "1 byte" : `${n} bytes`;
 }
 
 /** RFC 5987 attr-char: what may stand unencoded in an extended parameter value. */
@@ -477,13 +485,35 @@ export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes
   );
 }
 
+/**
+ * A path for the dialog, at most `max` characters, that always ends in the file's own name: a long
+ * path loses its middle, never its end, or a renamed file would hide which file it really is.
+ */
+export function dialogPath(p: string, max = 120): string {
+  const full = dialogText(p, Number.MAX_SAFE_INTEGER);
+  if ([...full].length <= max) return full;
+  const slash = full.lastIndexOf("/");
+  const base = keepEnds(slash === -1 ? full : full.slice(slash + 1), 80);
+  if (slash === -1) return base;
+  const head = [...full.slice(0, slash)].slice(0, Math.max(0, max - [...base].length - 2)).join("");
+  return `${head}\u2026/${base}`;
+}
+
+/** At most `max` code points, the start and the last 20 kept: a name's extension is at its end. */
+function keepEnds(s: string, max: number): string {
+  const cps = [...s];
+  return cps.length <= max ? s : `${cps.slice(0, max - 21).join("")}\u2026${cps.slice(-20).join("")}`;
+}
+
 /** What the confirmation dialog says: the recipients first, new ones marked, the attachments, then the content. */
 export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, unknown: readonly string[]): string {
   const origin = (a: DraftAttachment) =>
     a.source === "file"
-      ? `new, from the file ${dialogText(a.origin ?? a.filename, 120)} on this computer`
+      ? `new, from the file ${dialogPath(a.origin ?? a.filename)} on this computer`
       : a.source === "message"
-        ? "from a mail in the thread"
+        ? a.newTo?.length
+          ? `from a mail in the thread that never went to ${a.newTo.map((x) => dialogText(x, 80)).join(", ")}`
+          : "from a mail in the thread"
         : "already in the draft";
   const files = (d.attachments ?? []).map((a) => `${dialogText(a.filename, 80)} (${formatBytes(a.data.length)}, ${origin(a)})`);
   const mark = (a: string) => (unknown.includes(a) ? `${a} (new)` : a);
