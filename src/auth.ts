@@ -561,6 +561,7 @@ async function persistToken(
   // would otherwise leave one orphaned keystore entry behind each time.
   const previousKeyId = await keyIdOf(file);
 
+  if (protection.kind === "refused") throw keystoreRequired(protection.detail);
   if (protection.kind === "passphrase") {
     await fs.writeFile(file, JSON.stringify(encryptToken(payload, passphrase!), null, 2), { mode: 0o600 });
     console.error("mailwarden: token stored encrypted at rest (MAILWARDEN_TOKEN_PASSPHRASE).");
@@ -572,7 +573,8 @@ async function persistToken(
       stored = true;
     } catch (err) {
       // A keystore that is present but refuses the write (locked, denied) must not cost the user the
-      // consent they just gave: store as before and say why.
+      // consent they just gave: store as before and say why — unless the operator ruled that out.
+      if (setting === "require") throw keystoreRequired(err instanceof Error ? err.message : String(err));
       console.error(
         `mailwarden: could not store a key in the OS keystore (${err instanceof Error ? err.message : String(err)}) — ` +
           "token stored in plaintext. Set MAILWARDEN_TOKEN_PASSPHRASE to encrypt it instead.",
@@ -608,6 +610,14 @@ async function persistToken(
       if (store.ok) await store.store.delete(previousKeyId).catch(() => false);
     }
   }
+}
+
+/** `MAILWARDEN_KEYSTORE=require` and no keystore took the key: nothing was written. */
+function keystoreRequired(detail: string): CliError {
+  return new CliError(
+    `MAILWARDEN_KEYSTORE=require, but the OS keystore did not take the key (${detail}). Nothing was written; ` +
+      "the token file is as it was. Unlock or set up the keystore and re-run, or set MAILWARDEN_TOKEN_PASSPHRASE.",
+  );
 }
 
 /** The keystore key id of the token file at `file`, or null (absent, plaintext, passphrase). */
@@ -811,8 +821,12 @@ export async function getAuth(interactive = false, opts: { force?: boolean } = {
   const cred = checkCredentials(raw, CRED_PATH);
   if (!cred.ok) throw new CliError(cred.message);
   // persistToken reads this again after the consent; a typo found only there would cost the user
-  // the consent they just gave, so it is refused here, before the browser opens.
-  parseKeystoreSetting(process.env.MAILWARDEN_KEYSTORE);
+  // the consent they just gave, so it is refused here, before the browser opens — and so is
+  // `require` on a machine where no keystore is reachable at all.
+  if (parseKeystoreSetting(process.env.MAILWARDEN_KEYSTORE) === "require" && !process.env.MAILWARDEN_TOKEN_PASSPHRASE) {
+    const store = await openKeyStore();
+    if (!store.ok) throw keystoreRequired(store.reason);
+  }
 
   // `mailwarden --auth`: always run the browser consent flow. We deliberately do NOT return a
   // previously saved token here — a stale/expired token.json (e.g. the 7-day refresh-token expiry

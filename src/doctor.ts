@@ -142,6 +142,17 @@ export function buildReport(i: DoctorInputs): DoctorCheck[] {
     }
   }
 
+  // The next --auth, not the token in place: `require` with no keystore here would stop it.
+  if (i.protection?.kind === "refused") {
+    checks.push({
+      name: "Keystore",
+      status: "warn",
+      detail:
+        `MAILWARDEN_KEYSTORE=require, but no OS keystore is reachable here (${i.protection.detail}). ` +
+        `\`${authCmd}\` will stop and write nothing rather than store the token in plaintext.`,
+    });
+  }
+
   // 3. Granted scopes vs. what the enabled tiers need.
   const tiers = [...i.enabledTiers].join(", ");
   const need = `Enabled tiers (${tiers}) need: ${i.requiredScopes.map(SCOPE_SHORT).join(", ")}.`;

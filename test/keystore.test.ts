@@ -108,6 +108,8 @@ describe("MAILWARDEN_KEYSTORE + chooseProtection (pure)", () => {
     ["0", "off"],
     ["false", "off"],
     ["no", "off"],
+    ["require", "require"],
+    [" REQUIRE ", "require"],
   ])("parses %j as %s", (raw, want) => {
     expect(parseKeystoreSetting(raw)).toBe(want);
   });
@@ -124,6 +126,9 @@ describe("MAILWARDEN_KEYSTORE + chooseProtection (pure)", () => {
     [{ passphraseSet: false, setting: "auto", store: ok }, { kind: "keystore" }],
     [{ passphraseSet: false, setting: "off", store: ok }, { kind: "plaintext", why: "off" }],
     [{ passphraseSet: false, setting: "auto", store: none }, { kind: "plaintext", why: "unavailable", detail: "no Secret Service" }],
+    [{ passphraseSet: false, setting: "require", store: ok }, { kind: "keystore" }],
+    [{ passphraseSet: false, setting: "require", store: none }, { kind: "refused", detail: "no Secret Service" }],
+    [{ passphraseSet: true, setting: "require", store: none }, { kind: "passphrase" }],
   ] as const)("%j → %j", (input, want) => {
     expect(chooseProtection(input)).toEqual(want);
   });
@@ -232,6 +237,46 @@ describe("keystore through getAuth", () => {
     expect(await readToken()).toMatchObject({ type: "authorized_user", refresh_token: "rt" });
     expect(log).toHaveBeenCalledWith(expect.stringMatching(said));
     expect(ks.entries.size).toBe(0);
+  });
+
+  describe("MAILWARDEN_KEYSTORE=require — no plaintext fallback", () => {
+    it("stops before the browser when no keystore is reachable, and writes nothing", async () => {
+      ks.mode = "unavailable";
+      mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
+      await expect((await fresh({ MAILWARDEN_KEYSTORE: "require" })).getAuth(true)).rejects.toThrow(
+        /MAILWARDEN_KEYSTORE=require, but the OS keystore did not take the key/,
+      );
+      expect(mocks.runConsentFlow).not.toHaveBeenCalled();
+      await expect(fs.access(tokenFile())).rejects.toThrow();
+    });
+
+    it("refuses to write plaintext when the keystore refuses the key, and leaves the old token alone", async () => {
+      quiet();
+      mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt-old" });
+      await (await fresh()).getAuth(true);
+      const before = await fs.readFile(tokenFile(), "utf8");
+      ks.mode = "set-fails";
+      mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt-new" });
+      await expect((await fresh({ MAILWARDEN_KEYSTORE: "require" })).getAuth(true, { force: true })).rejects.toThrow(
+        /Nothing was written/,
+      );
+      expect(await fs.readFile(tokenFile(), "utf8")).toBe(before);
+    });
+
+    it("encrypts as auto does where the keystore works", async () => {
+      quiet();
+      mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
+      await (await fresh({ MAILWARDEN_KEYSTORE: "require" })).getAuth(true);
+      expect(await readToken()).toMatchObject({ v: 2, kdf: "keystore" });
+    });
+
+    it("takes the passphrase without asking for a keystore", async () => {
+      quiet();
+      ks.mode = "unavailable";
+      mocks.runConsentFlow.mockResolvedValue({ refresh_token: "rt" });
+      await (await fresh({ MAILWARDEN_KEYSTORE: "require", MAILWARDEN_TOKEN_PASSPHRASE: "pw" })).getAuth(true);
+      expect(await readToken()).toMatchObject({ v: 1, kdf: "scrypt" });
+    });
   });
 
   it("rejects a malformed MAILWARDEN_KEYSTORE before writing anything", async () => {

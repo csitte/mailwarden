@@ -201,8 +201,10 @@ A backup, a synced folder, or another machine exposes `token.json`.
   fallback, the kernel keyring, does not survive a reboot and would strand the token.
 - **A passphrase where there is no keystore.** `MAILWARDEN_TOKEN_PASSPHRASE` keys the same cipher by
   scrypt (fresh salt+IV) and takes precedence over the keystore when set. With neither available the
-  token is stored in plaintext as before, and both `--auth` and `--check` say so. On POSIX the file is
-  also `mode 0o600`.
+  token is stored in plaintext as before, and both `--auth` and `--check` say so — unless
+  `MAILWARDEN_KEYSTORE=require` is set: then `--auth` stops and writes nothing where no keystore takes
+  the key (checked before the browser opens, where that is already known), and `--check` warns ahead
+  of time. On POSIX the file is also `mode 0o600`.
 
 ### 6. Network attacker against the optional HTTP listener
 `--http` is opt-in and hardened:

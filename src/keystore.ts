@@ -103,27 +103,31 @@ export function openWithKey(env: KeystoreEnvelope, key: Buffer): string {
 /**
  * `MAILWARDEN_KEYSTORE`: `auto` (default) encrypts new tokens with a keystore key wherever one is
  * reachable; `off` never stores a key in the keystore (a re-auth still removes the key of the token it
- * replaces, so none is left orphaned). It governs writing only — a token that was stored
- * with a keystore key still needs that key to be read, whatever this says.
+ * replaces, so none is left orphaned); `require` is `auto` without the plaintext fallback — where no
+ * keystore takes the key, `--auth` stops and writes nothing. It governs writing only — a token that
+ * was stored with a keystore key still needs that key to be read, whatever this says.
  */
-export type KeystoreSetting = "auto" | "off";
+export type KeystoreSetting = "auto" | "off" | "require";
 
 export function parseKeystoreSetting(raw: string | undefined): KeystoreSetting {
   const v = (raw ?? "").trim().toLowerCase();
   if (v === "" || v === "auto" || v === "on") return "auto";
   if (v === "off" || v === "0" || v === "false" || v === "no") return "off";
-  throw new CliError(`Invalid MAILWARDEN_KEYSTORE=${JSON.stringify(raw)} — use "auto" (the default) or "off".`);
+  if (v === "require") return "require";
+  throw new CliError(`Invalid MAILWARDEN_KEYSTORE=${JSON.stringify(raw)} — use "auto" (the default), "off" or "require".`);
 }
 
 export type Protection =
   | { kind: "passphrase" }
   | { kind: "keystore" }
-  | { kind: "plaintext"; why: "off" | "unavailable"; detail?: string };
+  | { kind: "plaintext"; why: "off" | "unavailable"; detail?: string }
+  | { kind: "refused"; detail: string };
 
 /**
  * How a token about to be written is protected. A passphrase is an explicit choice and wins; then
  * the keystore, unless switched off; and where none is reachable, plaintext exactly as before —
- * the caller says so, it does not fail.
+ * the caller says so, it does not fail. Only `require` turns that last case into `refused`: the
+ * caller then writes nothing.
  */
 export function chooseProtection(i: {
   passphraseSet: boolean;
@@ -133,5 +137,6 @@ export function chooseProtection(i: {
   if (i.passphraseSet) return { kind: "passphrase" };
   if (i.setting === "off") return { kind: "plaintext", why: "off" };
   if (i.store.ok) return { kind: "keystore" };
+  if (i.setting === "require") return { kind: "refused", detail: i.store.reason };
   return { kind: "plaintext", why: "unavailable", detail: i.store.reason };
 }

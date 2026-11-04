@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   source) and `attachmentBytes`, always, empty when there are none. Filenames are written as RFC 2231
   continuations when not plain ASCII; file types Gmail refuses to send (`.exe`, `.js`, …) are refused
   at once. Requested by the gmail deployment (bridge thread 632). New threat 11 in `SECURITY.md`.
+- **`MAILWARDEN_KEYSTORE=require`** — the keystore without the plaintext fallback. Where no OS
+  keystore takes the key and no passphrase is set, `--auth` stops and writes nothing (before the
+  browser opens when no keystore is reachable at all; after the consent when the keystore refuses
+  the write, leaving the old token file as it was), and `--check` warns ahead. `auto` and `off`
+  are unchanged. Requested in the Grok review of 0.25.0 (L15).
 - `scripts/probe-draft-size.mjs` measures what draft size the plain `drafts.create`/`drafts.update`
   calls accept. Every size from 1 to 35 MB of attachment passed and was stored whole (4 November
   2026, `docs/measurements.json`), so attachments needed no new egress endpoint; the upload endpoint

@@ -264,4 +264,11 @@ describe("plaintext token: the fix depends on what --auth would do", () => {
   it("names the passphrase when the keystore is switched off", () => {
     expect(detail({ kind: "plaintext", why: "off" })).toMatch(/Set MAILWARDEN_TOKEN_PASSPHRASE/);
   });
+
+  it("warns that --auth would stop under MAILWARDEN_KEYSTORE=require without a keystore", () => {
+    const r = buildReport(inputs({ protection: { kind: "refused", detail: "no Secret Service" } }));
+    expect(check(r, "Keystore")).toMatchObject({ status: "warn" });
+    expect(check(r, "Keystore").detail).toMatch(/require, but no OS keystore is reachable here \(no Secret Service\).*will stop and write nothing/);
+    expect(buildReport(inputs({ protection: { kind: "keystore" } })).some((c) => c.name === "Keystore")).toBe(false);
+  });
 });
