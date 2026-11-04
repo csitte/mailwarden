@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2026, `docs/measurements.json`), so attachments needed no new egress endpoint; the upload endpoint
   stays refused.
 
+### Fixed
+- **A reply to a sender at an internationalised domain is no longer asked about as if to a
+  stranger.** A recipient is written with its domain in ASCII form (`xn--…`), but the thread's own
+  addresses were compared as the header spelled them, so `joerg@münchen.example` never matched
+  `joerg@xn--mnchen-3ya.example`, and every such reply needed the dialog, which a client without one
+  refuses. The thread's addresses now go through the same normalization. A domain that only looks
+  alike is still a stranger. Reported in the Grok review of 0.25.0 (L11).
+
 ## [0.27.2] - 2026-11-03
 
 ### Security

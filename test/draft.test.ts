@@ -449,6 +449,49 @@ describe("saveReplyDraft", () => {
   });
 });
 
+describe("saveReplyDraft — a thread at an internationalised domain", () => {
+  const umlaut = (over: Record<string, string> = {}) =>
+    fakeGmail({
+      replySource: async () => ({
+        messageId: "m2",
+        source: {
+          from: "Jörg <joerg@münchen.example>",
+          to: "me@example.com",
+          cc: "Anna <anna@BÜRO.example>",
+          subject: "Termin",
+          messageId: "<m2@münchen.example>",
+          ...over,
+        },
+      }),
+    });
+
+  it("does not take the sender for a stranger because the header spells the domain in Unicode", async () => {
+    const { gmail } = umlaut();
+    const confirm = vi.fn(async () => false);
+    const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", replyAll: true }, "off", confirm);
+    expect(r.to).toEqual(["joerg@xn--mnchen-3ya.example"]);
+    expect(r.cc).toEqual(["anna@xn--bro-hoa.example"]);
+    expect(r.newRecipients).toEqual([]);
+    expect(confirm).toHaveBeenCalledWith("off", expect.any(String));
+  });
+
+  it("knows a cc given in either spelling as the thread's own", async () => {
+    for (const cc of ["anna@büro.example", "anna@xn--bro-hoa.example"]) {
+      const { gmail } = umlaut();
+      const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", cc: [cc] }, "off", vi.fn(async () => false));
+      expect(r.newRecipients, cc).toEqual([]);
+    }
+  });
+
+  it("still asks about a different domain that merely looks alike", async () => {
+    const { gmail } = umlaut();
+    const confirm = vi.fn(async () => true);
+    const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", cc: ["joerg@munchen.example"] }, "off", confirm);
+    expect(r.newRecipients).toEqual(["joerg@munchen.example"]);
+    expect(confirm).toHaveBeenCalledWith("require", expect.any(String));
+  });
+});
+
 describe("saveNewDraft", () => {
   it("always asks with require, whatever is configured, and writes no thread", async () => {
     const { gmail, created } = fakeGmail();

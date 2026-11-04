@@ -312,8 +312,11 @@ export async function saveReplyDraft(
   // Every address the thread itself supplied, whether or not this reply uses it: a reply that
   // goes to fewer people than reply-all is no reason to ask. Reply-To is deliberately not
   // among them: the sender alone chooses it, so a Reply-To that is not also in From/To/Cc is a
-  // stranger and the reply to it is asked about. (Bcc is never listed either.)
-  const threadAddresses = [...addressesOf(source.from), ...addressesOf(source.to), ...addressesOf(source.cc)];
+  // stranger and the reply to it is asked about. (Bcc is never listed either.) They go through the
+  // same normalization as the recipients, or a sender at an internationalised domain would be a
+  // stranger to their own thread: the recipient is written in its ASCII form (xn--…), the header
+  // may carry the Unicode one.
+  const threadAddresses = [...normalizeLenient(source.from), ...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const unknown = unknownRecipients(recipients, threadAddresses);
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
   const content: DraftContent = {
