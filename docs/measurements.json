@@ -121,6 +121,29 @@
       ],
       "stored": "drafts.get reported sizeEstimate 1.4 MB for the 1 MB attachment and 32.8 MB for the 24 MB one, after drafts.create and after drafts.update alike: the full MIME message arrived.",
       "caution": "No size was refused, up to a 35 MB attachment (63.9 MB raw request body). So the plain path carries every attachment Gmail can send, and the 25 MB limit is one mailwarden has to enforce itself: Gmail stores a larger draft without complaint. The raw request is about 1.8 times the attachment, because the attachment is base64 inside the MIME and the MIME is base64url again; a 24 MB attachment took 32 to 44 seconds to save."
+    },
+    "draft-send-size-2026-11-04": {
+      "what": "Two drafts built by mailwarden's buildMime, each with one attachment of random bytes, addressed to the mailbox's own address and sent by hand from the Gmail web interface. `hits` is drafts sent, `delivered` how many arrived in the inbox with no bounce.",
+      "mailbox": "taktum test mailbox",
+      "date": "2026-11-04",
+      "endpoint": "drafts.create, then Send in Gmail",
+      "source": "mailwarden session on 2026-11-04 for session-bridge thread 632-mailwarden-draft-anhaenge, send test by Chris",
+      "queries": [
+        {
+          "query": "send a draft to the own address, attachment of 18 and 24 MiB",
+          "hits": 2,
+          "delivered": 2,
+          "attachmentMB": [
+            18,
+            24
+          ],
+          "messageMB": [
+            24.6,
+            32.8
+          ]
+        }
+      ],
+      "caution": "Gmail sent both, so its 25 MB limit counts the files, not the encoded message: the 24 MiB one was 32.8 MB as a message. Not measured: exactly 25 MiB, and a recipient outside Gmail, whose server may refuse a message of that size by its encoded length."
     }
   }
 }

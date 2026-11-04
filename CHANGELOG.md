@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.0] - 2026-11-04
+
 ### Added
 - **Attachments for drafts.** `create_draft` and `update_draft` take `attachments`: at most 10, 25 MB
   together. A file comes only from the folder named in the new `MAILWARDEN_ATTACH_DIR`; without it no
@@ -29,7 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   surrogate, an encoded word (`=?…?=`) or a trailing dot or space is refused, so the dialog and the
   recipient see the same name; other filenames are written as RFC 2231
   continuations when not plain ASCII; file types Gmail refuses to send (`.exe`, `.js`, …) are refused
-  at once. Requested by the gmail deployment (bridge thread 632). New threat 11 in `SECURITY.md`.
+  at once. Gmail's 25 MB limit counts the files: a 24 MB attachment (33 MB as a message) was sent and
+  delivered in a test; a server outside Gmail may refuse a message that large by its encoded size.
+  Requested by the gmail deployment (bridge thread 632). New threat 11 in `SECURITY.md`.
 - **`MAILWARDEN_KEYSTORE=require`** — the keystore without the plaintext fallback. Where no OS
   keystore takes the key and no passphrase is set, `--auth` stops and writes nothing (before the
   browser opens when no keystore is reachable at all; after the consent when the keystore refuses
@@ -2369,7 +2373,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.27.2...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/csitte/mailwarden/compare/v0.27.2...v0.28.0
 [0.27.2]: https://github.com/csitte/mailwarden/compare/v0.27.1...v0.27.2
 [0.27.1]: https://github.com/csitte/mailwarden/compare/v0.27.0...v0.27.1
 [0.27.0]: https://github.com/csitte/mailwarden/compare/v0.26.1...v0.27.0

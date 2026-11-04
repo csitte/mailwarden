@@ -457,6 +457,10 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   `drafts.create`/`drafts.update` calls as before — Gmail took drafts with up to 35 MB of attachments
   that way when measured on 4 November 2026 — so the egress guard gained no endpoint; the upload
   endpoint stays refused. Large files take time: a 24 MB attachment took about 40 seconds to save.
+  Gmail's 25 MB limit counts the files, not the encoded message: a draft with 24 MB of attachment
+  (33 MB as a message) was sent and delivered in a test the same day. A server outside Gmail may still
+  refuse a message that large, since some count its encoded size; above about 18 MB of files, expect
+  that a recipient might not take it.
 - **Who is asked.** Any address the thread did not already contain — every recipient of a new
   message, a `cc` on a reply that names a stranger, an address added in an update — is confirmed in
   the client's own dialog (MCP elicitation), whatever `MAILWARDEN_CONFIRM` says, and refused on a
@@ -821,7 +825,7 @@ those rules come from).
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (2042 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (2139 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 
