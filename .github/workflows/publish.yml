@@ -51,8 +51,8 @@ jobs:
       - name: Smoke-test the packed package
         run: npm run smoke
 
-      # The MCPB bundle is the release asset for Smithery (`smithery mcp publish`) and the Claude
-      # Desktop extension directory. Built BEFORE the irreversible publish — a bundle that does not
+      # The MCPB bundle is the GitHub release asset and what the Claude Desktop extension
+      # directory takes. Built BEFORE the irreversible publish — a bundle that does not
       # build or boot is one more reason not to ship — from the same checkout and lockfile, verified
       # (validate + unpack + boot), and kept as a run artifact so the file attached to the GitHub
       # release is the one CI checked (see the release steps in CLAUDE.md). It also has to run before

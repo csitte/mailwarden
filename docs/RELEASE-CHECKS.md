@@ -158,8 +158,8 @@ Gewinn: 27 echte Opt-out-Endpunkte, keiner fälschlich blockiert.
 *installierte* Paket: relative Links, Sprungmarken, Versionsgleichstand package.json ↔
 server.json, das **Alter der Vergleichstabelle** (s. u.), dazu Handshake, Tool-Oberfläche und
 `--check`. `npm run mcpb` tut dasselbe für das
-zweite Artefakt, das MCPB-Bundle (Manifest validiert, Bundle entpackt und gebootet, Größe unter
-Smitherys Limit). Nicht mehr per Prompt nachbauen — der Prompt fragt nur noch nach dem, was ein
+zweite Artefakt, das MCPB-Bundle (Manifest validiert, Bundle entpackt und gebootet; die
+Smithery-Variante samt Größengrenze ist seit 0.28.0 entfallen). Nicht mehr per Prompt nachbauen — der Prompt fragt nur noch nach dem, was ein
 Skript nicht beurteilen kann:
 
 ```

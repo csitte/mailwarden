@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2026, `docs/measurements.json`), so attachments needed no new egress endpoint; the upload endpoint
   stays refused.
 
+### Removed
+- **The `-smithery` MCPB variant.** `npm run mcpb` builds one bundle again, the strict one that is
+  the release asset. The second file carried the full MCP Tool objects Smithery's registry required;
+  Smithery shut down its CLI and accounts on 31 October 2026 and is a directory only now, and 0.23.0
+  was the last version published there. The listing and the README link stay. `fflate`, used only to
+  zip that variant, is no longer a dev dependency.
+
 ### Fixed
 - **A reply to a sender at an internationalised domain is no longer asked about as if to a
   stranger.** A recipient is written with its domain in ASCII form (`xn--…`), but the thread's own
