@@ -4,6 +4,9 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { gmail_v1 } from "@googleapis/gmail";
+import { promises as fs } from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 import { Gmail } from "../src/gmail.js";
@@ -440,5 +443,74 @@ describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own add
     const { client } = await setup("1");
     const names = (await client.listTools()).tools.map((t) => t.name).filter((n) => /draft|send/.test(n)).sort();
     expect(names).toEqual(["create_draft", "update_draft"]);
+  });
+});
+
+describe("attachments over MCP", () => {
+  async function folder(): Promise<string> {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mw-attach-mcp-"));
+    await fs.writeFile(path.join(dir, "Foto.jpg"), "JPEG");
+    return dir;
+  }
+
+  it("attaches a file from MAILWARDEN_ATTACH_DIR after the dialog, and lists it in the result", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const dir = await folder();
+    vi.stubEnv("MAILWARDEN_ATTACH_DIR", dir);
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client, asked } = await connect({ action: "accept", content: { confirm: true } });
+    const res: any = await client.callTool({
+      name: "create_draft",
+      arguments: { threadId: "t1", body: "Anbei das Foto", attachments: [{ path: "Foto.jpg" }] },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatch(/Attachments: Foto\.jpg \(4 bytes, new, from a file on this computer\)/);
+    expect(res.structuredContent).toMatchObject({
+      attachments: [{ filename: "Foto.jpg", mimeType: "image/jpeg", bytes: 4, source: "file" }],
+      attachmentBytes: 4,
+      sent: false,
+    });
+    const raw = Buffer.from(calls.created[0].message.raw, "base64url").toString();
+    expect(raw).toMatch(/Content-Type: multipart\/mixed/);
+    expect(raw).toContain('filename="Foto.jpg"');
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("refuses a file on a client without a dialog, even with MAILWARDEN_CONFIRM off", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const dir = await folder();
+    vi.stubEnv("MAILWARDEN_ATTACH_DIR", dir);
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client } = await connect();
+    const res: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x", attachments: [{ path: "Foto.jpg" }] } });
+    expect(text(res)).toMatch(/declined_by_user/);
+    expect(text(res)).toMatch(/with a file from the disk attached/);
+    expect(calls.created).toEqual([]);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("reports no attachments as an empty list, never a missing field", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    (getAuth as Mock).mockResolvedValue(draftApi().api);
+    const { client } = await connect();
+    const res: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x" } });
+    expect(res.structuredContent).toMatchObject({ attachments: [], attachmentBytes: 0 });
+  });
+
+  it("does not take `kept` in create_draft", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    (getAuth as Mock).mockResolvedValue(draftApi().api);
+    const { client } = await connect();
+    const res: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x", attachments: [{ kept: "a.pdf" }] } });
+    expect(res.isError).toBe(true);
+  });
+
+  it("stops the start on an unusable MAILWARDEN_ATTACH_DIR", () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    vi.stubEnv("MAILWARDEN_ATTACH_DIR", os.homedir());
+    expect(() => registerTools(new McpServer({ name: "mailwarden", version: "0.0.0" }))).toThrow(/home directory itself/);
   });
 });

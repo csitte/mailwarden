@@ -294,8 +294,11 @@ function fakeGmail(over: Partial<DraftGmail> & { draft?: Partial<DraftInfo> } = 
       subject: "Re: Plans",
       inReplyTo: "<m2@example.org>",
       references: "<m1@example.org> <m2@example.org>",
+      attachments: [],
       ...over.draft,
     }),
+    threadAttachments: async () => [],
+    attachmentBytes: async () => Buffer.alloc(0),
     ...over,
   };
   return { gmail, created, updated };

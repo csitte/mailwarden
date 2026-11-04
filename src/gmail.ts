@@ -594,6 +594,8 @@ export interface DraftInfo {
   subject: string;
   inReplyTo?: string;
   references?: string;
+  /** The files the draft carries now — its own, or ones the user added in Gmail. */
+  attachments: Attachment[];
 }
 
 /** Normalize a Content-ID header value: strip surrounding `<>`, trim, lowercase. */
@@ -1922,15 +1924,16 @@ export class Gmail {
     return this.markDraft(res.data);
   }
 
-  /** A draft's recipients, subject and threading, and whether mailwarden wrote it. */
+  /** A draft's recipients, subject, threading and attachments, and whether mailwarden wrote it. */
   async getDraft(draftId: string): Promise<DraftInfo> {
     const [res, labels] = await Promise.all([
       this.req(() =>
         this.api.users.drafts.get({
           userId: "me",
           id: draftId,
-          // drafts.get takes no metadataHeaders; "metadata" returns every header, and these are few.
-          format: "metadata",
+          // "full" for the attachment list, which update_draft keeps; the text it returns is small,
+          // and an attachment's bytes come only by attachmentId, fetched when one is kept.
+          format: "full",
         }),
       ),
       this.listLabels(),
@@ -1951,7 +1954,19 @@ export class Gmail {
       subject: decodeRfc2047(h("Subject") ?? ""),
       inReplyTo: h("In-Reply-To"),
       references: h("References"),
+      attachments: collectAttachments(m),
     };
+  }
+
+  /**
+   * Every real attachment in a thread, by message, as the thread is now. The attachment ids are
+   * fresh from this read: Gmail issues a new one for the same part on every fetch (measured
+   * 4 Nov 2026, three reads, three ids), so a draft names a thread attachment by message and
+   * filename and the id is looked up here.
+   */
+  async threadAttachments(threadId: string): Promise<Attachment[]> {
+    const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));
+    return (res.data.messages ?? []).flatMap((m) => (m.id ? collectAttachments(m) : []));
   }
 
   private async markDraft(d: gmail_v1.Schema$Draft): Promise<DraftRef> {

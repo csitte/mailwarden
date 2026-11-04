@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Attachments for drafts.** `create_draft` and `update_draft` take `attachments`: at most 10, 25 MB
+  together. A file comes only from the folder named in the new `MAILWARDEN_ATTACH_DIR`; without it no
+  file can be attached, `..` and symlinks or junctions leading out are refused, and the root of a drive
+  or the home directory itself stops the start. An attachment of a mail comes only from a message in
+  the reply's own thread, named by `fromMessage` and `filename` (Gmail's attachment ids change on every
+  read). **A file from the disk is confirmed like a new address** — the client's dialog, whatever
+  `MAILWARDEN_CONFIRM` says, also in a reply within the thread; `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`
+  covers it only when every recipient is the user's own address. In `update_draft`, omitting
+  `attachments` keeps every file the draft has (an update replaces the whole message, so they used to
+  be lost with every text change once someone added one in Gmail), a list replaces them with
+  `{ kept }` for one to keep, `[]` removes them. The result carries `attachments` (name, type, size,
+  source) and `attachmentBytes`, always, empty when there are none. Filenames are written as RFC 2231
+  continuations when not plain ASCII; file types Gmail refuses to send (`.exe`, `.js`, …) are refused
+  at once. Requested by the gmail deployment (bridge thread 632). New threat 11 in `SECURITY.md`.
+- `scripts/probe-draft-size.mjs` measures what draft size the plain `drafts.create`/`drafts.update`
+  calls accept. Every size from 1 to 35 MB of attachment passed and was stored whole (4 November
+  2026, `docs/measurements.json`), so attachments needed no new egress endpoint; the upload endpoint
+  stays refused.
+
 ## [0.27.2] - 2026-11-03
 
 ### Security

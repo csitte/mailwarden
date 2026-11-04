@@ -200,6 +200,18 @@ claude mcp add mailwarden -- npx -y mailwarden
 remote deployments also read [Security & privacy](../README.md#security--privacy) and
 consider `MAILWARDEN_READONLY=1` and `MAILWARDEN_DOWNLOAD_DIR`.
 
+**Drafts with attachments:** with the `drafts` tier on, `create_draft` and `update_draft` can attach
+files from one folder only. Name it in the same `env` block as `MAILWARDEN_TOOLS`:
+
+```json
+"env": { "MAILWARDEN_TOOLS": "read,manage,drafts", "MAILWARDEN_ATTACH_DIR": "/home/you/mail-out" }
+```
+
+Use a folder of its own and put into it only what may be sent; the root of a drive and the home
+directory itself are refused at startup. Without the setting, no file can be attached; attachments of
+a mail in the reply's thread work either way. Every file from the folder is confirmed in the client's
+dialog, so a client without one cannot attach files (see the README, *Drafts*).
+
 **Smoke test:** ask your assistant something like *"search my inbox for unread mail from
 the last 2 days"* — you should get real thread summaries back.
 

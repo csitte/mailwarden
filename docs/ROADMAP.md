@@ -61,7 +61,8 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    recipients the caller names — and can change only drafts it created. A new message to a freely
    chosen address is where an injected instruction could aim mail at a stranger, so that path always
    asks the person at the client first, through the same elicitation as `MAILWARDEN_CONFIRM`, and is
-   refused on a client that cannot ask. No attachments from local disk. Sending stays a non-goal:
+   refused on a client that cannot ask. Attachments followed in 0.28.0, from one configured folder or
+   from the reply's own thread, a file always confirmed like a new address. Sending stays a non-goal:
    `messages.send` and `drafts.send` stay on the egress denylist, and only a person pressing Send in
    Gmail sends anything. What remains is stated plainly: a draft can carry what an injected mail asked
    for, and the protection is the human reading it before Send.

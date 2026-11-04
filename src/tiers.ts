@@ -102,8 +102,9 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   }
   if (tiers.has("drafts")) {
     jobs.push(
-      "write reply drafts and drafts of new messages, and revise drafts it wrote — saved in Gmail's " +
-        "Drafts for the user to review and send; mailwarden itself never sends",
+      "write reply drafts and drafts of new messages, and revise drafts it wrote, with attachments from " +
+        "the operator's attachment folder or the reply's thread — saved in Gmail's Drafts for the user " +
+        "to review and send; mailwarden itself never sends",
     );
   }
   const triggers = ["asks about their Gmail inbox, specific emails, newsletters or what still needs a reply"];

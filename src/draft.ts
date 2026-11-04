@@ -16,6 +16,7 @@
  *      addr-specs rather than copied from the thread.
  */
 
+import { randomBytes } from "node:crypto";
 import { domainToASCII } from "node:url";
 import { addressesOf } from "./signals.js";
 import { ToolError } from "./cli.js";
@@ -223,21 +224,193 @@ export function encodeHeaderText(value: string): string {
   return words.map((w) => `=?UTF-8?B?${Buffer.from(w, "utf8").toString("base64")}?=`).join("\r\n ");
 }
 
+/** Upper bounds for attachments: Gmail's own limit on what a mail may carry, and a count to match. */
+export const MAX_ATTACHMENTS = 10;
+export const MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024;
+export const MAX_FILENAME_CHARS = 255;
+
+/** Where an attachment came from: a file in MAILWARDEN_ATTACH_DIR, a message in the thread, or the draft itself. */
+export type AttachmentSource = "file" | "message" | "kept";
+
+export interface DraftAttachment {
+  filename: string;
+  mimeType: string;
+  data: Buffer;
+  source: AttachmentSource;
+}
+
+/**
+ * Extensions Gmail refuses to send (support.google.com/mail/answer/6590). Gmail stores a draft
+ * carrying one and only refuses at Send, so they are turned away here, where the reason can still
+ * be told. A convenience, not a security boundary: the boundary is the directory.
+ */
+const BLOCKED_EXTENSIONS = new Set(
+  (
+    "ade adp apk appx appxbundle bat cab chm cmd com cpl diagcab diagcfg diagpkg dll dmg ex_ exe hta img ins iso isp " +
+    "jar jnlp js jse lib lnk mde mjs msc msi msix msixbundle msp mst nsh pif ps1 scr sct shb sys vb vbe vbs vhd vxd " +
+    "wsc wsf wsh xll"
+  ).split(" "),
+);
+
+/** The type a recipient's client is told, by extension. It decides nothing here; unknown is octet-stream. */
+const MIME_TYPES: Record<string, string> = {
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  gif: "image/gif",
+  webp: "image/webp",
+  heic: "image/heic",
+  heif: "image/heif",
+  tif: "image/tiff",
+  tiff: "image/tiff",
+  svg: "image/svg+xml",
+  txt: "text/plain",
+  csv: "text/csv",
+  md: "text/markdown",
+  html: "text/html",
+  htm: "text/html",
+  xml: "application/xml",
+  json: "application/json",
+  ics: "text/calendar",
+  vcf: "text/vcard",
+  eml: "message/rfc822",
+  rtf: "application/rtf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  odt: "application/vnd.oasis.opendocument.text",
+  ods: "application/vnd.oasis.opendocument.spreadsheet",
+  odp: "application/vnd.oasis.opendocument.presentation",
+  zip: "application/zip",
+  gz: "application/gzip",
+  "7z": "application/x-7z-compressed",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+};
+
+function extensionOf(filename: string): string {
+  const dot = filename.lastIndexOf(".");
+  return dot > 0 ? filename.slice(dot + 1).toLowerCase() : "";
+}
+
+/** A bare `type/subtype`, nothing a header line could be bent with. */
+export function isMimeType(value: string): boolean {
+  return /^[a-z0-9!#$&^_.+-]+\/[a-z0-9!#$&^_.+-]+$/i.test(value);
+}
+
+export function mimeTypeFor(filename: string): string {
+  return MIME_TYPES[extensionOf(filename)] ?? "application/octet-stream";
+}
+
+/**
+ * Refuse a filename that could not be written as a single header parameter or would name a path:
+ * empty, a line break or control character, a slash or backslash, `.`/`..`, too long, or a type
+ * Gmail will not send. Nothing is repaired — the caller learns what to change.
+ */
+export function checkFilename(filename: string): void {
+  const bad = (why: string) =>
+    new ToolError("invalid_input", `The attachment name "${dialogText(filename, 80)}" ${why}; nothing was written.`);
+  if (!filename.trim()) throw bad("is empty");
+  if (HEADER_UNSAFE.test(filename)) throw bad("contains a line break or control character");
+  if (/[\\/]/.test(filename)) throw bad("contains a slash; give the name without a path");
+  if (filename === "." || filename === "..") throw bad("is not a file name");
+  if ([...filename].length > MAX_FILENAME_CHARS) throw bad(`is longer than ${MAX_FILENAME_CHARS} characters`);
+  if (BLOCKED_EXTENSIONS.has(extensionOf(filename))) {
+    throw bad("has a file type Gmail refuses to send (.exe, .js, .bat and similar)");
+  }
+}
+
+/** The count, the names and the total size, checked before a byte of the message is built. */
+export function checkAttachments(list: readonly DraftAttachment[]): void {
+  if (list.length > MAX_ATTACHMENTS) {
+    throw new ToolError(
+      "invalid_input",
+      `A draft may carry at most ${MAX_ATTACHMENTS} attachments (got ${list.length}); nothing was written.`,
+    );
+  }
+  for (const a of list) checkFilename(a.filename);
+  const total = attachmentBytes(list);
+  if (total > MAX_ATTACHMENT_BYTES) {
+    throw new ToolError(
+      "invalid_input",
+      `The attachments add up to ${formatBytes(total)}, more than Gmail's limit of ${formatBytes(MAX_ATTACHMENT_BYTES)}; nothing was written.`,
+    );
+  }
+}
+
+export function attachmentBytes(list: readonly DraftAttachment[]): number {
+  return list.reduce((n, a) => n + a.data.length, 0);
+}
+
+/** `1.4 MB`, `820 KB`, `12 bytes` — for dialogs and messages, in binary units. */
+export function formatBytes(n: number): string {
+  if (n >= 1024 * 1024) return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+  if (n >= 1024) return `${Math.round(n / 1024)} KB`;
+  return `${n} bytes`;
+}
+
+/** RFC 5987 attr-char: what may stand unencoded in an extended parameter value. */
+const ATTR_CHAR = /^[A-Za-z0-9!#$&+\-.^_`|~]$/;
+
+/**
+ * A filename as a MIME parameter: quoted when it is plain printable ASCII, otherwise as RFC 2231
+ * continuations of UTF-8 percent-encoding, cut into short pieces so no header line grows long and
+ * no `%XX` is split. Pure ASCII is the common case and stays readable in the raw message.
+ */
+export function fileParameter(param: string, filename: string): string[] {
+  if (/^[\x20-\x7e]*$/.test(filename) && !/["\\]/.test(filename) && filename.length <= 200) {
+    return [`${param}="${filename}"`];
+  }
+  const tokens: string[] = [];
+  for (const byte of Buffer.from(filename, "utf8")) {
+    const ch = String.fromCharCode(byte);
+    tokens.push(byte < 0x80 && ATTR_CHAR.test(ch) ? ch : `%${byte.toString(16).toUpperCase().padStart(2, "0")}`);
+  }
+  const pieces: string[] = [];
+  let piece = "";
+  for (const t of tokens) {
+    if (piece.length + t.length > 60) {
+      pieces.push(piece);
+      piece = "";
+    }
+    piece += t;
+  }
+  if (piece) pieces.push(piece);
+  return pieces.map((p, i) => `${param}*${i}*=${i === 0 ? "UTF-8''" : ""}${p}`);
+}
+
 export interface DraftContent extends Recipients {
   subject: string;
   body: string;
   inReplyTo?: string;
   references?: string;
+  /** Omitted or empty: a plain-text message, byte for byte what it was before attachments existed. */
+  attachments?: DraftAttachment[];
 }
 
+const base64Lines = (data: Buffer) => data.toString("base64").match(/.{1,76}/g) ?? [];
+
 /**
- * The RFC 5322 message, ready to be base64url-encoded into `raw`. Plain text only, the body
+ * The RFC 5322 message, ready to be base64url-encoded into `raw`. The body is plain text,
  * base64-encoded so no line of it can be read as anything but body. Every header value has been
  * checked or built here; nothing the caller wrote reaches a header unchecked.
+ *
+ * With attachments the message becomes `multipart/mixed`: the same text part first, then one
+ * base64 part per file. The boundary contains `=_`, which no base64 line can — so no part's
+ * content can end its part early, whatever the file holds.
  */
-export function buildMime(d: DraftContent): string {
+export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes(12).toString("hex")}`): string {
   checkContent(d.subject, d.body);
   checkRecipients(d);
+  const attachments = d.attachments ?? [];
+  checkAttachments(attachments);
   const lines: string[] = [];
   if (d.to.length) lines.push(`To: ${d.to.join(", ")}`);
   if (d.cc.length) lines.push(`Cc: ${d.cc.join(", ")}`);
@@ -251,13 +424,45 @@ export function buildMime(d: DraftContent): string {
     checkHeaderValue("References", d.references);
     lines.push(`References: ${d.references}`);
   }
-  lines.push("MIME-Version: 1.0", "Content-Type: text/plain; charset=UTF-8", "Content-Transfer-Encoding: base64");
-  const body = Buffer.from(d.body.replace(/\r?\n/g, "\r\n"), "utf8").toString("base64");
-  return [...lines, "", ...(body.match(/.{1,76}/g) ?? [])].join("\r\n") + "\r\n";
+  lines.push("MIME-Version: 1.0");
+  const text = [
+    "Content-Type: text/plain; charset=UTF-8",
+    "Content-Transfer-Encoding: base64",
+    "",
+    ...base64Lines(Buffer.from(d.body.replace(/\r?\n/g, "\r\n"), "utf8")),
+  ];
+  if (!attachments.length) return [...lines, ...text].join("\r\n") + "\r\n";
+  const parts = attachments.map((a) => {
+    if (!isMimeType(a.mimeType)) {
+      throw new ToolError("invalid_input", `"${dialogText(a.mimeType, 80)}" is not a MIME type; nothing was written.`);
+    }
+    return [
+      `Content-Type: ${a.mimeType};\r\n ${fileParameter("name", a.filename).join(";\r\n ")}`,
+      `Content-Disposition: attachment;\r\n ${fileParameter("filename", a.filename).join(";\r\n ")}`,
+      "Content-Transfer-Encoding: base64",
+      "",
+      ...base64Lines(a.data),
+    ];
+  });
+  return (
+    [
+      ...lines,
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      ...text,
+      ...parts.flatMap((p) => [`--${boundary}`, ...p]),
+      `--${boundary}--`,
+    ].join("\r\n") + "\r\n"
+  );
 }
 
-/** What the confirmation dialog says: the recipients first, new ones marked, then the content. */
+/** What the confirmation dialog says: the recipients first, new ones marked, the attachments, then the content. */
 export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, unknown: readonly string[]): string {
+  const origin = { file: "new, from a file on this computer", message: "from a mail in the thread", kept: "already in the draft" };
+  const files = (d.attachments ?? []).map(
+    (a) => `${dialogText(a.filename, 80)} (${formatBytes(a.data.length)}, ${origin[a.source]})`,
+  );
   const mark = (a: string) => (unknown.includes(a) ? `${a} (new)` : a);
   const list = (label: string, xs: string[]) => (xs.length ? [`${label}: ${xs.map(mark).join(", ")}`] : []);
   const head =
@@ -271,6 +476,7 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
     ...list("To", d.to),
     ...list("Cc", d.cc),
     ...list("Bcc", d.bcc),
+    ...(files.length ? [`Attachments: ${files.join("; ")}`] : []),
     `Subject: ${dialogText(d.subject, 120)}`,
     `Text: ${dialogText(d.body, 300)}`,
   ].join("\n");

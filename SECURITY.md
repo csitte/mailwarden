@@ -51,7 +51,7 @@ mailbox content).
   compose capability either. There is **no tool** through which mail content can be pushed to an
   external recipient. This is the primary exfiltration defense and the reason it is a hard design
   rule, not a feature gap. The opt-in `drafts` tier writes drafts and still sends nothing; what that
-  leaves open is threat 10.
+  leaves open is threat 10, and threat 11 for files attached from the disk.
 - **Scope-level guarantee — in `read` deployments.** With `MAILWARDEN_TOOLS=read` (or
   `MAILWARDEN_READONLY=1`) the only scope requested is `gmail.readonly`, and Google itself refuses
   that token on `messages.send`. A `manage`/`filters` deployment holds `gmail.modify`, which Google
@@ -363,11 +363,44 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
   only the draft tools set; every label tool refuses to add it, by name or by id, so an injected
   "label that draft" cannot hand one of the user's own drafts to an overwrite.
 - **What it does not defend against.** A reply's recipient is the thread's sender — and the sender of
-  an injected mail is exactly that. A reply within the thread is therefore not asked about unless
+  an injected mail is exactly that. (Files attached from the disk are the subject of threat 11.) A reply within the thread is therefore not asked about unless
   `MAILWARDEN_CONFIRM` says so, and its text can contain whatever the model was steered into
   writing, including content read from other mail. The dialog shows the recipients and the start of
   the text; it is not a review of the whole draft. The protection that remains is the person reading
   the draft before pressing Send, and nothing in this server can replace that.
+
+### 11. Prompt injection → a local file in a draft (`drafts` tier only)
+`create_draft` and `update_draft` can attach files, and so they are the one place mailwarden reads a
+file from the local disk because a caller asked. The threat is an injected mail steering the model to
+attach a file — a tax document, a key, an export — to a reply that goes back to its sender, who then
+receives it once the person presses Send without looking at the attachment list.
+
+- **One folder, and nothing without it.** A file can come only from `MAILWARDEN_ATTACH_DIR`. Unset, no
+  file can be attached at all; this is stricter than `MAILWARDEN_DOWNLOAD_DIR`, which only narrows where
+  a download may land. The folder's own path and its resolved path are both checked, and the file again
+  after `realpath`, so neither `..` nor a symlink or junction inside the folder leads out of it. Only a
+  regular file is read, through the handle that was checked, and only up to the size limit. The root of
+  a drive and the home directory itself are refused at startup: either would put everything the user
+  owns behind one path. The folder is meant to hold only what may leave, and the person fills it.
+- **A file is asked about like a new address.** Any file from the disk makes the draft wait for the
+  person's yes in the client's own dialog, whatever `MAILWARDEN_CONFIRM` says, and a client that cannot
+  show one is refused — also in a reply to someone already in the thread, because the sender of an
+  injected mail is exactly such a someone. The dialog names each file with its size and origin.
+  `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` covers a file only when every recipient is the account's own
+  address. A file the draft already carries is not asked about again when the draft is revised.
+- **A mail's attachment stays in its thread.** An attachment can be taken from a mail only if that mail
+  is in the reply's own thread, so it goes back to people who were sent it in the first place. Taking
+  one from elsewhere in the mailbox — the accountant's PDF into a reply to a stranger — is refused; it
+  would be a new way out of the mailbox. It is not asked about beyond the rule for the recipients.
+- **No new way out of the process.** The draft travels in the same `drafts.create` / `drafts.update`
+  request body as before (Gmail accepted drafts with up to 35 MB of attachments that way, measured
+  4 November 2026), so the egress guard gained no endpoint; the upload endpoint stays refused. Reading an
+  attachment of the thread or of the draft uses `messages.attachments.get`, which `download_attachment`
+  has always used. The model never passes file content itself, only a path or a name.
+- **What it does not defend against.** A file that is in the folder and that the person confirms in the
+  dialog is in the draft, and it leaves once they press Send. The dialog shows names and sizes, not the
+  content. A file the person put into the folder for one mail is available to every draft until they
+  remove it; the folder is only as narrow as the person keeps it.
 
 ## Against published guidance
 
