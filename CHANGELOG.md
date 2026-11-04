@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.28.1] - 2026-11-04
+
 ### Fixed
 - **An attachment taken from a mail in the thread is asked about unless every recipient got that very
   mail.** 0.28.0 only checked that the mail was in the reply's thread, but a Gmail thread also holds
@@ -2394,7 +2396,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.28.1...HEAD
+[0.28.1]: https://github.com/csitte/mailwarden/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/csitte/mailwarden/compare/v0.27.2...v0.28.0
 [0.27.2]: https://github.com/csitte/mailwarden/compare/v0.27.1...v0.27.2
 [0.27.1]: https://github.com/csitte/mailwarden/compare/v0.27.0...v0.27.1
