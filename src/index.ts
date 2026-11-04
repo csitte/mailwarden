@@ -15,6 +15,7 @@ import { sweepSnoozed } from "./snooze.js";
 import { startHttp } from "./http.js";
 import { resolveEnabledTiers, scopeGapMessage, serverInstructions } from "./tiers.js";
 import { runDoctor } from "./doctor.js";
+import { resolveAttachDir } from "./attach.js";
 import {
   CliError,
   debugEnabled,
@@ -94,7 +95,8 @@ async function main(): Promise<void> {
   // Every other mode: fail fast on a misconfigured environment. MAILWARDEN_TOOLS must be validated
   // here too — in --http, registration otherwise runs per-request and a bad value would hang the
   // first request instead of failing at boot.
-  resolveEnabledTiers(process.env);
+  // The same for MAILWARDEN_ATTACH_DIR, which only the drafts tier reads.
+  if (resolveEnabledTiers(process.env).has("drafts")) resolveAttachDir(process.env);
   const account = activeAccount();
 
   // One-time interactive OAuth consent. Named accounts go via `--account <name>` (→ token.<name>.json);

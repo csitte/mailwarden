@@ -7,6 +7,7 @@ import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { decodeRfc2047 } from "./rfc2047.js";
 import { DRAFT_LABEL, type ReplySource } from "./draft.js";
+import { inAttachDir } from "./attach.js";
 import { decodeCharset } from "./charset.js";
 
 export { decodeRfc2047 };
@@ -2030,6 +2031,17 @@ async function resolveLocalDest(destPath: string): Promise<string> {
   // without the fence, an HTTP-hosted deployment would hand every client an
   // arbitrary file write on the server.
   const root = process.env.MAILWARDEN_DOWNLOAD_DIR;
+  // Never into the folder drafts attach files from: only the person fills it, or any attachment
+  // of the mailbox could be fetched there and attached to a draft for anyone (SECURITY.md, 11).
+  const refuseAttachDir = async (p: string) => {
+    if (await inAttachDir(p)) {
+      throw new ToolError(
+        "forbidden_operation",
+        "That path is in MAILWARDEN_ATTACH_DIR, the folder drafts attach files from. mailwarden never writes there; " +
+          "only the person puts files into it. Save the file somewhere else. Nothing was written.",
+      );
+    }
+  };
   let dest: string;
   if (root) {
     await fs.mkdir(root, { recursive: true });
@@ -2047,6 +2059,7 @@ async function resolveLocalDest(destPath: string): Promise<string> {
       throw new Error(`destPath escapes MAILWARDEN_DOWNLOAD_DIR (${fence}).`);
     }
     dest = path.join(fence, rel);
+    await refuseAttachDir(dest);
     await fs.mkdir(path.dirname(dest), { recursive: true });
     // …and again against the REAL parent directory: a symlinked subdirectory
     // inside the fence pointing outside would pass the lexical check above.
@@ -2057,8 +2070,11 @@ async function resolveLocalDest(destPath: string): Promise<string> {
     dest = path.join(realDir, path.basename(dest));
   } else {
     dest = path.resolve(destPath);
+    await refuseAttachDir(dest);
     await fs.mkdir(path.dirname(dest), { recursive: true });
   }
+  // Again on the real parent: a link elsewhere may lead into the attachment folder.
+  await refuseAttachDir(path.join(await fs.realpath(path.dirname(dest)), path.basename(dest)));
   return dest;
 }
 

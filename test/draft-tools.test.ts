@@ -466,7 +466,7 @@ describe("attachments over MCP", () => {
     });
     expect(res.isError).toBeFalsy();
     expect(asked).toHaveLength(1);
-    expect(asked[0]).toMatch(/Attachments: Foto\.jpg \(4 bytes, new, from a file on this computer\)/);
+    expect(asked[0]).toMatch(/Attachments: Foto\.jpg \(4 bytes, new, from the file Foto\.jpg on this computer\)/);
     expect(res.structuredContent).toMatchObject({
       attachments: [{ filename: "Foto.jpg", mimeType: "image/jpeg", bytes: 4, source: "file" }],
       attachmentBytes: 4,

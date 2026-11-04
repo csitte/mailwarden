@@ -2395,6 +2395,28 @@ describe("Gmail.downloadAttachment", () => {
     expect(await fs.readFile(saved, "utf8")).toBe("X");
   });
 
+  it("never writes into MAILWARDEN_ATTACH_DIR, by any spelling, with or without a download folder", async () => {
+    tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
+    const attach = path.join(tmp, "out");
+    await fs.mkdir(attach);
+    vi.stubEnv("MAILWARDEN_ATTACH_DIR", attach);
+    const gmail = new Gmail(apiWith(b64url("X")));
+    for (const dest of [path.join(attach, "a.pdf"), path.join(attach, "new", "sub", "a.pdf"), path.join(tmp, "x", "..", "out", "a.pdf")]) {
+      await expect(gmail.downloadAttachment("m1", "a1", dest), dest).rejects.toThrow(/MAILWARDEN_ATTACH_DIR/);
+    }
+    // nothing was created on the way, not even the directories
+    expect(await fs.readdir(attach)).toEqual([]);
+    // a junction elsewhere that leads into the folder is caught on the real parent
+    const via = path.join(tmp, "via");
+    await fs.symlink(attach, via, "junction");
+    await expect(gmail.downloadAttachment("m1", "a1", path.join(via, "a.pdf"))).rejects.toThrow(/MAILWARDEN_ATTACH_DIR/);
+    // the download folder's own rules still apply around it
+    vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
+    await expect(gmail.downloadAttachment("m1", "a1", "out/a.pdf")).rejects.toThrow(/MAILWARDEN_ATTACH_DIR/);
+    expect(await gmail.downloadAttachment("m1", "a1", "elsewhere/a.pdf")).toBe(path.join(await fs.realpath(tmp), "elsewhere", "a.pdf"));
+    expect(await fs.readdir(attach)).toEqual([]);
+  });
+
   it("never overwrites: an existing file gets a numeric suffix", async () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
     const gmail = new Gmail(apiWith(b64url("NEW")));

@@ -10,16 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Attachments for drafts.** `create_draft` and `update_draft` take `attachments`: at most 10, 25 MB
   together. A file comes only from the folder named in the new `MAILWARDEN_ATTACH_DIR`; without it no
-  file can be attached, `..` and symlinks or junctions leading out are refused, and the root of a drive
-  or the home directory itself stops the start. An attachment of a mail comes only from a message in
+  file can be attached; `..`, symlinks or junctions leading out, files with a second hard link and
+  (on Windows) file streams are refused; and a drive root, the home directory or a folder containing
+  it — also through a link — or on Windows a path without a drive letter stops the start. mailwarden
+  never writes into that folder:
+  `download_attachment` and `export_thread` refuse a path there, and a `MAILWARDEN_DOWNLOAD_DIR` that is
+  the folder or lies inside it stops the start — otherwise any attachment of the mailbox could be
+  fetched into it and attached from there. An attachment of a mail comes only from a message in
   the reply's own thread, named by `fromMessage` and `filename` (Gmail's attachment ids change on every
   read). **A file from the disk is confirmed like a new address** — the client's dialog, whatever
   `MAILWARDEN_CONFIRM` says, also in a reply within the thread; `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`
-  covers it only when every recipient is the user's own address. In `update_draft`, omitting
+  covers it only when every recipient is the user's own address. The dialog names a file by its real
+  path in the folder, also when `filename` renames it for the mail. In `update_draft`, omitting
   `attachments` keeps every file the draft has (an update replaces the whole message, so they used to
   be lost with every text change once someone added one in Gmail), a list replaces them with
   `{ kept }` for one to keep, `[]` removes them. The result carries `attachments` (name, type, size,
-  source) and `attachmentBytes`, always, empty when there are none. Filenames are written as RFC 2231
+  source) and `attachmentBytes`, always, empty when there are none. A filename with invisible, bidi or C1 control characters, a lone
+  surrogate, an encoded word (`=?…?=`) or a trailing dot or space is refused, so the dialog and the
+  recipient see the same name; other filenames are written as RFC 2231
   continuations when not plain ASCII; file types Gmail refuses to send (`.exe`, `.js`, …) are refused
   at once. Requested by the gmail deployment (bridge thread 632). New threat 11 in `SECURITY.md`.
 - **`MAILWARDEN_KEYSTORE=require`** — the keystore without the plaintext fallback. Where no OS

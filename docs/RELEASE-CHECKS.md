@@ -465,3 +465,27 @@ Zwei Beobachtungen aus derselben Runde, beide über die Bridge:
   ja der Beleg. **Eine Prüfung gegen das publizierte Paket ist so viel wert wie ihre Zählung.**
   Unser Anteil: `CLAUDE.md` nannte nur die 15, ohne die 13 daneben — beide Zählweisen stehen jetzt
   dort.
+
+## Nachtrag zur Trefferquote (04.11.2026, Release 0.28.0)
+
+Drei Runden nach der Stoppregel: 2 und 6 immer, dazu Runde 1, weil der Release mit dem
+Anhangordner einen neuen Pfadvergleich bringt.
+
+- **Runde 1 (Eingabe-Korpus, 1.764 Aufrufe über 14 Schreibweisen des Ordners × 126 Pfade):**
+  `readAttachmentFile` las keine einzige Datei von außen über eine Schreibweise. **Die Lücke lag eine
+  Ebene höher**, im Startcheck des Ordners selbst: `C:\Users` (enthält Home), `\?\C:\Users\…`,
+  `\.\…`, `\localhost\c$\…`, `\?\UNC\localhost\c$` (Node liest das als Freigabe `UNC`) und
+  Junctions auf Home oder `C:\` wurden als Ordner angenommen, und danach las `readAttachmentFile`
+  korrekt *innerhalb* dieses viel zu großen Ordners. Dazu ein Hardlink im Ordner (kein Pfadvergleich
+  sieht ihn), NTFS-Streams als Umweg um die Endungssperre, `..foo.txt` als Fehlalarm
+  (`startsWith("..")` statt Segmentvergleich), Bidi- und Steuerzeichen sowie halbe Surrogate in
+  Dateinamen und `mimeTypeFor("x.constructor")` aus dem Objekt-Prototyp.
+- **Runde 2 (Doku gegen Code):** ein mittlerer Fund, der eine Designannahme kippte:
+  `download_attachment` durfte in den Anhangordner schreiben, also war „nur aus dem selben Thread“
+  umgehbar. Mein eigener Entwurf hatte „beide Ordner dürfen gleich sein“ ausdrücklich erlaubt. Dazu
+  der Startcheck, der unter `--http` erst pro Anfrage lief, und drei Sätze, die „immer bestätigt“
+  ohne die Selbst-Ausnahme sagten.
+- **Runde 6:** CHANGELOG vollständig; die Testzahl im README war veraltet.
+
+**Merksatz:** Ein Korpus über die Funktion, die den Pfad *prüft*, findet nichts, wenn die Grenze
+selbst falsch gezogen ist. Der Korpus muss auch über die Werte laufen, aus denen die Grenze entsteht.

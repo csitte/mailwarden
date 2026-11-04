@@ -254,7 +254,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `preview_filter` | Check a filter before creating it: how many messages its criteria match today (`currentMatches`, from the same index an `applyToExisting` sweep would use), which existing filters have exactly the same criteria (`sameCriteria`) and which share a `from`/`to`/`subject`/`query` value with it (`overlapping`, with the shared fields named), which `addLabels` names would be created, and whether the action trashes every future match. Read-only; same validation as `create_filter` |
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
-| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. A new message, any address the thread did not already contain, and any file from the disk is always confirmed in a client dialog ([details](#drafts-opt-in--written-here-sent-by-you)) |
+| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. A new message, any address the thread did not already contain, and any file from the disk is confirmed in a client dialog; the one exception is a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` ([details](#drafts-opt-in--written-here-sent-by-you)) |
 | `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused. Attachments not mentioned are kept. A new address or a new file is confirmed like one in `create_draft` |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
@@ -442,14 +442,18 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   wrote yourself cannot be handed to it.
 - **Attachments** (`attachments`, at most 10 files and 25 MB together) come from exactly two places.
   A **file** only from the folder named in `MAILWARDEN_ATTACH_DIR` — a path relative to it or an
-  absolute path inside it; `..` and symlinks that lead out are refused, and without the setting no
-  file can be attached at all. Point it at a folder of its own that holds only what may go out; the
-  root of a drive and the home directory itself are refused at startup. An **attachment of a mail**
+  absolute path inside it; `..`, symlinks and junctions that lead out, hard links and (on Windows)
+  file streams are refused, and without the setting no file can be attached at all. Point it at a
+  folder of its own that holds only what may go out; a drive root, the home directory or a folder that
+  contains it — also when reached through a link — and on Windows any path that does not start with a
+  drive letter are refused at startup. mailwarden never writes into
+  that folder — `download_attachment` and `export_thread` refuse it — so only you put files there. An **attachment of a mail**
   only from a message in the reply's own thread, named by `fromMessage` and `filename` (Gmail issues
   a new `attachmentId` on every read, so the id cannot name it), and never for a new message. In
   `update_draft`, leaving `attachments` out keeps every file the draft carries, a list replaces them
   (`{ "kept": "<filename>" }` keeps one), `[]` removes them. The result lists every attachment of the
-  saved draft with name, type, size and where it came from. The draft is saved through the same
+  saved draft with name, type, size and where it came from; the dialog names a file by its real path
+  in the folder, also when `filename` gives it another name in the mail. The draft is saved through the same
   `drafts.create`/`drafts.update` calls as before — Gmail took drafts with up to 35 MB of attachments
   that way when measured on 4 November 2026 — so the egress guard gained no endpoint; the upload
   endpoint stays refused. Large files take time: a 24 MB attachment took about 40 seconds to save.
@@ -803,7 +807,7 @@ those rules come from).
 | `MAILWARDEN_KEYSTORE` | `auto` (default): encrypt a new token under a key in the OS keystore wherever one is reachable. `off`: never store a key in the keystore — a new token is then stored with the passphrase, or in plaintext (re-authorizing over a keystore token still removes its now-unused key). `require`: like `auto`, but never plaintext — where no keystore takes the key (and no passphrase is set), `--auth` stops and writes nothing, and `--check` warns. Governs writing only: a token already stored with a keystore key still needs that key |
 | `MAILWARDEN_AUTO_SWEEP` | `1` → snooze sweep at startup + hourly while running (writes labels — needs the `manage`/`gmail.modify` scope; a `read`-only grant can't sweep) |
 | `MAILWARDEN_DOWNLOAD_DIR` | restrict `download_attachment` and `export_thread` to this directory. Unset, the client picks any path this process can write to — `--http` warns at startup unless the `manage` tier is off |
-| `MAILWARDEN_ATTACH_DIR` | the one folder the `drafts` tier may attach files from (absolute path; a path inside it or relative to it is accepted, nothing outside). Unset, no file can be attached — attachments from the thread still work. The root of a drive and the home directory itself are refused at startup. May be the same folder as `MAILWARDEN_DOWNLOAD_DIR` |
+| `MAILWARDEN_ATTACH_DIR` | the one folder the `drafts` tier may attach files from (absolute path; a path inside it or relative to it is accepted, nothing outside). Unset, no file can be attached — attachments from the thread still work. A drive root, the home directory or a folder containing it (also through a link), and on Windows any path without a drive letter, are refused at startup. mailwarden never writes into it: `download_attachment` and `export_thread` refuse a path there, and a `MAILWARDEN_DOWNLOAD_DIR` that is the same folder or lies inside it stops the start |
 | `MAILWARDEN_CONFIRM` | ask the person at the client before `create_filter`, `unsubscribe`, `bulk_unsubscribe` and a reply draft within its thread act (a draft to any address the thread did not contain is always asked about), through an MCP elicitation dialog — the answer never passes through the model, so a prompt-injected mail cannot supply it. `ask`: ask where the client supports elicitation, go ahead where it does not. `require`: refuse where it does not. `off` (default): never ask — unattended runs would otherwise fail on a dialog nobody sees. A no is the error `declined_by_user`, and nothing was done. Dry runs are never asked about |
 | `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG` | `1` → the `drafts` tier saves a draft without the confirmation dialog when every new recipient is the signed-in account's own address (the address Gmail reports for the profile; case-insensitive, exact — no aliases or `+tag`), so a client without a usable dialog (none, or one that advertises MCP elicitation and declines it) can draft notes-to-self. Nobody is asked, whatever the client can show; `MAILWARDEN_CONFIRM=require` is still honoured; any other recipient is refused as before. Off by default; only the value `1` enables it. Has no effect outside the `drafts` tier and sends nothing |
 | `MAILWARDEN_READONLY` | `1` → register only the read tools (search/get_thread/read_attachment/list_labels/list_snoozed/get_profile/what_changed/triage_digest/follow_ups/list_unsubscribe/list_subscriptions). Shorthand for `MAILWARDEN_TOOLS=read` |

@@ -381,19 +381,35 @@ receives it once the person presses Send without looking at the attachment list.
   file can be attached at all; this is stricter than `MAILWARDEN_DOWNLOAD_DIR`, which only narrows where
   a download may land. The folder's own path and its resolved path are both checked, and the file again
   after `realpath`, so neither `..` nor a symlink or junction inside the folder leads out of it. Only a
-  regular file is read, through the handle that was checked, and only up to the size limit. The root of
-  a drive and the home directory itself are refused at startup: either would put everything the user
-  owns behind one path. The folder is meant to hold only what may leave, and the person fills it.
+  regular file is read, and only up to the size limit; after opening, the path is resolved again and
+  must still lead inside and to the very file that was opened, so a link swapped in between is caught.
+  A file with more than one hard link is refused: a hard link is the same file under a second name,
+  that name can be anywhere, and no path check can see it. On Windows a name with a colon past the
+  drive letter (an NTFS stream, `photo.jpg:hidden`) is refused too. A drive root, the home directory
+  and any folder that contains it are refused at startup (also for `--http`), checked both as written
+  and where a link leads, and on Windows only a drive-letter path is taken — `\\?\`, `\\.\` and UNC
+  spellings name the same places in forms a comparison cannot all see through. Any of those would put
+  everything the user owns behind one path. Found by the input corpus before 0.28.0 shipped: `C:\Users`,
+  `\\?\UNC\localhost\c$` and a junction to home were accepted at first.
+- **Only the person fills the folder.** `download_attachment` and `export_thread` refuse to write into
+  it, by either spelling of the folder and again on the real parent directory, and a
+  `MAILWARDEN_DOWNLOAD_DIR` that is the folder or lies inside it stops the start. Without this, the
+  model could fetch any attachment of the mailbox into the folder and attach it from there — around
+  the rule below.
 - **A file is asked about like a new address.** Any file from the disk makes the draft wait for the
   person's yes in the client's own dialog, whatever `MAILWARDEN_CONFIRM` says, and a client that cannot
   show one is refused — also in a reply to someone already in the thread, because the sender of an
-  injected mail is exactly such a someone. The dialog names each file with its size and origin.
+  injected mail is exactly such a someone. The dialog names each file with its size and its real path
+  in the folder, also when the caller gave it another name for the mail.
   `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` covers a file only when every recipient is the account's own
   address. A file the draft already carries is not asked about again when the draft is revised.
 - **A mail's attachment stays in its thread.** An attachment can be taken from a mail only if that mail
-  is in the reply's own thread, so it goes back to people who were sent it in the first place. Taking
-  one from elsewhere in the mailbox — the accountant's PDF into a reply to a stranger — is refused; it
-  would be a new way out of the mailbox. It is not asked about beyond the rule for the recipients.
+  is in the reply's own thread. Taking one from elsewhere in the mailbox — the accountant's PDF into a
+  reply to a stranger — is refused; it would be a new way out of the mailbox. It is not asked about
+  beyond the rule for the recipients, so it goes to the thread's own people unasked, and to anyone
+  else only after the dialog for that address — with one gap: `update_draft` compares addresses with
+  the draft as it stood, so an address already confirmed for that draft is not asked about again when
+  a thread attachment is added later.
 - **No new way out of the process.** The draft travels in the same `drafts.create` / `drafts.update`
   request body as before (Gmail accepted drafts with up to 35 MB of attachments that way, measured
   4 November 2026), so the egress guard gained no endpoint; the upload endpoint stays refused. Reading an

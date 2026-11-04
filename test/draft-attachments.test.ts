@@ -129,12 +129,35 @@ describe("checkFilename / checkAttachments", () => {
   ])("refuses %j", (name, why) => {
     expect(() => checkFilename(name)).toThrow(why);
   });
+  // Found by the input corpus of round 1 (4 Nov 2026): each encodes cleanly and would still mislead.
+  it.each([
+    ["a" + String.fromCharCode(0xd800) + ".txt", /lone surrogate/],
+    ["a" + String.fromCharCode(0xdc00) + ".txt", /lone surrogate/],
+    ["a" + String.fromCharCode(0xdc00, 0xd800) + ".txt", /lone surrogate/],
+    ["Rechnung" + String.fromCharCode(0x202e) + "fdp.exe", /invisible or direction-changing/],
+    ["a" + String.fromCharCode(0x200b) + ".pdf", /invisible or direction-changing/],
+    [String.fromCharCode(0xfeff) + "a.pdf", /invisible or direction-changing/],
+    ["a" + String.fromCharCode(0x9b) + ".pdf", /invisible or direction-changing/],
+    ["a" + String.fromCharCode(0x2066) + ".pdf", /invisible or direction-changing/],
+    ["=?UTF-8?B?ZXZpbC5leGU=?=", /encoded header word/],
+    ["x =?utf-8?q?evil.exe?= y", /encoded header word/],
+    ["a.exe.", /ends in a dot or a space/],
+    ["a.exe ", /ends in a dot or a space/],
+    ["a.pdf...", /ends in a dot or a space/],
+  ])("refuses the misleading name %j", (name, why) => {
+    expect(() => checkFilename(name)).toThrow(why);
+  });
+
+  it("accepts a real pair (an emoji) and an equals sign that is no encoded word", () => {
+    for (const ok of ["Urlaub " + String.fromCodePoint(0x1f600) + ".jpg", "a=b?.txt", "=?.pdf"]) expect(() => checkFilename(ok), ok).not.toThrow();
+  });
+
   it("accepts ordinary names, umlauts and names without an extension", () => {
     for (const ok of ["Foto 1.jpg", "Grüße.pdf", "README", ".profile.txt"]) expect(() => checkFilename(ok)).not.toThrow();
   });
   it("refuses more than 25 MB together, and says how much", () => {
     const half = Buffer.alloc(MAX_ATTACHMENT_BYTES / 2 + 1);
-    expect(() => checkAttachments([file("a.bin", half), file("b.bin", half)])).toThrow(/add up to 25\.0 MB, more than Gmail's limit of 25\.0 MB/);
+    expect(() => checkAttachments([file("a.bin", half), file("b.bin", half)])).toThrow(/add up to 26214402 bytes, more than Gmail's limit of 26214400 bytes \(25\.0 MB\)/);
     expect(() => checkAttachments([file("a.bin", Buffer.alloc(MAX_ATTACHMENT_BYTES))])).not.toThrow();
   });
 });
@@ -145,6 +168,9 @@ describe("mimeTypeFor / isMimeType", () => {
     expect(mimeTypeFor("IMG_1.JPG")).toBe("image/jpeg");
     expect(mimeTypeFor("a.unknownext")).toBe("application/octet-stream");
     expect(mimeTypeFor("Makefile")).toBe("application/octet-stream");
+    for (const name of ["x.constructor", "x.__proto__", "x.toString", "x.hasOwnProperty"]) {
+      expect(mimeTypeFor(name), name).toBe("application/octet-stream");
+    }
   });
   it("accepts only a bare type/subtype", () => {
     expect(isMimeType("image/heic")).toBe(true);
@@ -164,13 +190,17 @@ describe("draftDialog with attachments", () => {
         bcc: [],
         subject: "Re: x",
         body: "y",
-        attachments: [file("a.jpg", Buffer.alloc(1536 * 1024)), file("b.pdf", "x", "message"), file("c.txt", "xy", "kept")],
+        attachments: [
+          { ...file("a.jpg", Buffer.alloc(1536 * 1024)), origin: "scans/IMG_0001.jpg" },
+          file("b.pdf", "x", "message"),
+          file("c.txt", "xy", "kept"),
+        ],
       },
       [],
     );
     const lines = d.split("\n");
     expect(lines[2]).toBe(
-      "Attachments: a.jpg (1.5 MB, new, from a file on this computer); b.pdf (1 bytes, from a mail in the thread); c.txt (2 bytes, already in the draft)",
+      "Attachments: a.jpg (1.5 MB, new, from the file scans/IMG_0001.jpg on this computer); b.pdf (1 bytes, from a mail in the thread); c.txt (2 bytes, already in the draft)",
     );
   });
 });
@@ -230,7 +260,7 @@ describe("saveReplyDraft with attachments", () => {
     const { gmail, created } = fake();
     const confirm = vi.fn(async () => true);
     const r = await saveReplyDraft(gmail, { threadId: "t1", body: "Anbei", attachments: [{ path: "foto1.jpg" }] }, "off", confirm, false, readFile);
-    expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("foto1.jpg (8 bytes, new, from a file on this computer)"));
+    expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("foto1.jpg (8 bytes, new, from the file foto1.jpg on this computer)"));
     expect(r.attachments).toEqual([{ filename: "foto1.jpg", mimeType: "image/jpeg", bytes: 8, source: "file" }]);
     expect(r.attachmentBytes).toBe(8);
     expect(r.newRecipients).toEqual([]);
@@ -249,6 +279,10 @@ describe("saveReplyDraft with attachments", () => {
       readFile,
     );
     expect(r.attachments[0]).toMatchObject({ filename: "Rechnung März.pdf", mimeType: "application/pdf" });
+    // A renamed file is still named by its real path in the dialog: a name alone could disguise any file.
+    const asked = vi.fn(async () => true);
+    await saveReplyDraft(gmail, { threadId: "t1", body: "x", attachments: [{ path: "scan.pdf", filename: "photo.jpg" }] }, "off", asked, false, readFile);
+    expect(asked).toHaveBeenCalledWith("require", expect.stringContaining("photo.jpg (4 bytes, new, from the file scan.pdf on this computer)"));
     await expect(
       saveReplyDraft(gmail, { threadId: "t1", body: "x", attachments: [{ path: "scan.pdf", filename: "x.exe" }] }, "off", vi.fn(async () => true), false, readFile),
     ).rejects.toThrow(/refuses to send/);
@@ -416,9 +450,53 @@ describe("attachDirProblem / resolveAttachDir", () => {
     expect(attachDirProblem(home, home)).toMatch(/home directory itself/);
     expect(attachDirProblem(home + path.sep, home)).toMatch(/home directory itself/);
   });
+  it("refuses a folder that contains home, and on Windows every spelling that is not a drive letter", () => {
+    expect(attachDirProblem(path.dirname(home), home)).toMatch(/contains the home directory/);
+    const B = String.fromCharCode(92);
+    const win = (...parts: string[]) => parts.join(B);
+    for (const dir of [
+      win("", "", "?", "C:", "Users", "x"),
+      win("", "", ".", "C:", "Users", "x"),
+      win("", "", "localhost", "c$", "Users", "x"),
+      win("", "", "?", "UNC", "localhost", "c$"),
+      "//server/share/attach",
+    ]) {
+      expect(attachDirProblem(dir, home, "win32"), dir).toMatch(/drive-letter path/);
+    }
+  });
+
+  it("refuses a link to home or to a drive root by where it leads", async () => {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "mw-attachdir-"));
+    const fakeHome = path.join(base, "home");
+    await fs.mkdir(fakeHome);
+    try {
+      await fs.symlink(fakeHome, path.join(base, "to-home"), "junction");
+      await fs.symlink(path.parse(base).root, path.join(base, "to-root"), "junction");
+    } catch {
+      await fs.rm(base, { recursive: true, force: true });
+      return; // no links here; CI on Linux makes them
+    }
+    expect(() => resolveAttachDir({ MAILWARDEN_ATTACH_DIR: path.join(base, "to-home") }, fakeHome)).toThrow(/home directory itself/);
+    expect(() => resolveAttachDir({ MAILWARDEN_ATTACH_DIR: path.join(base, "to-root") }, fakeHome)).toThrow(/root of a drive/);
+    await fs.rm(base, { recursive: true, force: true });
+  });
+
   it("accepts a folder below home", () => {
     expect(attachDirProblem(path.join(home, "Scanbot", "_Anhang-Ausgang"), home)).toBeNull();
   });
+  it("refuses a download folder that is the attachment folder or lies in it", () => {
+    const attach = path.join(home, "out");
+    for (const download of [attach, path.join(attach, "dl"), attach + path.sep]) {
+      expect(() => resolveAttachDir({ MAILWARDEN_ATTACH_DIR: attach, MAILWARDEN_DOWNLOAD_DIR: download }, home), download).toThrow(
+        /lies in MAILWARDEN_ATTACH_DIR/,
+      );
+    }
+    expect(resolveAttachDir({ MAILWARDEN_ATTACH_DIR: attach, MAILWARDEN_DOWNLOAD_DIR: path.join(home, "dl") }, home)).toBe(attach);
+    expect(resolveAttachDir({ MAILWARDEN_ATTACH_DIR: path.join(home, "dl", "out"), MAILWARDEN_DOWNLOAD_DIR: path.join(home, "dl") }, home)).toBe(
+      path.join(home, "dl", "out"),
+    );
+  });
+
   it("is off when unset and stops the start when unusable", () => {
     expect(resolveAttachDir({})).toBeUndefined();
     expect(resolveAttachDir({ MAILWARDEN_ATTACH_DIR: "  " })).toBeUndefined();
@@ -462,9 +540,9 @@ describe("readAttachmentFile — only files inside the folder", () => {
   });
 
   it("reads a relative path and an absolute path inside the folder", async () => {
-    expect(await readAttachmentFile(root, "Foto 1.jpg")).toEqual({ filename: "Foto 1.jpg", data: Buffer.from("JPEG") });
+    expect(await readAttachmentFile(root, "Foto 1.jpg")).toEqual({ filename: "Foto 1.jpg", data: Buffer.from("JPEG"), relative: "Foto 1.jpg" });
     const abs = await readAttachmentFile(root, path.join(root, "sub", "Grüße.pdf"));
-    expect(abs).toEqual({ filename: "Grüße.pdf", data: Buffer.from("PDF") });
+    expect(abs).toEqual({ filename: "Grüße.pdf", data: Buffer.from("PDF"), relative: "sub/Grüße.pdf" });
   });
 
   it.each([["../secret.txt"], ["sub/../../secret.txt"]])("refuses %j, which leads out of the folder", async (p) => {
@@ -483,6 +561,25 @@ describe("readAttachmentFile — only files inside the folder", () => {
   it("refuses a path through a linked directory that leads out of the folder", async (ctx) => {
     if (!dirLink) ctx.skip();
     await expect(readAttachmentFile(root, "updir/secret.txt")).rejects.toThrow(/outside MAILWARDEN_ATTACH_DIR/);
+  });
+
+  it("reads a name that only starts with two dots — it is a name, not a way up", async () => {
+    await fs.writeFile(path.join(root, "..foo.txt"), "DOTS");
+    expect((await readAttachmentFile(root, "..foo.txt")).data.toString()).toBe("DOTS");
+    await fs.rm(path.join(root, "..foo.txt"));
+  });
+
+  it("refuses a file with a second hard link, which may lie anywhere", async () => {
+    const hard = path.join(root, "hard.txt");
+    await fs.link(outsideFile, hard);
+    await expect(readAttachmentFile(root, "hard.txt")).rejects.toThrow(/more than one hard link/);
+    await fs.rm(hard);
+  });
+
+  it.runIf(process.platform === "win32")("refuses an NTFS stream and names the file by its real name", async () => {
+    await expect(readAttachmentFile(root, "Foto 1.jpg:hidden")).rejects.toThrow(/file stream/);
+    await expect(readAttachmentFile(root, "Foto 1.jpg::$DATA")).rejects.toThrow(/file stream/);
+    expect((await readAttachmentFile(root, "FOTO 1.JPG")).filename).toBe("Foto 1.jpg");
   });
 
   it("refuses the folder itself, a directory, and a missing file", async () => {

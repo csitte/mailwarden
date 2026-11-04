@@ -237,6 +237,8 @@ export interface DraftAttachment {
   mimeType: string;
   data: Buffer;
   source: AttachmentSource;
+  /** For a file: its path inside MAILWARDEN_ATTACH_DIR, so the dialog names the real file. */
+  origin?: string;
 }
 
 /**
@@ -306,8 +308,19 @@ export function isMimeType(value: string): boolean {
 }
 
 export function mimeTypeFor(filename: string): string {
-  return MIME_TYPES[extensionOf(filename)] ?? "application/octet-stream";
+  const ext = extensionOf(filename);
+  // Own keys only: `x.constructor` must not find Object's.
+  return Object.hasOwn(MIME_TYPES, ext) ? MIME_TYPES[ext] : "application/octet-stream";
 }
+
+/**
+ * Characters a name must not carry although they encode cleanly: C1 controls, zero-width
+ * characters, bidi controls and the BOM. A right-to-left override shows `Rechnung<RLO>fdp.exe`
+ * as `Rechnungexe.pdf` in the dialog and in the recipient's client.
+ */
+/** Half of a UTF-16 pair without its other half: it encodes as U+FFFD, so the name would change. */
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+const NAME_INVISIBLE = /[\u0080-\u009f\u061c\u200b-\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
 
 /**
  * Refuse a filename that could not be written as a single header parameter or would name a path:
@@ -318,9 +331,16 @@ export function checkFilename(filename: string): void {
   const bad = (why: string) =>
     new ToolError("invalid_input", `The attachment name "${dialogText(filename, 80)}" ${why}; nothing was written.`);
   if (!filename.trim()) throw bad("is empty");
-  if (HEADER_UNSAFE.test(filename)) throw bad("contains a line break or control character");
+  if (HEADER_UNSAFE.test(filename) || NAME_INVISIBLE.test(filename)) {
+    throw bad("contains a line break, a control character or an invisible or direction-changing character");
+  }
+  if (LONE_SURROGATE.test(filename)) throw bad("contains a broken character (a lone surrogate)");
+  // A client that decodes an encoded word inside a parameter would show another name than the dialog.
+  if (/=\?[^?]*\?[bq]\?/i.test(filename)) throw bad("looks like an encoded header word (=?…?=)");
   if (/[\\/]/.test(filename)) throw bad("contains a slash; give the name without a path");
   if (filename === "." || filename === "..") throw bad("is not a file name");
+  // Windows drops trailing dots and spaces, so `a.exe.` would arrive as `a.exe`.
+  if (/[. ]$/.test(filename)) throw bad("ends in a dot or a space");
   if ([...filename].length > MAX_FILENAME_CHARS) throw bad(`is longer than ${MAX_FILENAME_CHARS} characters`);
   if (BLOCKED_EXTENSIONS.has(extensionOf(filename))) {
     throw bad("has a file type Gmail refuses to send (.exe, .js, .bat and similar)");
@@ -340,7 +360,7 @@ export function checkAttachments(list: readonly DraftAttachment[]): void {
   if (total > MAX_ATTACHMENT_BYTES) {
     throw new ToolError(
       "invalid_input",
-      `The attachments add up to ${formatBytes(total)}, more than Gmail's limit of ${formatBytes(MAX_ATTACHMENT_BYTES)}; nothing was written.`,
+      `The attachments add up to ${total} bytes, more than Gmail's limit of ${MAX_ATTACHMENT_BYTES} bytes (${formatBytes(MAX_ATTACHMENT_BYTES)}); nothing was written.`,
     );
   }
 }
@@ -365,7 +385,7 @@ const ATTR_CHAR = /^[A-Za-z0-9!#$&+\-.^_`|~]$/;
  * no `%XX` is split. Pure ASCII is the common case and stays readable in the raw message.
  */
 export function fileParameter(param: string, filename: string): string[] {
-  if (/^[\x20-\x7e]*$/.test(filename) && !/["\\]/.test(filename) && filename.length <= 200) {
+  if (/^[\x20-\x7e]*$/.test(filename) && !/["\\]/.test(filename) && filename.length <= 60) {
     return [`${param}="${filename}"`];
   }
   const tokens: string[] = [];
@@ -459,10 +479,13 @@ export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes
 
 /** What the confirmation dialog says: the recipients first, new ones marked, the attachments, then the content. */
 export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, unknown: readonly string[]): string {
-  const origin = { file: "new, from a file on this computer", message: "from a mail in the thread", kept: "already in the draft" };
-  const files = (d.attachments ?? []).map(
-    (a) => `${dialogText(a.filename, 80)} (${formatBytes(a.data.length)}, ${origin[a.source]})`,
-  );
+  const origin = (a: DraftAttachment) =>
+    a.source === "file"
+      ? `new, from the file ${dialogText(a.origin ?? a.filename, 120)} on this computer`
+      : a.source === "message"
+        ? "from a mail in the thread"
+        : "already in the draft";
+  const files = (d.attachments ?? []).map((a) => `${dialogText(a.filename, 80)} (${formatBytes(a.data.length)}, ${origin(a)})`);
   const mark = (a: string) => (unknown.includes(a) ? `${a} (new)` : a);
   const list = (label: string, xs: string[]) => (xs.length ? [`${label}: ${xs.map(mark).join(", ")}`] : []);
   const head =

@@ -33,9 +33,10 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 - **Triage `signals`** on search hits (newsletter / automated / calendar / replyToMismatch, later displayNameSpoof / lookalikeDomain), header-derived,
   aggregated in `triage_digest` (0.10.0).
 - **MCPB bundle** (`npm run mcpb` → `dist-mcpb/mailwarden-<version>.mcpb`) as a release artifact — the
-  format Smithery (`smithery mcp publish`) and the Claude Desktop extension directory accept for a
-  local stdio server; built from the packed package against the lockfile, validated, unpacked and
-  booted in CI (0.10.0). Published on Smithery as `csitte/mailwarden` (15.08.2026).
+  format Smithery (`smithery mcp publish`, until its shutdown on 31.10.2026) and the Claude Desktop
+  extension directory accepted for a local stdio server; built from the packed package against the
+  lockfile, validated, unpacked and booted in CI (0.10.0). Published on Smithery as `csitte/mailwarden`
+  from 15.08.2026 to 0.23.0; the Smithery variant of the bundle was removed in 0.28.0.
 
 ## Next
 
@@ -62,7 +63,7 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
    chosen address is where an injected instruction could aim mail at a stranger, so that path always
    asks the person at the client first, through the same elicitation as `MAILWARDEN_CONFIRM`, and is
    refused on a client that cannot ask. Attachments followed in 0.28.0, from one configured folder or
-   from the reply's own thread, a file always confirmed like a new address. Sending stays a non-goal:
+   from the reply's own thread, a file confirmed like a new address. Sending stays a non-goal:
    `messages.send` and `drafts.send` stay on the egress denylist, and only a person pressing Send in
    Gmail sends anything. What remains is stated plainly: a draft can carry what an injected mail asked
    for, and the protection is the human reading it before Send.

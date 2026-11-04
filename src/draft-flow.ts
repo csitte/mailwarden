@@ -47,7 +47,7 @@ export interface DraftGmail {
 }
 
 /** Reads one file from MAILWARDEN_ATTACH_DIR (`readAttachmentFile` in attach.ts, a fake in tests). */
-export type ReadFile = (path: string) => Promise<{ filename: string; data: Buffer }>;
+export type ReadFile = (path: string) => Promise<{ filename: string; data: Buffer; relative?: string }>;
 
 /** No directory configured: every file attachment is refused, with the reason. */
 const noFiles: ReadFile = async () => {
@@ -196,13 +196,13 @@ async function resolveAttachments(
       if (input.filename !== undefined) checkFilename(input.filename);
       const file = await ctx.readFile(input.path);
       const filename = input.filename ?? file.filename;
-      out.push({ filename, mimeType: mimeTypeFor(filename), data: file.data, source: "file" });
+      out.push({ filename, mimeType: mimeTypeFor(filename), data: file.data, source: "file", origin: file.relative ?? input.path });
     } else if ("fromMessage" in input) {
       if (!ctx.threadId) {
         throw new ToolError(
           "invalid_input",
           "An attachment from a mail can only go into a reply, from a message of the same thread. A new message has " +
-            "no thread: save the file into MAILWARDEN_ATTACH_DIR with download_attachment and attach it from there.",
+            "no thread: ask the user to put the file into MAILWARDEN_ATTACH_DIR and attach it from there. Nothing was written.",
         );
       }
       inThread ??= await gmail.threadAttachments(ctx.threadId);
@@ -233,7 +233,7 @@ function threadAttachmentError(
     return new ToolError(
       "invalid_input",
       `Message ${input.fromMessage} carries ${found} attachments named "${input.filename}", so the name does not say which. ` +
-        "Save the one you mean into MAILWARDEN_ATTACH_DIR with download_attachment and attach it from there. Nothing was written.",
+        "Ask the user to put the one meant into MAILWARDEN_ATTACH_DIR and attach it from there. Nothing was written.",
     );
   }
   if (!ofMessage.length) {

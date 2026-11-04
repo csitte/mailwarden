@@ -208,9 +208,12 @@ files from one folder only. Name it in the same `env` block as `MAILWARDEN_TOOLS
 ```
 
 Use a folder of its own and put into it only what may be sent; the root of a drive and the home
-directory itself are refused at startup. Without the setting, no file can be attached; attachments of
+directory itself are refused at startup, as are a folder containing home and, on Windows, any path
+without a drive letter; so is a `MAILWARDEN_DOWNLOAD_DIR` inside it: mailwarden
+never writes into the attachment folder. Without the setting, no file can be attached; attachments of
 a mail in the reply's thread work either way. Every file from the folder is confirmed in the client's
-dialog, so a client without one cannot attach files (see the README, *Drafts*).
+dialog, so a client without one cannot attach files — except to your own address alone with
+`MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (see the README, *Drafts*).
 
 **Smoke test:** ask your assistant something like *"search my inbox for unread mail from
 the last 2 days"* — you should get real thread summaries back.

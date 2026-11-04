@@ -7,40 +7,100 @@
  * where a download may land, an unset MAILWARDEN_ATTACH_DIR switches file attachments off. A path
  * is checked against the directory as configured and as resolved, and the file itself again after
  * `realpath`, so neither `..` nor a symlink inside the directory leads out of it.
+ *
+ * Only the person fills it: `download_attachment` and `export_thread` refuse to write into it
+ * (`inAttachDir`, used by gmail.ts). Otherwise the model could fetch any attachment of the mailbox
+ * into the folder and attach it from there — around the rule that an attachment of a mail may only
+ * come from the reply's own thread.
  */
 
-import { promises as fs } from "node:fs";
+import { promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { CliError, ToolError } from "./cli.js";
 import { MAX_ATTACHMENT_BYTES, formatBytes } from "./draft.js";
 
+/** Whether `target` is `root` itself or lies below it. Lexical; case-insensitive where the OS is. */
+function within(root: string, target: string): boolean {
+  return !escapes(path.relative(root, target)) || path.relative(root, target) === "";
+}
+
+/** A relative path that is the root itself, leaves it, or is not relative at all. By segment: `..x` is a name. */
+function escapes(rel: string): boolean {
+  return rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel);
+}
+
 /**
- * Why a value cannot be the attachment directory, or null. Pure. A filesystem root and the home
- * directory itself are refused: either would put every file the user owns behind one path, which
- * is the opposite of a folder the user fills with what may leave. A folder below home is fine.
+ * Why a value cannot be the attachment directory, or null. Pure. A filesystem root, the home
+ * directory and any folder that contains it are refused: each would put every file the user owns
+ * behind one path, which is the opposite of a folder the user fills with what may leave. A folder
+ * below home is fine. On Windows only a drive-letter path is taken: `\\server\share`, `\\?\` and
+ * `\\.\` spellings name the same places in forms the comparisons here cannot all see through
+ * (`\\?\UNC\localhost\c$` parses as a share named `UNC`).
  */
-export function attachDirProblem(dir: string, home: string): string | null {
+export function attachDirProblem(dir: string, home: string, platform: NodeJS.Platform = process.platform): string | null {
+  if (platform === "win32" && /^[\\/]{2}/.test(dir)) {
+    return "it is a network, device or extended-length path; give a drive-letter path such as D:\\mail-out";
+  }
   if (!path.isAbsolute(dir)) return "it is not an absolute path";
   const resolved = path.resolve(dir);
   if (resolved === path.parse(resolved).root) return "it is the root of a drive or filesystem";
-  const same = (a: string, b: string) =>
-    process.platform === "win32" || process.platform === "darwin" ? a.toLowerCase() === b.toLowerCase() : a === b;
-  if (home && same(resolved, path.resolve(home))) return "it is the home directory itself";
+  if (home && within(resolved, path.resolve(home))) {
+    return within(path.resolve(home), resolved) ? "it is the home directory itself" : "it contains the home directory";
+  }
   return null;
 }
 
-/** MAILWARDEN_ATTACH_DIR as configured, checked at startup; undefined when unset. */
+/** `realpath` that never throws: the folder may not exist yet, and then its spelling is all there is. */
+function realOrNull(p: string): string | null {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * MAILWARDEN_ATTACH_DIR as configured, checked at startup; undefined when unset. A
+ * MAILWARDEN_DOWNLOAD_DIR that is the same folder or lies inside it is refused too: every download
+ * would then be refused (see `inAttachDir`), and the setting can only have meant something else.
+ */
 export function resolveAttachDir(env: NodeJS.ProcessEnv, home = os.homedir()): string | undefined {
   const raw = env.MAILWARDEN_ATTACH_DIR?.trim();
   if (!raw) return undefined;
-  const problem = attachDirProblem(raw, home);
+  // As written and as resolved: a junction or symlink to a drive root or to home is the same folder.
+  const real = realOrNull(raw);
+  const realHome = (home && realOrNull(home)) || home;
+  const problem = attachDirProblem(raw, home) ?? (real ? attachDirProblem(real, realHome) : null);
   if (problem) {
     throw new CliError(
       `MAILWARDEN_ATTACH_DIR is not usable (${raw}): ${problem}. Point it at a folder of its own that holds only what may be attached.`,
     );
   }
+  const download = env.MAILWARDEN_DOWNLOAD_DIR?.trim();
+  if (download && within(path.resolve(raw), path.resolve(download))) {
+    throw new CliError(
+      `MAILWARDEN_DOWNLOAD_DIR (${download}) lies in MAILWARDEN_ATTACH_DIR (${raw}). mailwarden never writes into the ` +
+        "attachment folder — only the person puts files there — so give downloads a folder of their own.",
+    );
+  }
   return path.resolve(raw);
+}
+
+/**
+ * Whether a path mailwarden is about to write lies in MAILWARDEN_ATTACH_DIR, by the folder as
+ * configured and as resolved. Checked before a directory is created and again on the real parent.
+ */
+export async function inAttachDir(target: string, env: NodeJS.ProcessEnv = process.env): Promise<boolean> {
+  const raw = env.MAILWARDEN_ATTACH_DIR?.trim();
+  if (!raw) return false;
+  const roots = [path.resolve(raw)];
+  try {
+    roots.push(await fs.realpath(raw));
+  } catch {
+    // not there (yet): the configured spelling is all there is
+  }
+  return roots.some((r) => within(r, path.resolve(target)));
 }
 
 /**
@@ -51,7 +111,7 @@ export function resolveAttachDir(env: NodeJS.ProcessEnv, home = os.homedir()): s
 export async function readAttachmentFile(
   root: string | undefined,
   given: string,
-): Promise<{ filename: string; data: Buffer }> {
+): Promise<{ filename: string; data: Buffer; relative: string }> {
   if (!root) {
     throw new ToolError(
       "invalid_input",
@@ -60,7 +120,6 @@ export async function readAttachmentFile(
   }
   const outside = () =>
     new ToolError("forbidden_operation", `"${given}" is outside MAILWARDEN_ATTACH_DIR (${root}); nothing was written.`);
-  const escapes = (rel: string) => rel === "" || rel.startsWith("..") || path.isAbsolute(rel);
   let fence: string;
   try {
     fence = await fs.realpath(root);
@@ -68,6 +127,10 @@ export async function readAttachmentFile(
     throw new ToolError("not_found", `MAILWARDEN_ATTACH_DIR (${root}) does not exist; nothing was written.`);
   }
   // Lexically first, against both spellings of the root, so `..` never reaches the filesystem.
+  // A colon past the drive letter names an NTFS stream: hidden content, and a name that hides its type.
+  if (process.platform === "win32" && given.replace(/^[A-Za-z]:/, "").includes(":")) {
+    throw new ToolError("invalid_input", `"${given}" names a file stream, not a file; nothing was written.`);
+  }
   let rel = path.relative(root, path.resolve(root, given));
   if (escapes(rel)) rel = path.relative(fence, path.resolve(fence, given));
   if (escapes(rel)) throw outside();
@@ -82,8 +145,24 @@ export async function readAttachmentFile(
   const handle = await fs.open(real, "r");
   try {
     const stat = await handle.stat();
+    // The path was checked, the handle is what is read: if the file was swapped for a link between
+    // the two, the path no longer resolves inside, or no longer to the file that was opened.
+    const again = await fs.realpath(real).catch(() => "");
+    const atPath = again ? await fs.stat(again).catch(() => undefined) : undefined;
+    if (!again || escapes(path.relative(fence, again)) || !atPath || atPath.ino !== stat.ino || atPath.dev !== stat.dev) {
+      throw outside();
+    }
     if (!stat.isFile()) {
       throw new ToolError("invalid_input", `"${given}" is not a regular file; nothing was written.`);
+    }
+    // A hard link is the same file under a second name, and that name may be anywhere: no path
+    // check can tell. A file with more than one link is refused rather than guessed about.
+    if (stat.nlink > 1) {
+      throw new ToolError(
+        "forbidden_operation",
+        `"${given}" has more than one hard link, so it may be a file from outside MAILWARDEN_ATTACH_DIR. ` +
+          "Copy the file into the folder instead. Nothing was written.",
+      );
     }
     if (stat.size > MAX_ATTACHMENT_BYTES) {
       throw new ToolError(
@@ -92,7 +171,10 @@ export async function readAttachmentFile(
       );
     }
     // Read through the handle that was checked, so the file cannot be swapped in between.
-    return { filename: path.basename(path.join(fence, rel)), data: await handle.readFile() };
+    // The real name, not the spelling given: `FOTO~1.JPG` or a differently cased name is not what
+    // the person sees in the folder.
+    const inside = path.relative(fence, again);
+    return { filename: path.basename(again), data: await handle.readFile(), relative: inside.split(path.sep).join("/") };
   } finally {
     await handle.close();
   }
