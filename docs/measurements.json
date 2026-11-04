@@ -62,6 +62,65 @@
         { "query": "private mailbox, -in:sent -in:drafts, 150 threads", "hits": 154, "dkimPass": 152, "reportedUnaligned": 42, "alignedFurtherDown": 42 }
       ],
       "caution": "`hits` is received messages checked; the misreported count is `alignedFurtherDown` (156 of 167, and 42 of the 152 with DKIM passing). The one remaining business-mailbox message had no aligned passing signature at all and stays false after the fix. A snapshot of the newest threads, not of the mailbox."
+    },
+    "draft-size-plain-endpoint-2026-11-04": {
+      "what": "Drafts with no recipient and one attachment of random bytes, saved through the plain drafts.create and drafts.update endpoints (JSON body with a base64url raw message, no upload endpoint), each moved to the trash right after. `hits` is drafts attempted, `accepted` how many Gmail saved. Measured by scripts/probe-draft-size.mjs.",
+      "mailbox": "taktum test mailbox",
+      "date": "2026-11-04",
+      "endpoint": "drafts.create, drafts.update",
+      "source": "mailwarden session on 2026-11-04 for session-bridge thread 632-mailwarden-draft-anhaenge, runs of scripts/probe-draft-size.mjs",
+      "queries": [
+        {
+          "query": "drafts.create, attachment of 1 to 35 MB",
+          "hits": 12,
+          "accepted": 12,
+          "attachmentMB": [
+            1,
+            4,
+            5,
+            6,
+            8,
+            10,
+            15,
+            20,
+            24,
+            26,
+            30,
+            35
+          ],
+          "rawMB": [
+            1.8,
+            7.3,
+            9.1,
+            10.9,
+            14.6,
+            18.2,
+            27.4,
+            36.5,
+            43.8,
+            47.4,
+            54.7,
+            63.9
+          ]
+        },
+        {
+          "query": "drafts.update, attachment of 1 to 24 MB",
+          "hits": 3,
+          "accepted": 3,
+          "attachmentMB": [
+            1,
+            10,
+            24
+          ],
+          "rawMB": [
+            1.8,
+            18.2,
+            43.8
+          ]
+        }
+      ],
+      "stored": "drafts.get reported sizeEstimate 1.4 MB for the 1 MB attachment and 32.8 MB for the 24 MB one, after drafts.create and after drafts.update alike: the full MIME message arrived.",
+      "caution": "No size was refused, up to a 35 MB attachment (63.9 MB raw request body). So the plain path carries every attachment Gmail can send, and the 25 MB limit is one mailwarden has to enforce itself: Gmail stores a larger draft without complaint. The raw request is about 1.8 times the attachment, because the attachment is base64 inside the MIME and the MIME is base64url again; a 24 MB attachment took 32 to 44 seconds to save."
     }
   }
 }
