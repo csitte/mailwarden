@@ -45,6 +45,29 @@ export function resolveDraftSelfWithoutDialog(env: NodeJS.ProcessEnv): boolean {
   return env.MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG === "1";
 }
 
+/**
+ * `MAILWARDEN_DRAFT_CONFIRM=off`: the drafts tier asks nobody — not for a new recipient, a file from
+ * the disk, a mail's attachment or a sender other than the main address. For an operator who reads
+ * every draft in Gmail before pressing Send and wants that review to be the check (asked for by the
+ * gmail deployment, 5 Nov 2026). Unset or empty keeps the dialogs; any other value stops the start,
+ * like an unknown `MAILWARDEN_CONFIRM`: a value meant as "on" must not be read as anything.
+ */
+export function resolveDraftDialogOff(env: NodeJS.ProcessEnv): boolean {
+  const raw = env.MAILWARDEN_DRAFT_CONFIRM;
+  if (raw === undefined || raw.trim() === "") return false;
+  if (raw.trim().toLowerCase() === "off") return true;
+  throw new CliError(`MAILWARDEN_DRAFT_CONFIRM is invalid (${raw}). Set it to off, or leave it unset.`);
+}
+
+/**
+ * The mode a draft's question is put in, once `modeFor` (draft-flow.ts) has chosen one. With
+ * `MAILWARDEN_DRAFT_CONFIRM=off` nothing is asked, so a decline is never read as a yes; an explicit
+ * `MAILWARDEN_CONFIRM=require` still wins, as it does over the self switch.
+ */
+export function draftConfirmMode(mode: ConfirmMode, configured: ConfirmMode, dialogOff: boolean): ConfirmMode {
+  return dialogOff && configured !== "require" ? "off" : mode;
+}
+
 export type ConfirmPlan = "proceed" | "ask" | "refuse";
 
 /** What to do before a confirmable action, given the mode and whether this client can show a form. */

@@ -479,6 +479,129 @@ describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own add
   });
 });
 
+describe("MAILWARDEN_DRAFT_CONFIRM=off — the operator's review in Gmail is the check", () => {
+  async function setup(answer?: Parameters<typeof connect>[0], opts: Parameters<typeof draftApi>[0] = {}) {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    vi.stubEnv("MAILWARDEN_DRAFT_CONFIRM", "off");
+    const { api, calls } = draftApi(opts);
+    (getAuth as Mock).mockResolvedValue(api);
+    return { calls, ...(await connect(answer)) };
+  }
+
+  it("saves a new message to a stranger unasked, on a client with a dialog and on one without", async () => {
+    for (const answer of [{ action: "decline" } as const, undefined]) {
+      vi.clearAllMocks();
+      const { client, calls, asked } = await setup(answer);
+      const res: any = await client.callTool({ name: "create_draft", arguments: { to: ["zoe@example.com"], subject: "Hi", body: "x" } });
+      expect(res.isError, String(answer?.action)).toBeFalsy();
+      expect(asked).toEqual([]);
+      expect(res.structuredContent).toMatchObject({ kind: "new", newRecipients: ["zoe@example.com"], confirmedByUser: false, sent: false });
+      expect(calls.created).toHaveLength(1);
+    }
+  });
+
+  it("saves a reply from an alias with a stranger in cc unasked, the case that asked for the switch", async () => {
+    const { client, calls, asked } = await setup({ action: "decline" }, { aliases: ["contact@band.example"] });
+    const res: any = await client.callTool({
+      name: "create_draft",
+      arguments: { threadId: "t1", cc: ["office@promoter.example"], from: "contact@band.example", body: "x" },
+    });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toEqual([]);
+    expect(res.structuredContent).toMatchObject({ from: "contact@band.example", newRecipients: ["office@promoter.example"], confirmedByUser: false });
+    expect(calls.created).toHaveLength(1);
+  });
+
+  it("attaches a file from the folder unasked", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mw-attach-off-"));
+    await fs.writeFile(path.join(dir, "Foto.jpg"), "JPEG");
+    vi.stubEnv("MAILWARDEN_ATTACH_DIR", dir);
+    const { client, calls, asked } = await setup();
+    const res: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x", attachments: [{ path: "Foto.jpg" }] } });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toEqual([]);
+    expect(res.structuredContent.attachments).toMatchObject([{ filename: "Foto.jpg", source: "file" }]);
+    expect(calls.created).toHaveLength(1);
+    await fs.rm(dir, { recursive: true, force: true });
+  });
+
+  it("update_draft adds a stranger unasked", async () => {
+    const { client, calls, asked } = await setup({ action: "decline" });
+    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["zoe@example.com"], body: "Neu" } });
+    expect(res.isError).toBeFalsy();
+    expect(asked).toEqual([]);
+    expect(calls.updated).toHaveLength(1);
+  });
+
+  it("still asks under MAILWARDEN_CONFIRM=require, and a no writes nothing", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "require");
+    const { client, calls, asked } = await setup({ action: "decline" });
+    const res: any = await client.callTool({ name: "create_draft", arguments: { to: ["zoe@example.com"], subject: "Hi", body: "x" } });
+    expect(asked).toHaveLength(1);
+    expect(text(res)).toMatch(/declined_by_user/);
+    expect(calls.created).toEqual([]);
+  });
+
+  it("tells the model the dialog is off, and to name recipients, sender and files", async () => {
+    const { client } = await setup();
+    const tools = (await client.listTools()).tools.filter((t) => /draft/.test(t.name));
+    expect(tools).toHaveLength(2);
+    for (const t of tools) {
+      expect(t.description, t.name).toMatch(/MAILWARDEN_DRAFT_CONFIRM=off/);
+      expect(t.description, t.name).not.toMatch(/ALWAYS confirmed/);
+    }
+  });
+
+  it("stops the start on a value other than off", () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    vi.stubEnv("MAILWARDEN_DRAFT_CONFIRM", "on");
+    expect(() => registerTools(new McpServer({ name: "mailwarden", version: "0.0.0" }))).toThrow(/MAILWARDEN_DRAFT_CONFIRM is invalid/);
+  });
+
+  it("is not read outside the drafts tier", () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read");
+    vi.stubEnv("MAILWARDEN_DRAFT_CONFIRM", "on");
+    expect(() => registerTools(new McpServer({ name: "mailwarden", version: "0.0.0" }))).not.toThrow();
+  });
+});
+
+describe("a confirmation dialog nobody answers", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("waits ten minutes, then says it timed out, retryable, and nothing was written", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const server = new McpServer({ name: "mailwarden", version: "0.0.0" });
+    registerTools(server);
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0.0.0" }, { capabilities: { elicitation: {} } });
+    let asked = 0;
+    client.setRequestHandler(ElicitRequestSchema, () => {
+      asked++;
+      return new Promise(() => {});
+    });
+    await Promise.all([server.connect(st), client.connect(ct)]);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const pending = client.callTool({ name: "create_draft", arguments: { to: ["zoe@example.com"], subject: "Hi", body: "x" } }, undefined, {
+      timeout: 60 * 60_000,
+    }) as Promise<any>;
+    let settled = false;
+    void pending.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(9 * 60_000);
+    // The SDK default would have given up after one minute.
+    expect(settled).toBe(false);
+    expect(asked).toBe(1);
+    expect(calls.created).toEqual([]);
+    await vi.advanceTimersByTimeAsync(60_000 + 1);
+    const res = await pending;
+    expect(text(res)).toMatch(/declined_by_user/);
+    expect(text(res)).toMatch(/Nobody answered the confirmation dialog within 10 minutes/);
+    expect(text(res)).toMatch(/retryable\W+true/);
+    expect(calls.created).toEqual([]);
+  });
+});
+
 describe("attachments over MCP", () => {
   async function folder(): Promise<string> {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "mw-attach-mcp-"));

@@ -3,7 +3,15 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
-import { confirmPlan, confirmed, dialogText, resolveConfirmMode, resolveDraftSelfWithoutDialog } from "../src/confirm.js";
+import {
+  confirmPlan,
+  confirmed,
+  dialogText,
+  draftConfirmMode,
+  resolveConfirmMode,
+  resolveDraftDialogOff,
+  resolveDraftSelfWithoutDialog,
+} from "../src/confirm.js";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 
@@ -276,5 +284,37 @@ describe("resolveDraftSelfWithoutDialog", () => {
       expect(resolveDraftSelfWithoutDialog({ MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG: v }), v).toBe(false);
     }
     expect(resolveDraftSelfWithoutDialog({ MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG: "1" })).toBe(true);
+  });
+});
+
+describe("resolveDraftDialogOff", () => {
+  it("is off when unset or empty, on for off in any case", () => {
+    expect(resolveDraftDialogOff({})).toBe(false);
+    expect(resolveDraftDialogOff({ MAILWARDEN_DRAFT_CONFIRM: "" })).toBe(false);
+    expect(resolveDraftDialogOff({ MAILWARDEN_DRAFT_CONFIRM: "  " })).toBe(false);
+    for (const v of ["off", "OFF", " Off "]) expect(resolveDraftDialogOff({ MAILWARDEN_DRAFT_CONFIRM: v }), v).toBe(true);
+  });
+
+  it("refuses any other value instead of guessing which way it was meant", () => {
+    for (const v of ["0", "1", "on", "no", "false", "ask", "require"]) {
+      expect(() => resolveDraftDialogOff({ MAILWARDEN_DRAFT_CONFIRM: v }), v).toThrow(/MAILWARDEN_DRAFT_CONFIRM is invalid/);
+    }
+  });
+});
+
+describe("draftConfirmMode", () => {
+  it("leaves the chosen mode alone while the dialog is on", () => {
+    for (const chosen of ["off", "ask", "require"] as const) {
+      for (const configured of ["off", "ask", "require"] as const) {
+        expect(draftConfirmMode(chosen, configured, false)).toBe(chosen);
+      }
+    }
+  });
+
+  it("asks nothing when off, a forced require included, unless MAILWARDEN_CONFIRM=require", () => {
+    expect(draftConfirmMode("require", "off", true)).toBe("off");
+    expect(draftConfirmMode("require", "ask", true)).toBe("off");
+    expect(draftConfirmMode("ask", "ask", true)).toBe("off");
+    expect(draftConfirmMode("require", "require", true)).toBe("require");
   });
 });

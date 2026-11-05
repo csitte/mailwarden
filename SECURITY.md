@@ -340,12 +340,12 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
 - **Off unless named.** The tier is not in the default set, so a deployment nobody configured has no
   draft tool and the egress guard keeps every draft endpoint shut for it. A broken
   `MAILWARDEN_TOOLS` value never reads as "on".
-- **A new address is asked about, always.** Every recipient the thread did not already contain — all
+- **A new address is asked about** (unless the operator opts out, below). Every recipient the thread did not already contain — all
   recipients of a new message, a `cc`/`bcc` on a reply, an address added by `update_draft` — makes
   the draft wait for the person's yes in the client's own dialog (MCP elicitation), regardless of
   `MAILWARDEN_CONFIRM`; a client that cannot show one is refused. The answer never passes through the
   model, so an injected mail cannot supply it. A reply within its thread follows `MAILWARDEN_CONFIRM`.
-- **The one opt-out, for the owner's own address.** `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (off by
+- **The narrow opt-out, for the owner's own address.** `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` (off by
   default; only `1` counts) lets a draft be saved without the dialog when *every* new recipient is the
   account's own address, as the profile reports it, compared case-insensitively and exactly — an
   alias, a `+tag` or a dot variant is a stranger. It exists for clients that have no usable dialog:
@@ -411,6 +411,19 @@ receives it once the person presses Send without looking at the attachment list.
   `MAILWARDEN_DOWNLOAD_DIR` that is the folder or lies inside it stops the start. Without this, the
   model could fetch any attachment of the mailbox into the folder and attach it from there — around
   the rule below.
+- **The full opt-out: `MAILWARDEN_DRAFT_CONFIRM=off`** (off by default; only `off` counts, any
+  other value stops the start). Since 0.29.0. It drops every draft dialog — new recipients, files from
+  the disk, a mail's attachments, a sender other than the main address — on any client, for an
+  operator who reads each draft in Gmail before sending and wants that review to be the check (asked
+  for by a deployment that answers a band's mail, where nearly every reply had a new address and an
+  alias sender). Then an injected mail *can* get a draft saved to an address of its choosing, with a
+  file from `MAILWARDEN_ATTACH_DIR` or text from elsewhere in the mailbox in it. What still holds:
+  nothing is sent, so the draft stays in the owner's own Drafts until a person presses Send; files
+  still come only from that folder; a mail's attachment still only from the reply's own thread; the
+  sender still only from the account's verified send-as addresses. The tool descriptions switch to
+  telling the model that nothing was asked and that it must name recipients, sender and files for
+  every draft, and the result keeps marking `newRecipients`. `MAILWARDEN_CONFIRM=require` still asks.
+  The risk this accepts is the one this threat names: a draft sent without being read closely.
 - **A file is asked about like a new address.** Any file from the disk makes the draft wait for the
   person's yes in the client's own dialog, whatever `MAILWARDEN_CONFIRM` says, and a client that cannot
   show one is refused — also in a reply to someone already in the thread, because the sender of an

@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `gmail.modify` suffices for it (measured with a token narrowed to that one scope), so no new
   OAuth grant and no new sign-in.
 
+- **`MAILWARDEN_DRAFT_CONFIRM=off` saves drafts without any dialog.** New recipients, files from the
+  disk, a mail's attachments and an alias sender are no longer asked about, on any client; the
+  operator's review of the draft in Gmail before sending is the check. Off by default; any value other
+  than `off` stops the start; `MAILWARDEN_CONFIRM=require` still asks. The tool descriptions say
+  so and tell the model to name recipients, sender and files for every draft. Asked for by the gmail
+  deployment, where a band's replies to contact-form mail asked twice each time (a `Reply-To` stranger
+  and the alias). `SECURITY.md`, threat 10, names what it gives up.
+
+### Changed
+- **A confirmation dialog waits ten minutes**, not the one minute the MCP SDK allows any request.
+  One that nobody answers still saves nothing, but the error now says it timed out and is marked
+  retryable, instead of reading like a no.
+
 ### Fixed
 - **A reply-all to a mail sent to one of the account's aliases no longer copies the alias.** Only the
   main address counted as the owner's own when a reply's recipients were derived, so a band answering

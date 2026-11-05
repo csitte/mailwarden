@@ -167,6 +167,9 @@ export interface UpdateInput {
  * opt-in covers either only when the draft goes to the owner alone (see `selfOnly`). A sender
  * other than the main address counts the same way: an injected mail must not get a draft prepared
  * in the name of a band or a firm without the person seeing it.
+ *
+ * The operator can turn all of this off with `MAILWARDEN_DRAFT_CONFIRM=off`; the tool layer then
+ * lowers whatever this returns (`draftConfirmMode` in confirm.ts), so the rule is still stated here.
  */
 function modeFor(configured: ConfirmMode, unknown: readonly string[], selfOnly: boolean, newFiles = false): ConfirmMode {
   if (!unknown.length && !newFiles) return configured;
