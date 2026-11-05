@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.29.0] - 2026-11-05
+
 ### Added
 - **A draft can go out from a send-as address.** `create_draft` and `update_draft` take `from`: the
   account's main address or one of its Gmail send-as aliases with `verificationStatus: accepted`,
@@ -2432,7 +2434,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.28.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/csitte/mailwarden/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/csitte/mailwarden/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/csitte/mailwarden/compare/v0.27.2...v0.28.0
 [0.27.2]: https://github.com/csitte/mailwarden/compare/v0.27.1...v0.27.2
