@@ -171,6 +171,17 @@
         { "query": "drafts.create with a foreign From, and with the main address", "hits": 2, "fromKept": 1 }
       ],
       "caution": "gmail.modify alone answers sendAs.list, so the drafts tier needs no new grant. The foreign From (someone@example.com) came back as the main address with the account's name; the main address with a display name stayed as written. Not measured: a draft from a real alias, its display name, signature and Reply-To when sent; the taktum mailbox has no alias."
+    },
+    "draft-from-alias-sent-2026-11-05": {
+      "what": "A new-message draft saved by mailwarden 0.28.1+b3f09bc with `from` set to a verified send-as alias and the owner's own address as recipient, confirmed in the dialog, sent by hand from the Gmail web interface, and the arrived message read with get_thread. `hits` is drafts sent, `displayName` how many arrived with the alias's display name in From, `signature` how many carried a signature in the text.",
+      "mailbox": "private mailbox (gmail session), alias of a band",
+      "date": "2026-11-05",
+      "endpoint": "drafts.create, then Send in Gmail, then threads.get",
+      "source": "session-bridge thread 644-mailwarden-draft-absender-waehlbar, message 2026-11-05T051311Z from the gmail session, test steps in 2026-11-04T204104Z",
+      "queries": [
+        { "query": "draft from the alias to the own address, sent from Gmail", "hits": 1, "displayName": 1, "signature": 0 }
+      ],
+      "caution": "Gmail put the alias's own display name into From although mailwarden wrote the bare address, so mailwarden need not set one. No signature was added to the sent text. Whether Gmail added a Reply-To was not seen: get_thread shows no such field. One message, one alias; Gmail placed draft and delivery in one thread of one message, as it does for mail to oneself."
     }
   }
 }
