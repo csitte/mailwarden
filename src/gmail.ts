@@ -1908,6 +1908,35 @@ export class Gmail {
   }
 
   /**
+   * The message a reply quotes, with its text: by Gmail id (`messageId`), by its `Message-ID`
+   * header (`rfcMessageId`, what a saved draft's `In-Reply-To` names), or else the newest message
+   * that is not a draft. `undefined` when nothing in the thread matches. A second `threads.get`,
+   * in `full` format, made only when a quote is asked for.
+   */
+  async quoteSource(
+    threadId: string,
+    which: { messageId?: string; rfcMessageId?: string },
+  ): Promise<{ name: string; address: string; date: Date; plaintextBody: string; htmlBody: string } | undefined> {
+    const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));
+    const messages = res.data.messages ?? [];
+    const pick = which.messageId
+      ? messages.find((m) => m.id === which.messageId)
+      : which.rfcMessageId
+        ? messages.find((m) => headerValue(m.payload?.headers, "Message-ID")?.trim() === which.rfcMessageId)
+        : [...messages].reverse().find((m) => !(m.labelIds ?? []).includes("DRAFT"));
+    if (!pick?.id || !pick.threadId) return undefined;
+    const parsed = parseMessage(pick);
+    const { address, name } = mailboxOf(headerValue(pick.payload?.headers, "From"));
+    return {
+      name: decodeRfc2047(name).trim(),
+      address: address || parsed.from,
+      date: new Date(Number(pick.internalDate ?? 0)),
+      plaintextBody: parsed.plaintextBody,
+      htmlBody: parsed.htmlBody,
+    };
+  }
+
+  /**
    * Save a draft and mark it as mailwarden's. Gmail refuses labels in `drafts.create` itself
    * ("Cannot set labels on drafts", measured 29 Oct 2026), so the mark goes on afterwards through
    * the message's own `batchModify`. If that second step fails the draft exists unmarked — which

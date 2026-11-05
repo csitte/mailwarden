@@ -6,7 +6,8 @@
  * Nothing in this file sends. The Gmail calls it can reach are `drafts.create`, `drafts.update`
  * and `drafts.get` (plus the read and label calls the rest of mailwarden uses,
  * `messages.attachments.get` for an attachment taken from the thread or kept from the draft, and
- * `settings.sendAs.list` to check a sender and to know the account's own addresses);
+ * `settings.sendAs.list` to check a sender and to know the account's own addresses, and a second
+ * `threads.get` in `full` format when a reply quotes the message it answers);
  * `drafts.send` and `messages.send` stay refused in src/egress.ts whatever is enabled.
  */
 
@@ -29,12 +30,14 @@ import {
   replySubject,
   replyThreading,
   unknownRecipients,
+  withQuote,
   type AttachmentSource,
   type DraftAttachment,
   type DraftContent,
   type Recipients,
   type ReplySource,
 } from "./draft.js";
+import { htmlToText } from "./export.js";
 import { addressesOf } from "./signals.js";
 import type { Attachment, DraftInfo, DraftRef, ThreadAttachment } from "./gmail.js";
 
@@ -48,6 +51,10 @@ export interface DraftGmail {
   threadAttachments(threadId: string): Promise<ThreadAttachment[]>;
   attachmentBytes(messageId: string, attachmentId: string): Promise<Buffer>;
   sendAsAddresses(): Promise<SendAs[]>;
+  quoteSource(
+    threadId: string,
+    which: { messageId?: string; rfcMessageId?: string },
+  ): Promise<{ name: string; address: string; date: Date; plaintextBody: string; htmlBody: string } | undefined>;
 }
 
 /** One address the account may send from: the primary one, or an alias Gmail has verified. */
@@ -110,6 +117,8 @@ export interface DraftResult extends Recipients {
   attachments: SavedAttachment[];
   /** Their total size in bytes. */
   attachmentBytes: number;
+  /** Only when a quote was asked for: whether the body ends with one. The note says why not. */
+  quoted?: boolean;
   sent: false;
   note: string;
 }
@@ -123,6 +132,8 @@ export interface ReplyInput {
   bcc?: string[];
   subject?: string;
   body: string;
+  /** Quote the answered message below the body, as a mail client does. */
+  quote?: boolean;
   attachments?: AttachmentInput[];
 }
 
@@ -145,6 +156,8 @@ export interface UpdateInput {
   bcc?: string[];
   subject?: string;
   body: string;
+  /** Quote the message the draft answers below the body again; the new body replaces the old quote too. */
+  quote?: boolean;
   /** Omitted: the draft keeps the attachments it has. Given: the new list, `[]` for none. */
   attachments?: AttachmentInput[];
 }
@@ -382,7 +395,7 @@ export async function saveReplyDraft(
   readFile: ReadFile = noFiles,
 ): Promise<DraftResult> {
   const sendAs = sendAsOnce(gmail);
-  const [{ emailAddress }, { source }] = await Promise.all([
+  const [{ emailAddress }, { messageId: answered, source }] = await Promise.all([
     gmail.getProfile(),
     gmail.replySource(input.threadId, input.messageId),
     sendAs(),
@@ -417,11 +430,13 @@ export async function saveReplyDraft(
   const threadAddresses = [...normalizeLenient(source.from), ...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const unknown = unknownRecipients(recipients, threadAddresses);
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
+  const quote = input.quote ? await quoteFor(gmail, input.threadId, { messageId: answered }, input.body) : undefined;
   const content: DraftContent = {
     ...recipients,
     from,
     subject: input.subject ?? replySubject(source.subject),
-    body: input.body,
+    body: quote?.body ?? input.body,
+    ...(quote?.quotes !== undefined ? { quotes: quote.quotes } : {}),
     ...replyThreading(source),
     attachments,
   };
@@ -435,7 +450,10 @@ export async function saveReplyDraft(
   // other than the main address is confirmed in the dialog.
   const addressed = [...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const suggestedFrom = aliases.find((a) => addressed.includes(a) && a !== from);
-  return { ...result(ref, "reply", content, unknown, confirmedByUser, main), ...(suggestedFrom ? { suggestedFrom } : {}) };
+  return withQuoteResult(
+    { ...result(ref, "reply", content, unknown, confirmedByUser, main), ...(suggestedFrom ? { suggestedFrom } : {}) },
+    quote,
+  );
 }
 
 export async function saveNewDraft(
@@ -502,6 +520,9 @@ export async function reviseDraft(
   // as if it still held.
   const from = await checkFrom(input.from ?? had, main, sendAsOnce(gmail));
   const threading = threadingOf(before);
+  if (input.quote && !threading.inReplyTo) {
+    throw new ToolError("invalid_input", `Draft ${input.draftId} is a new message, not a reply, so it has nothing to quote. Nothing was changed.`);
+  }
   // Omitted keeps what the draft carries: an update replaces the whole message, so without this
   // every correction to the text would drop the files without a word.
   const attachments = input.attachments
@@ -511,11 +532,16 @@ export async function reviseDraft(
         readFile,
       })
     : await keepAll(gmail, before);
+  const quote =
+    input.quote && threading.inReplyTo
+      ? await quoteFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body)
+      : undefined;
   const content: DraftContent = {
     ...recipients,
     from,
     subject: input.subject ?? before.subject,
-    body: input.body,
+    body: quote?.body ?? input.body,
+    ...(quote?.quotes !== undefined ? { quotes: quote.quotes } : {}),
     ...threading,
     attachments,
   };
@@ -528,7 +554,33 @@ export async function reviseDraft(
   // A draft that answers a thread is passed its thread again — without it Gmail moves the
   // updated draft into a thread of its own (measured 29 Oct 2026).
   const ref = await gmail.updateDraft(input.draftId, raw, threading.inReplyTo ? before.threadId : undefined);
-  return result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main);
+  return withQuoteResult(result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main), quote);
+}
+
+/**
+ * The body with the answered message quoted below it, or the body alone and the reason. Never
+ * fatal: a reply without its quote is still the reply the caller wrote, and the result says so.
+ * The line above the quote is written in the locale and time zone of the machine mailwarden runs
+ * on — the account's Gmail language would need another settings endpoint opened.
+ */
+async function quoteFor(
+  gmail: DraftGmail,
+  threadId: string,
+  which: { messageId?: string; rfcMessageId?: string },
+  body: string,
+): Promise<{ body: string; quotes?: string; reason?: string }> {
+  const q = await gmail.quoteSource(threadId, which);
+  if (!q) return { body, reason: "the message this draft answers is no longer in the thread" };
+  const text = q.plaintextBody.trim() ? q.plaintextBody : htmlToText(q.htmlBody);
+  const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
+  const r = withQuote(body, { name: q.name, address: q.address, date: q.date, text }, locale, timeZone);
+  return "reason" in r ? { body, reason: r.reason } : { body: r.body, quotes: r.attribution };
+}
+
+function withQuoteResult(r: DraftResult, quote: { quotes?: string; reason?: string } | undefined): DraftResult {
+  if (!quote) return r;
+  if (quote.quotes !== undefined) return { ...r, quoted: true };
+  return { ...r, quoted: false, note: `${r.note} No quote was added: ${quote.reason}.` };
 }
 
 /** Every attachment the draft carries, re-read so the update can write it again. */

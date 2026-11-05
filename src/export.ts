@@ -42,6 +42,9 @@ export function htmlToText(html: string): string {
   const text = s
     .replace(/<br\b[^<>]*>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|table|blockquote)\s*>/gi, "\n")
+    // Cells of a row apart: without it a booking form read "TypeGuestsBudget" (5 Nov 2026).
+    // The cleanup below collapses the space a cell before a row end leaves.
+    .replace(/<\/(td|th)\s*>/gi, " ")
     .replace(/<li\b[^<>]*>/gi, "- ")
     // A tag starts with a letter, `/` or `!`; `a < b and c > d` is text, not a tag.
     .replace(/<[/!]?[a-zA-Z][^<>]*>/g, "")

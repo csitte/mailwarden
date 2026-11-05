@@ -670,3 +670,30 @@ describe("attachments over MCP", () => {
     expect(() => registerTools(new McpServer({ name: "mailwarden", version: "0.0.0" }))).toThrow(/home directory itself/);
   });
 });
+
+describe("quote over MCP", () => {
+  it("passes quote through: the harness thread has no text, so the reply is saved without one and says so", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client } = await connect();
+    const res: any = await client.callTool({ name: "create_draft", arguments: { threadId: "t1", body: "x", quote: true } });
+    expect(res.isError).toBeFalsy();
+    expect(res.structuredContent).toMatchObject({ quoted: false, note: expect.stringMatching(/No quote was added/) });
+    expect(calls.created).toHaveLength(1);
+  });
+
+  it("refuses quote on a new message, and the descriptions explain it", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client } = await connect({ action: "accept", content: { confirm: true } });
+    const res: any = await client.callTool({ name: "create_draft", arguments: { to: ["zoe@example.com"], subject: "Hi", body: "x", quote: true } });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toMatch(/quote only apply to a reply/);
+    expect(calls.created).toEqual([]);
+    const tools = (await client.listTools()).tools.filter((t) => /draft/.test(t.name));
+    for (const t of tools) expect(t.description, t.name).toMatch(/QUOTE \(optional, replies only\)/);
+    expect(tools.find((t) => t.name === "update_draft")?.description).toMatch(/pass quote: true on every update of a quoted reply/);
+  });
+});

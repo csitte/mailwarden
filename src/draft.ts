@@ -414,6 +414,71 @@ export function fileParameter(param: string, filename: string): string[] {
   return pieces.map((p, i) => `${param}*${i}*=${i === 0 ? "UTF-8''" : ""}${p}`);
 }
 
+/** The message a reply quotes: who sent it, when Gmail received it, and its text. */
+export interface QuoteSource {
+  /** The display name of `From`, decoded; "" when it has none. */
+  name: string;
+  /** The address of `From`. */
+  address: string;
+  date: Date;
+  /** The text/plain part, or the HTML reduced to text when there is none. */
+  text: string;
+}
+
+/**
+ * The line above a quote, the way Gmail writes it: the sender as `From` names them — the same
+ * header Gmail's own line uses, so a contact form's "Name via site <noreply@…>" stays that — at
+ * the time Gmail received the mail, in the given locale and time zone. German and English have
+ * their own wording; every other language gets the English one, with the date in its own format.
+ * The name and address come from the sender and are flattened to one line.
+ */
+export function quoteAttribution(q: Pick<QuoteSource, "name" | "address" | "date">, locale: string, timeZone: string): string {
+  const address = dialogText(q.address, 254);
+  const name = dialogText(q.name, 100);
+  const who = name && name !== address ? `${name} <${address}>` : address;
+  const at = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale, { timeZone, ...opts }).format(q.date);
+  const day = at({ weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  if (/^de\b/i.test(locale)) return `Am ${day} um ${at({ hour: "2-digit", minute: "2-digit" })} Uhr schrieb ${who}:`;
+  return `On ${day} at ${at({ hour: "numeric", minute: "2-digit" })} ${who} wrote:`;
+}
+
+/**
+ * The quoted text: every line prefixed `> `, an empty line `>`, a line already quoted gets one more
+ * `>` without a space, as mail clients nest. Outlook's placeholders for inline images
+ * (`[cid:image001.gif@01DC…]`) are dropped: they point at nothing in the reply. Leading and
+ * trailing empty lines go. "" when no text is left.
+ */
+export function quotedText(text: string): string {
+  const lines = text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\[cid:[^\]\n]{1,300}\]/gi, "")
+    .split("\n")
+    .map((l) => l.replace(/[ \t]+$/, ""));
+  while (lines.length && !lines[0].trim()) lines.shift();
+  while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  return lines.map((l) => (l === "" ? ">" : l.startsWith(">") ? `>${l}` : `> ${l}`)).join("\n");
+}
+
+/**
+ * The body with the quote below it, or why it was left out: the message had no text to quote, or
+ * the two together would pass the body limit.
+ */
+export function withQuote(
+  body: string,
+  q: QuoteSource,
+  locale: string,
+  timeZone: string,
+): { body: string; attribution: string } | { reason: string } {
+  const quoted = quotedText(q.text);
+  if (!quoted) return { reason: "the answered message has no text mailwarden can read (no text part, and its HTML reduced to nothing)" };
+  const attribution = quoteAttribution(q, locale, timeZone);
+  const full = `${body.replace(/\s+$/, "")}\n\n${attribution}\n${quoted}\n`;
+  if (full.length > MAX_BODY_CHARS) {
+    return { reason: `the answered message is too long to quote (body and quote together pass ${MAX_BODY_CHARS} characters)` };
+  }
+  return { body: full, attribution };
+}
+
 export interface DraftContent extends Recipients {
   /**
    * A send-as alias to write as `From`, bare and already checked against the account's list.
@@ -422,6 +487,8 @@ export interface DraftContent extends Recipients {
   from?: string;
   subject: string;
   body: string;
+  /** The line above the quote the body ends with, for the dialog; omitted when it quotes nothing. */
+  quotes?: string;
   inReplyTo?: string;
   references?: string;
   /** Omitted or empty: a plain-text message, byte for byte what it was before attachments existed. */
@@ -542,5 +609,6 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
     ...(files.length ? [`Attachments: ${files.join("; ")}`] : []),
     `Subject: ${dialogText(d.subject, 120)}`,
     `Text: ${dialogText(d.body, 300)}`,
+    ...(d.quotes !== undefined ? [`Quoted below the text: ${dialogText(d.quotes, 200)}`] : []),
   ].join("\n");
 }

@@ -1894,6 +1894,11 @@ const FROM_NOTE =
   "Omitted, a new draft goes from the main address. A sender other than the main address is confirmed by the user in the dialog, like a new recipient. " +
   "The result always names `from`; for a reply to a mail sent to one of the aliases it offers that alias as `suggestedFrom` — pass it as `from` only when the user wants it. ";
 
+const QUOTE_NOTE =
+  "QUOTE (optional, replies only): quote: true puts the answered message below the body as plain text — a line like \"On <date> <sender> wrote:\" and every line prefixed \"> \", as a mail client does; " +
+  "the line is in the language and time zone of the computer mailwarden runs on, and names the sender as the mail's From does. Do not type a quote into body yourself. " +
+  "If the message has no readable text the draft is saved without the quote, and the result says so (quoted: false). ";
+
 const fromAddress = z.string().max(320);
 
 const draftOutput = {
@@ -1919,6 +1924,7 @@ const draftOutput = {
     }),
   ),
   attachmentBytes: z.number(),
+  quoted: z.boolean().optional(),
   sent: z.literal(false),
   note: z.string(),
 };
@@ -1965,6 +1971,7 @@ function registerDraftTools(
         "Subject defaults to \"Re: <subject>\", In-Reply-To/References are set so it threads. cc/bcc add recipients; `to` is not accepted for a reply. " +
         "NEW MESSAGE: omit threadId, pass to and subject. " +
         "Plain text body only. Addresses are saved bare (no display names). " +
+        QUOTE_NOTE +
         ATTACH_NOTE +
         FROM_NOTE +
         createConfirmation +
@@ -1981,12 +1988,13 @@ function registerDraftTools(
         bcc: recipientList.optional(),
         subject: z.string().max(MAX_SUBJECT_CHARS).optional(),
         body: z.string().max(MAX_BODY_CHARS),
+        quote: z.boolean().default(false),
         attachments: createAttachments.optional(),
       },
       outputSchema: draftOutput,
       annotations: { title: "Create draft", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, attachments }) => {
+    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, quote, attachments }) => {
       const gmail = await client();
       if (threadId) {
         if (to?.length) {
@@ -1998,7 +2006,7 @@ function registerDraftTools(
         return ok(
           await saveReplyDraft(
             gmail,
-            { threadId, messageId, replyAll, from, cc, bcc, subject, body, attachments },
+            { threadId, messageId, replyAll, from, cc, bcc, subject, body, quote, attachments },
             confirmMode,
             confirm,
             selfWithoutDialog,
@@ -2006,8 +2014,8 @@ function registerDraftTools(
           ),
         );
       }
-      if (messageId || replyAll) {
-        throw new ToolError("invalid_input", "messageId and replyAll only apply to a reply; pass threadId as well.");
+      if (messageId || replyAll || quote) {
+        throw new ToolError("invalid_input", "messageId, replyAll and quote only apply to a reply; pass threadId as well.");
       }
       if (!to?.length || subject === undefined) {
         throw new ToolError("invalid_input", "A new message needs `to` and `subject` (or pass threadId to reply).");
@@ -2029,6 +2037,8 @@ function registerDraftTools(
         "Replace the content of a draft that mailwarden itself created (labelled MCP/Drafts); any other draft is refused with forbidden_operation. " +
         "body is required and replaces the whole text; subject, to, cc and bcc keep their saved values unless given (a given list replaces that list). " +
         "A reply draft stays in its thread. " +
+        "quote: true quotes the message the draft answers below the new body again — body replaces the old text and its quote, so pass quote: true on every update of a quoted reply. " +
+        QUOTE_NOTE +
         "attachments: omitted keeps every file the draft carries; a list replaces them all — name one to keep as {kept: filename}; [] removes them. " +
         ATTACH_NOTE +
         "A file kept from the draft is not asked about again; a new file from the disk is. " +
@@ -2045,16 +2055,17 @@ function registerDraftTools(
         bcc: recipientList.optional(),
         subject: z.string().max(MAX_SUBJECT_CHARS).optional(),
         body: z.string().max(MAX_BODY_CHARS),
+        quote: z.boolean().default(false),
         attachments: updateAttachments.optional(),
       },
       outputSchema: draftOutput,
       annotations: { title: "Update draft", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ draftId, from, to, cc, bcc, subject, body, attachments }) =>
+    async ({ draftId, from, to, cc, bcc, subject, body, quote, attachments }) =>
       ok(
         await reviseDraft(
           await client(),
-          { draftId, from, to, cc, bcc, subject, body, attachments },
+          { draftId, from, to, cc, bcc, subject, body, quote, attachments },
           confirmMode,
           confirm,
           selfWithoutDialog,
