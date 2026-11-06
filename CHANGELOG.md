@@ -18,6 +18,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gmail-csitte deployment); a deployment that already labelled its sent mail by hand needs nothing
   changed, the server finds the label by name.
 
+### Fixed
+- **A quote falls back to the HTML part when the text part holds nothing but Outlook's `[cid:…]`
+  image placeholders.** Such a mail was answered without its quote although its HTML was readable;
+  the same rule now decides both whether the text part has lines and whether there is anything to
+  quote. Found by the grok-mailwarden review of 0.30.0 (N35, measured).
+- **A draft is never the message a reply answers or quotes**, also when it is named by id. Before,
+  `messageId` on `create_draft` could pick a draft of the thread and the reply took its recipients
+  from a mail nobody sent; the quote source had the same gap. Same review (N34).
+
 ## [0.30.0] - 2026-11-06
 
 ### Added

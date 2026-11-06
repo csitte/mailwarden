@@ -160,6 +160,8 @@ describe("Gmail — draft calls", () => {
     expect(messageId).toBe("m1");
     expect(source).toMatchObject({ from: "Ann <ann@example.org>", subject: "Grüße", messageId: "<m1@example.org>" });
     await expect(new Gmail(draftApi().api).replySource("t1", "nope")).rejects.toThrow(/not part of thread/);
+    // Grok review N34: a draft named by id is no answered message either.
+    await expect(new Gmail(draftApi().api).replySource("t1", "d0")).rejects.toThrow(/or it is a draft/);
   });
 });
 

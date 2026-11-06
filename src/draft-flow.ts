@@ -21,6 +21,7 @@ import {
   checkFilename,
   checkContent,
   checkTotalBytes,
+  quoteLines,
   draftDialog,
   isMimeType,
   mimeTypeFor,
@@ -576,7 +577,10 @@ async function quoteFor(
   checkContent("", body);
   const q = await gmail.quoteSource(threadId, which);
   if (!q) return { body, reason: "the message this draft answers is no longer in the thread" };
-  const text = q.plaintextBody.trim() ? q.plaintextBody : htmlToText(q.htmlBody);
+  // The text part when it has lines to quote, else the HTML part reduced to text. Judged by the
+  // same rule that later decides whether there is anything to quote: a text part that is nothing
+  // but Outlook's `[cid:…]` placeholders counts as empty (Grok review N35, 6 Nov 2026).
+  const text = quoteLines(q.plaintextBody).length ? q.plaintextBody : htmlToText(q.htmlBody);
   const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
   const r = withQuote(body, { name: q.name, address: q.address, date: q.date, text }, locale, timeZone);
   return "reason" in r ? { body, reason: r.reason } : { body: r.body, html: r.html, quotes: r.attribution };

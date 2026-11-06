@@ -261,6 +261,15 @@ describe("saveReplyDraft — quote", () => {
     expect(htmlOf(created[0])).toMatch(/<blockquote class="gmail_quote" [^>]*>Hallo<br>A B<\/blockquote>/);
   });
 
+  it("quotes the HTML part when the text part is nothing but Outlook's image placeholders (Grok N35)", async () => {
+    const { gmail, created } = fakeGmail({
+      quoteSource: async () => ({ name: "", address: "a@example.org", date: AT, plaintextBody: "[cid:image001.png@01DC]\r\n\r\n[cid:image002.png@01DC]", htmlBody: "<p>Hello from the HTML part</p>" }),
+    });
+    const res = await saveReplyDraft(gmail, { threadId: "t1", body: "Hi", quote: true }, "off", vi.fn(async () => false));
+    expect(res.quoted).toBe(true);
+    expect(bodyOf(created[0])).toContain("> Hello from the HTML part");
+  });
+
   it("refuses a body over the limit before the thread is read for the quote", async () => {
     const { gmail, created, quoteSource } = fakeGmail();
     const err = await saveReplyDraft(gmail, { threadId: "t1", body: "x".repeat(MAX_BODY_CHARS + 1), quote: true }, "off", vi.fn(async () => false)).catch((e) => e);

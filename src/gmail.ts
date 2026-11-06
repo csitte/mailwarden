@@ -1868,7 +1868,9 @@ export class Gmail {
 
   /**
    * The message a reply answers, with the headers `draft.ts` derives recipients and threading from.
-   * `messageId` picks one message of the thread; without it, the newest one that is not a draft.
+   * `messageId` picks one message of the thread; without it, the newest one that is not a draft. A
+   * draft is never the answered message, named or not: a reply to one would take its recipients
+   * from a mail nobody sent (Grok review N34, 6 Nov 2026).
    */
   async replySource(
     threadId: string,
@@ -1882,15 +1884,13 @@ export class Gmail {
         metadataHeaders: ["From", "Reply-To", "To", "Cc", "Subject", "Message-ID", "References"],
       }),
     );
-    const messages = res.data.messages ?? [];
-    const pick = messageId
-      ? messages.find((m) => m.id === messageId)
-      : [...messages].reverse().find((m) => !(m.labelIds ?? []).includes("DRAFT"));
+    const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT"));
+    const pick = messageId ? messages.find((m) => m.id === messageId) : messages[messages.length - 1];
     if (!pick?.id) {
       throw new ToolError(
         "not_found",
         messageId
-          ? `Message ${messageId} is not part of thread ${threadId}.`
+          ? `Message ${messageId} is not part of thread ${threadId}, or it is a draft; a reply answers a sent or received message.`
           : `Thread ${threadId} has no message to reply to (only drafts).`,
       );
     }
@@ -1911,21 +1911,22 @@ export class Gmail {
 
   /**
    * The message a reply quotes, with its text: by Gmail id (`messageId`), by its `Message-ID`
-   * header (`rfcMessageId`, what a saved draft's `In-Reply-To` names), or else the newest message
-   * that is not a draft. `undefined` when nothing in the thread matches. A second `threads.get`,
-   * in `full` format, made only when a quote is asked for.
+   * header (`rfcMessageId`, what a saved draft's `In-Reply-To` names), or else the newest message.
+   * Drafts are left out whichever way the message is named, as `replySource` leaves them out.
+   * `undefined` when nothing in the thread matches. A second `threads.get`, in `full` format, made
+   * only when a quote is asked for.
    */
   async quoteSource(
     threadId: string,
     which: { messageId?: string; rfcMessageId?: string },
   ): Promise<{ name: string; address: string; date: Date; plaintextBody: string; htmlBody: string } | undefined> {
     const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));
-    const messages = res.data.messages ?? [];
+    const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT"));
     const pick = which.messageId
       ? messages.find((m) => m.id === which.messageId)
       : which.rfcMessageId
         ? messages.find((m) => headerValue(m.payload?.headers, "Message-ID")?.trim() === which.rfcMessageId)
-        : [...messages].reverse().find((m) => !(m.labelIds ?? []).includes("DRAFT"));
+        : messages[messages.length - 1];
     if (!pick?.id || !pick.threadId) return undefined;
     const parsed = parseMessage(pick);
     const { address, name } = mailboxOf(headerValue(pick.payload?.headers, "From"));
