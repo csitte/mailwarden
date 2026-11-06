@@ -436,15 +436,21 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   (`Reply-To`, else `From`; the original `To` when that message is yours; `replyAll` adds the other
   `To` and `Cc`), the subject becomes `Re: …`, and `In-Reply-To`/`References` keep it in the thread.
   `cc`/`bcc` add people.
-- **Quote** (`quote: true`, replies only, both tools): the answered message goes below the text as
-  plain text, the way a mail client quotes it — a line such as "On Thu, 5 Nov 2026 at 9:56 Ann
-  <ann@example.org> wrote:" and every line prefixed `> `. The line names the sender as the mail's
-  `From` does, and its language and time come from the computer mailwarden runs on (German there
-  gives "Am Do., 5. Nov. 2026 um 09:56 Uhr schrieb …"; any language other than German and English
-  gets the English wording). A mail with only HTML is reduced to text first; Outlook's placeholders
-  for inline images (`[cid:…]`) are left out. A mail with no readable text is answered without the
-  quote, and the result says so (`quoted: false`). `update_draft` replaces the whole text, quote
-  included, so it takes `quote: true` again. Off by default: a reply without it is what it was.
+- **Quote** (`quote: true`, replies only, both tools): the answered message goes below the text,
+  the way a mail client quotes it — a line such as "On Thu, 5 Nov 2026 at 9:56 Ann
+  <ann@example.org> wrote:" and the message. The draft then carries the content twice, as
+  `multipart/alternative`: as plain text with every line prefixed `> `, and as HTML in the markup
+  Gmail itself writes for a quote (`gmail_quote`), which is what makes Gmail fold the quote behind
+  "..." for the reader — plain `> ` lines it folds only where they repeat text it already holds in
+  the thread, so the quote of an Outlook mail stayed open (received and read in Gmail). The HTML
+  holds nothing but that text, escaped: no markup, image, link or style of the quoted mail is
+  carried over. The line names the sender as the mail's `From` does, and its language and time
+  come from the computer mailwarden runs on (German there gives "Am Do., 5. Nov. 2026 um 09:56 Uhr
+  schrieb …"; any language other than German and English gets the English wording). A mail with
+  only HTML is reduced to text first; Outlook's placeholders for inline images (`[cid:…]`) are left
+  out. A mail with no readable text is answered without the quote, and the result says so
+  (`quoted: false`). `update_draft` replaces the whole text, quote included, so it takes
+  `quote: true` again. Off by default: a reply without it is what it was, plain text only.
 - **`create_draft`, new message:** omit `threadId`, pass `to` and `subject`.
 - **`update_draft`:** replaces the text of a draft `create_draft` wrote. Such drafts carry the label
   `MCP/Drafts`; a draft without it is refused, and no label tool can add that label, so a draft you
@@ -516,8 +522,10 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   attachment with its size and origin.
 - **What it does not do.** No sending, no files from anywhere but `MAILWARDEN_ATTACH_DIR`, no
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
-  HTML — plain text only. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
-  refused.
+  HTML of your own — the body is plain text; only a quote adds an HTML rendering of that same text,
+  so Gmail folds it. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
+  refused. The label `MCP/Drafts` stays on the message after you send it (seen in Gmail): the label
+  tools can remove it, and nothing else reads it on a sent mail.
 
 What it leaves to you is stated plainly in [SECURITY.md](SECURITY.md) (threats 10 and 11): a draft can carry
 what an injected mail asked for — the protection is you reading it before you press Send.

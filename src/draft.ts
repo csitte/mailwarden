@@ -443,12 +443,11 @@ export function quoteAttribution(q: Pick<QuoteSource, "name" | "address" | "date
 }
 
 /**
- * The quoted text: every line prefixed `> `, an empty line `>`, a line already quoted gets one more
- * `>` without a space, as mail clients nest. Outlook's placeholders for inline images
- * (`[cid:image001.gif@01DC…]`) are dropped: they point at nothing in the reply. Leading and
- * trailing empty lines go. "" when no text is left.
+ * The lines of the text a quote shows, cleaned: CRLF read as line ends, Outlook's placeholders for
+ * inline images (`[cid:image001.gif@01DC…]`) dropped — they point at nothing in the reply —,
+ * trailing blanks and the empty lines around the text gone. Empty when no text is left.
  */
-export function quotedText(text: string): string {
+export function quoteLines(text: string): string[] {
   const lines = text
     .replace(/\r\n?/g, "\n")
     .replace(/\[cid:[^\]\n]{1,300}\]/gi, "")
@@ -456,27 +455,67 @@ export function quotedText(text: string): string {
     .map((l) => l.replace(/[ \t]+$/, ""));
   while (lines.length && !lines[0].trim()) lines.shift();
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
-  return lines.map((l) => (l === "" ? ">" : l.startsWith(">") ? `>${l}` : `> ${l}`)).join("\n");
+  return lines;
 }
 
 /**
- * The body with the quote below it, or why it was left out: the message had no text to quote, or
- * the two together would pass the body limit.
+ * The quoted text: every line prefixed `> `, an empty line `>`, a line already quoted gets one more
+ * `>` without a space, as mail clients nest. "" when no text is left.
+ */
+export function quotedText(text: string): string {
+  return prefixed(quoteLines(text));
+}
+
+const prefixed = (lines: readonly string[]) =>
+  lines.map((l) => (l === "" ? ">" : l.startsWith(">") ? `>${l}` : `> ${l}`)).join("\n");
+
+/** `&`, `<`, `>` and `"` as entities: text a sender wrote becomes text in the HTML, never markup. */
+export function escapeHtml(s: string): string {
+  const entity: Record<string, string> = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" };
+  return s.replace(/[&<>"]/g, (c) => entity[c]);
+}
+
+/** Lines of text as HTML: each escaped, a `<br>` between them. */
+const htmlLines = (lines: readonly string[]) => lines.map(escapeHtml).join("<br>");
+
+/**
+ * The reply as HTML: the body, then the quote in the markup Gmail writes itself (`gmail_quote`,
+ * `gmail_attr`, the `blockquote` with Gmail's border). Gmail folds such a block behind "..." in
+ * the reader's view; plain `> ` lines it folds only where they repeat text it already holds in the
+ * thread — the quote of an Outlook HTML mail stayed open, our own earlier mail folded (received
+ * and read in Gmail, 6 Nov 2026). Everything in the HTML is the text of the plain part, escaped: no
+ * markup, image, link or style of the quoted mail is carried over, so the two parts show the same.
+ */
+export function quoteHtml(body: string, attribution: string, lines: readonly string[]): string {
+  return (
+    `<div dir="auto">${htmlLines(body.replace(/\r\n?/g, "\n").split("\n"))}</div><br>` +
+    `<div class="gmail_quote gmail_quote_container">` +
+    `<div dir="auto" class="gmail_attr">${escapeHtml(attribution)}<br></div>` +
+    `<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">` +
+    `${htmlLines(lines)}</blockquote></div>`
+  );
+}
+
+/**
+ * The body with the quote below it, as text and as HTML, or why it was left out: the message had
+ * no text to quote, or the two together would pass the body limit. The limit is checked on the
+ * text; the HTML is the same text with its markup, a bounded multiple of it.
  */
 export function withQuote(
   body: string,
   q: QuoteSource,
   locale: string,
   timeZone: string,
-): { body: string; attribution: string } | { reason: string } {
-  const quoted = quotedText(q.text);
-  if (!quoted) return { reason: "the answered message has no text mailwarden can read (no text part, and its HTML reduced to nothing)" };
+): { body: string; html: string; attribution: string } | { reason: string } {
+  const lines = quoteLines(q.text);
+  if (!lines.length) return { reason: "the answered message has no text mailwarden can read (no text part, and its HTML reduced to nothing)" };
   const attribution = quoteAttribution(q, locale, timeZone);
-  const full = `${body.replace(/\s+$/, "")}\n\n${attribution}\n${quoted}\n`;
+  const text = body.replace(/\s+$/, "");
+  const full = `${text}\n\n${attribution}\n${prefixed(lines)}\n`;
   if (full.length > MAX_BODY_CHARS) {
     return { reason: `the answered message is too long to quote (body and quote together pass ${MAX_BODY_CHARS} characters)` };
   }
-  return { body: full, attribution };
+  return { body: full, html: quoteHtml(text, attribution, lines), attribution };
 }
 
 export interface DraftContent extends Recipients {
@@ -489,6 +528,11 @@ export interface DraftContent extends Recipients {
   body: string;
   /** The line above the quote the body ends with, for the dialog; omitted when it quotes nothing. */
   quotes?: string;
+  /**
+   * The same content as HTML, when a reply quotes (`quoteHtml`): the message then carries text and
+   * HTML as `multipart/alternative`. Omitted: text only, byte for byte what it was before.
+   */
+  html?: string;
   inReplyTo?: string;
   references?: string;
   /** Omitted or empty: a plain-text message, byte for byte what it was before attachments existed. */
@@ -502,11 +546,16 @@ const base64Lines = (data: Buffer) => data.toString("base64").match(/.{1,76}/g) 
  * base64-encoded so no line of it can be read as anything but body. Every header value has been
  * checked or built here; nothing the caller wrote reaches a header unchecked.
  *
- * With attachments the message becomes `multipart/mixed`: the same text part first, then one
- * base64 part per file. The boundary contains `=_`, which no base64 line can — so no part's
- * content can end its part early, whatever the file holds.
+ * With `html` the content becomes `multipart/alternative`: the text part, then the same content
+ * as HTML. With attachments the message becomes `multipart/mixed`: that content first, then one
+ * base64 part per file. Both boundaries contain `=_`, which no base64 line can — so no part's
+ * content can end its part early, whatever the file holds — and neither is a prefix of the other.
  */
-export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes(12).toString("hex")}`): string {
+export function buildMime(
+  d: DraftContent,
+  boundary = `mailwarden=_${randomBytes(12).toString("hex")}`,
+  altBoundary = `mailwarden=_alt${randomBytes(12).toString("hex")}`,
+): string {
   checkContent(d.subject, d.body);
   checkRecipients(d);
   const attachments = d.attachments ?? [];
@@ -532,7 +581,22 @@ export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes
     "",
     ...base64Lines(Buffer.from(d.body.replace(/\r?\n/g, "\r\n"), "utf8")),
   ];
-  if (!attachments.length) return [...lines, ...text].join("\r\n") + "\r\n";
+  const content =
+    d.html === undefined
+      ? text
+      : [
+          `Content-Type: multipart/alternative; boundary="${altBoundary}"`,
+          "",
+          `--${altBoundary}`,
+          ...text,
+          `--${altBoundary}`,
+          "Content-Type: text/html; charset=UTF-8",
+          "Content-Transfer-Encoding: base64",
+          "",
+          ...base64Lines(Buffer.from(d.html, "utf8")),
+          `--${altBoundary}--`,
+        ];
+  if (!attachments.length) return [...lines, ...content].join("\r\n") + "\r\n";
   const parts = attachments.map((a) => {
     if (!isMimeType(a.mimeType)) {
       throw new ToolError("invalid_input", `"${dialogText(a.mimeType, 80)}" is not a MIME type; nothing was written.`);
@@ -551,7 +615,7 @@ export function buildMime(d: DraftContent, boundary = `mailwarden=_${randomBytes
       `Content-Type: multipart/mixed; boundary="${boundary}"`,
       "",
       `--${boundary}`,
-      ...text,
+      ...content,
       ...parts.flatMap((p) => [`--${boundary}`, ...p]),
       `--${boundary}--`,
     ].join("\r\n") + "\r\n"

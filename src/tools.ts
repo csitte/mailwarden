@@ -1895,7 +1895,7 @@ const FROM_NOTE =
   "The result always names `from`; for a reply to a mail sent to one of the aliases it offers that alias as `suggestedFrom` — pass it as `from` only when the user wants it. ";
 
 const QUOTE_NOTE =
-  "QUOTE (optional, replies only): quote: true puts the answered message below the body as plain text — a line like \"On <date> <sender> wrote:\" and every line prefixed \"> \", as a mail client does; " +
+  "QUOTE (optional, replies only): quote: true puts the answered message below the body, as a mail client does — a line like \"On <date> <sender> wrote:\" and the message, as plain text with every line prefixed \"> \" and the same as HTML in Gmail's own quote markup, so Gmail folds it behind \"...\"; " +
   "the line is in the language and time zone of the computer mailwarden runs on, and names the sender as the mail's From does. Do not type a quote into body yourself. " +
   "If the message has no readable text the draft is saved without the quote, and the result says so (quoted: false). ";
 

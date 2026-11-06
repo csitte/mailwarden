@@ -9,17 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **A reply draft can quote the message it answers.** `create_draft` and `update_draft` take
-  `quote: true` (replies only, off by default): the answered message goes below the body as plain
-  text, under a line like Gmail's own ("Am Do., 5. Nov. 2026 um 09:56 Uhr schrieb Ann <ann@…>:",
-  "On … wrote:" in English and every other language), every line prefixed `> `. The line names the
-  sender as `From` does, so a contact form stays "Name via site <noreply@…>"; its locale and time
-  zone are the machine's — the account's Gmail language would need another settings endpoint. An
-  HTML-only mail is reduced to text; Outlook's `[cid:…]` placeholders are dropped. A mail without
-  readable text, or one too long to fit the body limit, is answered without the quote and the result
-  says so (`quoted: false` and the reason in `note`). `update_draft` finds the answered message by
-  the draft's `In-Reply-To`. The text comes from a second `threads.get`, in `full` format, made
-  only when a quote is asked for: no new endpoint. The dialog names the quoted mail. Asked for by the
-  gmail deployment; measured read-only on real mails beforehand.
+  `quote: true` (replies only, off by default): the answered message goes below the body, under a
+  line like Gmail's own ("Am Do., 5. Nov. 2026 um 09:56 Uhr schrieb Ann <ann@…>:", "On … wrote:"
+  in English and every other language). The draft then carries the content as `multipart/alternative`:
+  plain text with every line prefixed `> `, and the same as HTML in Gmail's own quote markup
+  (`gmail_quote`), so Gmail folds the quote behind "..." for the reader — a first version wrote the
+  text alone, and the receiving test (6 Nov 2026, Gmail web) showed Gmail folding `> ` lines only
+  where they repeat text it already holds in the thread: an Outlook mail's quote stayed open. The
+  HTML is that text escaped, nothing of the quoted mail's markup, images, links or styles. The line
+  names the sender as `From` does, so a contact form stays "Name via site <noreply@…>"; its locale
+  and time zone are the machine's — the account's Gmail language would need another settings
+  endpoint. An HTML-only mail is reduced to text; Outlook's `[cid:…]` placeholders are dropped. A
+  mail without readable text, or one too long to fit the body limit, is answered without the quote
+  and the result says so (`quoted: false` and the reason in `note`). `update_draft` finds the
+  answered message by the draft's `In-Reply-To`. The text comes from a second `threads.get`, in
+  `full` format, made only when a quote is asked for: no new endpoint. The dialog names the quoted
+  mail. Without `quote` a draft is what it was: plain text only. Asked for by the gmail deployment;
+  measured read-only on real mails beforehand, then sent and received once.
 
 ### Fixed
 - **Table cells no longer run together when an HTML mail is reduced to text** (`get_thread`,

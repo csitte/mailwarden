@@ -436,7 +436,7 @@ export async function saveReplyDraft(
     from,
     subject: input.subject ?? replySubject(source.subject),
     body: quote?.body ?? input.body,
-    ...(quote?.quotes !== undefined ? { quotes: quote.quotes } : {}),
+    ...(quote?.quotes !== undefined ? { quotes: quote.quotes, html: quote.html } : {}),
     ...replyThreading(source),
     attachments,
   };
@@ -541,7 +541,7 @@ export async function reviseDraft(
     from,
     subject: input.subject ?? before.subject,
     body: quote?.body ?? input.body,
-    ...(quote?.quotes !== undefined ? { quotes: quote.quotes } : {}),
+    ...(quote?.quotes !== undefined ? { quotes: quote.quotes, html: quote.html } : {}),
     ...threading,
     attachments,
   };
@@ -558,23 +558,24 @@ export async function reviseDraft(
 }
 
 /**
- * The body with the answered message quoted below it, or the body alone and the reason. Never
- * fatal: a reply without its quote is still the reply the caller wrote, and the result says so.
- * The line above the quote is written in the locale and time zone of the machine mailwarden runs
- * on — the account's Gmail language would need another settings endpoint opened.
+ * The body with the answered message quoted below it — as text, and the same as HTML in Gmail's
+ * quote markup so Gmail folds it —, or the body alone and the reason. Never fatal: a reply without
+ * its quote is still the reply the caller wrote, and the result says so. The line above the quote
+ * is written in the locale and time zone of the machine mailwarden runs on — the account's Gmail
+ * language would need another settings endpoint opened.
  */
 async function quoteFor(
   gmail: DraftGmail,
   threadId: string,
   which: { messageId?: string; rfcMessageId?: string },
   body: string,
-): Promise<{ body: string; quotes?: string; reason?: string }> {
+): Promise<{ body: string; html?: string; quotes?: string; reason?: string }> {
   const q = await gmail.quoteSource(threadId, which);
   if (!q) return { body, reason: "the message this draft answers is no longer in the thread" };
   const text = q.plaintextBody.trim() ? q.plaintextBody : htmlToText(q.htmlBody);
   const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
   const r = withQuote(body, { name: q.name, address: q.address, date: q.date, text }, locale, timeZone);
-  return "reason" in r ? { body, reason: r.reason } : { body: r.body, quotes: r.attribution };
+  return "reason" in r ? { body, reason: r.reason } : { body: r.body, html: r.html, quotes: r.attribution };
 }
 
 function withQuoteResult(r: DraftResult, quote: { quotes?: string; reason?: string } | undefined): DraftResult {

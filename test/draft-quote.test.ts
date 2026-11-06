@@ -1,6 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 import type { gmail_v1 } from "@googleapis/gmail";
-import { MAX_BODY_CHARS, quoteAttribution, quotedText, withQuote, type QuoteSource } from "../src/draft.js";
+import {
+  MAX_BODY_CHARS,
+  buildMime,
+  escapeHtml,
+  quoteAttribution,
+  quoteHtml,
+  quoteLines,
+  quotedText,
+  withQuote,
+  type QuoteSource,
+} from "../src/draft.js";
 import { reviseDraft, saveReplyDraft, type DraftGmail } from "../src/draft-flow.js";
 import { htmlToText } from "../src/export.js";
 import { Gmail } from "../src/gmail.js";
@@ -65,11 +75,45 @@ describe("quotedText", () => {
   });
 });
 
+describe("quoteHtml — the quote in Gmail's own markup, so Gmail folds it", () => {
+  const ATTR = "On Thu, 5 Nov 2026 at 8:56 Jürgen Müller <jm@example.com> wrote:";
+
+  it("wraps the body, the attribution line and the quoted lines the way Gmail does", () => {
+    const html = quoteHtml(`Thanks!${LF}See you.`, ATTR, ["Hello again,", "", "> earlier"]);
+    expect(html).toBe(
+      '<div dir="auto">Thanks!<br>See you.</div><br>' +
+        '<div class="gmail_quote gmail_quote_container">' +
+        '<div dir="auto" class="gmail_attr">On Thu, 5 Nov 2026 at 8:56 Jürgen Müller &lt;jm@example.com&gt; wrote:<br></div>' +
+        '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">' +
+        "Hello again,<br><br>&gt; earlier</blockquote></div>",
+    );
+  });
+
+  it("carries nothing of the quoted mail but its text: markup in it is shown, not rendered", () => {
+    const html = quoteHtml("x", ATTR, ['<img src="http://t.example/p.gif"> <a href="x">click</a>', "<script>1</script>"]);
+    expect(html).not.toMatch(/<(img|a|script)\b/);
+    expect(html).toContain("&lt;img src=&quot;http://t.example/p.gif&quot;&gt; &lt;a href=&quot;x&quot;&gt;click&lt;/a&gt;");
+  });
+
+  it("reads CRLF in the body, and the body cannot close its own div", () => {
+    expect(quoteHtml(`a${CR}${LF}b</div><p>`, ATTR, ["q"])).toMatch(/^<div dir="auto">a<br>b&lt;\/div&gt;&lt;p&gt;<\/div><br>/);
+  });
+
+  it("escapeHtml: the four characters that matter, nothing else", () => {
+    expect(escapeHtml(`a & b < c > "d" 'e' ü`)).toBe("a &amp; b &lt; c &gt; &quot;d&quot; 'e' ü");
+  });
+
+  it("quoteLines: the cleaned lines the text quote and the HTML quote share", () => {
+    expect(quoteLines(`${CR}${LF}Hi  ${CR}${LF}[cid:image001.png@x]${CR}${LF}> old${CR}${LF}${CR}${LF}`)).toEqual(["Hi", "", "> old"]);
+  });
+});
+
 describe("withQuote", () => {
-  it("puts the line and the quote below the body, after one empty line", () => {
+  it("puts the line and the quote below the body, after one empty line, as text and as HTML", () => {
     const r = withQuote(`Thanks!${LF}${LF}`, ann, "en-GB", "UTC");
     expect(r).toEqual({
       body: ["Thanks!", "", "On Thu, 5 Nov 2026 at 8:56 Jürgen Müller <jm@example.com> wrote:", "> Hello again,", ""].join(LF),
+      html: quoteHtml("Thanks!", "On Thu, 5 Nov 2026 at 8:56 Jürgen Müller <jm@example.com> wrote:", ["Hello again,"]),
       attribution: "On Thu, 5 Nov 2026 at 8:56 Jürgen Müller <jm@example.com> wrote:",
     });
   });
@@ -79,6 +123,54 @@ describe("withQuote", () => {
     expect(withQuote("x", { ...ann, text: "y".repeat(MAX_BODY_CHARS) }, "en-GB", "UTC")).toEqual({
       reason: expect.stringMatching(/too long to quote/),
     });
+  });
+});
+
+describe("buildMime with html — text and HTML side by side", () => {
+  const base = { to: ["a@example.com"], cc: [], bcc: [], subject: "Re: Hi", body: `x${LF}${LF}> q${LF}`, html: "<div>x</div>" };
+  const decode = (b64: string) => Buffer.from(b64.replace(/\r\n/g, ""), "base64").toString("utf8");
+
+  it("is multipart/alternative with the text part first, then the HTML, both base64", () => {
+    const m = buildMime(base, "mailwarden=_mixed", "mailwarden=_alt");
+    expect(m).toContain('Content-Type: multipart/alternative; boundary="mailwarden=_alt"\r\n');
+    expect(m).not.toMatch(/multipart\/mixed/);
+    const parts = m.split("--mailwarden=_alt").slice(1, -1);
+    expect(parts).toHaveLength(2);
+    expect(parts[0]).toContain("Content-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
+    expect(decode(parts[0].split("\r\n\r\n")[1])).toBe("x\r\n\r\n> q\r\n");
+    expect(parts[1]).toContain("Content-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n");
+    expect(decode(parts[1].split("\r\n\r\n")[1])).toBe("<div>x</div>");
+    expect(m.endsWith("--mailwarden=_alt--\r\n")).toBe(true);
+  });
+
+  it("nests the alternative inside multipart/mixed when there are attachments", () => {
+    const m = buildMime(
+      { ...base, attachments: [{ filename: "a.txt", mimeType: "text/plain", data: Buffer.from("hi"), source: "file" }] },
+      "mailwarden=_mixed",
+      "mailwarden=_alt",
+    );
+    expect(m).toContain('Content-Type: multipart/mixed; boundary="mailwarden=_mixed"\r\n');
+    const outer = m.split("--mailwarden=_mixed").slice(1, -1);
+    expect(outer).toHaveLength(2);
+    expect(outer[0]).toContain('Content-Type: multipart/alternative; boundary="mailwarden=_alt"');
+    expect(outer[0].split("--mailwarden=_alt")).toHaveLength(4);
+    expect(outer[1]).toContain('Content-Disposition: attachment;\r\n filename="a.txt"');
+  });
+
+  it("without html the message is what it was: a single text part, no multipart", () => {
+    const { html: _, ...plain } = base;
+    const m = buildMime(plain);
+    expect(m).not.toMatch(/multipart|text\/html/);
+    expect(m).toContain("Content-Type: text/plain; charset=UTF-8\r\n");
+  });
+
+  it("the two default boundaries differ, and neither starts with the other", () => {
+    const m = buildMime({ ...base, attachments: [{ filename: "a.txt", mimeType: "text/plain", data: Buffer.from("hi"), source: "file" }] });
+    const [mixed, alt] = [/multipart\/mixed; boundary="([^"]+)"/.exec(m)![1], /multipart\/alternative; boundary="([^"]+)"/.exec(m)![1]];
+    expect(mixed).not.toBe(alt);
+    expect(mixed.startsWith(alt) || alt.startsWith(mixed)).toBe(false);
+    expect(mixed).toContain("=_");
+    expect(alt).toContain("=_");
   });
 });
 
@@ -130,7 +222,13 @@ function fakeGmail(over: Partial<DraftGmail> = {}) {
   return { gmail, created, updated, quoteSource };
 }
 
-const bodyOf = (raw: string) => Buffer.from(raw.split("\r\n\r\n")[1].replace(/\r\n/g, ""), "base64").toString("utf8").replace(/\r\n/g, LF);
+/** The decoded content of the first part of that type, or undefined when the message has none. */
+const partOf = (raw: string, type: string) => {
+  const m = new RegExp(`Content-Type: ${type}; charset=UTF-8\\r\\nContent-Transfer-Encoding: base64\\r\\n\\r\\n([A-Za-z0-9+/=\\r\\n]*)`).exec(raw);
+  return m ? Buffer.from(m[1].replace(/\r\n/g, ""), "base64").toString("utf8").replace(/\r\n/g, LF) : undefined;
+};
+const bodyOf = (raw: string) => partOf(raw, "text/plain") ?? "";
+const htmlOf = (raw: string) => partOf(raw, "text/html");
 
 describe("saveReplyDraft — quote", () => {
   it("quotes the message it answers below the body, and the dialog says so", async () => {
@@ -140,6 +238,10 @@ describe("saveReplyDraft — quote", () => {
     expect(quoteSource).toHaveBeenCalledWith("t1", { messageId: "m2" });
     const body = bodyOf(created[0]);
     expect(body).toMatch(/^Yes, we can\.\n\n.*Ann <ann@example\.org>.*:\n> Can you play on the 13th\?\n>\n> Ann\n$/);
+    expect(created[0]).toContain("Content-Type: multipart/alternative;");
+    expect(htmlOf(created[0])).toMatch(
+      /^<div dir="auto">Yes, we can\.<\/div><br><div class="gmail_quote gmail_quote_container"><div dir="auto" class="gmail_attr">.*Ann &lt;ann@example\.org&gt;.*:<br><\/div><blockquote class="gmail_quote" [^>]*>Can you play on the 13th\?<br><br>Ann<\/blockquote><\/div>$/,
+    );
     expect(confirm).toHaveBeenCalledWith("ask", expect.stringMatching(/Quoted below the text: .*Ann <ann@example\.org>/));
     expect(r.quoted).toBe(true);
   });
@@ -150,6 +252,7 @@ describe("saveReplyDraft — quote", () => {
     });
     await saveReplyDraft(gmail, { threadId: "t1", body: "x", quote: true }, "off", vi.fn(async () => false));
     expect(bodyOf(created[0])).toMatch(/\n> Hallo\n> A B\n$/);
+    expect(htmlOf(created[0])).toMatch(/<blockquote class="gmail_quote" [^>]*>Hallo<br>A B<\/blockquote>/);
   });
 
   it("saves the reply without a quote, and says why, when the message has no text", async () => {
@@ -158,6 +261,7 @@ describe("saveReplyDraft — quote", () => {
     });
     const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x", quote: true }, "off", vi.fn(async () => false));
     expect(bodyOf(created[0])).toBe("x");
+    expect(created[0]).not.toMatch(/multipart|text\/html/);
     expect(r.quoted).toBe(false);
     expect(r.note).toMatch(/No quote was added: the answered message has no text/);
   });
@@ -167,6 +271,7 @@ describe("saveReplyDraft — quote", () => {
     const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x" }, "off", vi.fn(async () => false));
     expect(quoteSource).not.toHaveBeenCalled();
     expect(bodyOf(created[0])).toBe("x");
+    expect(created[0]).not.toMatch(/multipart|text\/html/);
     expect(r).not.toHaveProperty("quoted");
   });
 });
@@ -177,6 +282,7 @@ describe("reviseDraft — quote", () => {
     const r = await reviseDraft(gmail, { draftId: "r1", body: "Better text.", quote: true }, "off", vi.fn(async () => false));
     expect(quoteSource).toHaveBeenCalledWith("t1", { rfcMessageId: "<m2@example.org>" });
     expect(bodyOf(updated[0])).toMatch(/^Better text\.\n\n.*\n> Can you play on the 13th\?/);
+    expect(htmlOf(updated[0])).toMatch(/^<div dir="auto">Better text\.<\/div><br><div class="gmail_quote/);
     expect(r.quoted).toBe(true);
   });
 
