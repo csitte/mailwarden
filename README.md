@@ -440,11 +440,14 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   the way a mail client quotes it — a line such as "On Thu, 5 Nov 2026 at 9:56 Ann
   <ann@example.org> wrote:" and the message. The draft then carries the content twice, as
   `multipart/alternative`: as plain text with every line prefixed `> `, and as HTML in the markup
-  Gmail itself writes for a quote (`gmail_quote`), which is what makes Gmail fold the quote behind
-  "..." for the reader — plain `> ` lines it folds only where they repeat text it already holds in
-  the thread, so the quote of an Outlook mail stayed open (received and read in Gmail). The HTML
-  holds nothing but that text, escaped: no markup, image, link or style of the quoted mail is
-  carried over. The line names the sender as the mail's `From` does, and its language and time
+  Gmail itself writes for a quote (`gmail_quote`), so Gmail's editor and the reader see a quote
+  block like one of Gmail's own. What the markup does not do is fold the quote behind "...": Gmail
+  folds only text that repeats an earlier mail of the thread, so a quote folds where its lines
+  match Gmail's own rendering of that mail and stays open where they do not — an Outlook mail
+  folded from its signature on (sent and received in Gmail). Full folding would need the quoted
+  mail's own HTML, images included, which is exactly what is kept out: the HTML holds nothing but
+  that text, escaped — no markup, image, link or style of the quoted mail is carried over. The
+  line names the sender as the mail's `From` does, and its language and time
   come from the computer mailwarden runs on (German there gives "Am Do., 5. Nov. 2026 um 09:56 Uhr
   schrieb …"; any language other than German and English gets the English wording). A mail with
   only HTML is reduced to text first; Outlook's placeholders for inline images (`[cid:…]`) are left
@@ -523,7 +526,7 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
 - **What it does not do.** No sending, no files from anywhere but `MAILWARDEN_ATTACH_DIR`, no
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
   HTML of your own — the body is plain text; only a quote adds an HTML rendering of that same text,
-  so Gmail folds it. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
+  so Gmail shows it as a quote block. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
   refused. The label `MCP/Drafts` stays on the message after you send it (seen in Gmail): the label
   tools can remove it, and nothing else reads it on a sent mail.
 

@@ -480,11 +480,15 @@ const htmlLines = (lines: readonly string[]) => lines.map(escapeHtml).join("<br>
 
 /**
  * The reply as HTML: the body, then the quote in the markup Gmail writes itself (`gmail_quote`,
- * `gmail_attr`, the `blockquote` with Gmail's border). Gmail folds such a block behind "..." in
- * the reader's view; plain `> ` lines it folds only where they repeat text it already holds in the
- * thread — the quote of an Outlook HTML mail stayed open, our own earlier mail folded (received
- * and read in Gmail, 6 Nov 2026). Everything in the HTML is the text of the plain part, escaped: no
- * markup, image, link or style of the quoted mail is carried over, so the two parts show the same.
+ * `gmail_attr`, the `blockquote` with Gmail's border). Gmail's editor and the reader's view then
+ * show it as a quote block, the way Gmail's own replies look. What the markup does NOT do is make
+ * Gmail fold the quote behind "...": Gmail folds only text that repeats an earlier message of the
+ * thread, whatever the markup, so a quote folds where its lines match Gmail's own rendering of the
+ * quoted mail and stays open where they do not (two sent-and-received tests, 6 Nov 2026: a text
+ * quote and this HTML quote of the same Outlook mail both folded from the signature on). Full
+ * folding would need the quoted mail's own HTML, images included, which is exactly what is kept
+ * out: everything in the HTML is the text of the plain part, escaped — no markup, image, link or
+ * style of the quoted mail is carried over, so the two parts show the same.
  */
 export function quoteHtml(body: string, attribution: string, lines: readonly string[]): string {
   return (

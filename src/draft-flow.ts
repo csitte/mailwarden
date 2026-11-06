@@ -559,7 +559,7 @@ export async function reviseDraft(
 
 /**
  * The body with the answered message quoted below it — as text, and the same as HTML in Gmail's
- * quote markup so Gmail folds it —, or the body alone and the reason. Never fatal: a reply without
+ * quote markup so Gmail shows it as a quote block —, or the body alone and the reason. Never fatal: a reply without
  * its quote is still the reply the caller wrote, and the result says so. The line above the quote
  * is written in the locale and time zone of the machine mailwarden runs on — the account's Gmail
  * language would need another settings endpoint opened.

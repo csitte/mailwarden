@@ -13,10 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line like Gmail's own ("Am Do., 5. Nov. 2026 um 09:56 Uhr schrieb Ann <ann@…>:", "On … wrote:"
   in English and every other language). The draft then carries the content as `multipart/alternative`:
   plain text with every line prefixed `> `, and the same as HTML in Gmail's own quote markup
-  (`gmail_quote`), so Gmail folds the quote behind "..." for the reader — a first version wrote the
-  text alone, and the receiving test (6 Nov 2026, Gmail web) showed Gmail folding `> ` lines only
-  where they repeat text it already holds in the thread: an Outlook mail's quote stayed open. The
-  HTML is that text escaped, nothing of the quoted mail's markup, images, links or styles. The line
+  (`gmail_quote`), so Gmail's editor and the reader see a quote block like Gmail's own. It does not
+  make Gmail fold the quote behind "...": two sent-and-received tests (6 Nov 2026, Gmail web, a
+  text quote and the HTML quote of the same Outlook mail) showed Gmail folding only text that
+  repeats an earlier mail of the thread, whatever the markup — both folded from the signature on
+  and stayed open above it. Full folding would need the quoted mail's own HTML, images included,
+  which is kept out on purpose (decided 6 Nov 2026): the HTML is that text escaped, nothing of the
+  quoted mail's markup, images, links or styles. The line
   names the sender as `From` does, so a contact form stays "Name via site <noreply@…>"; its locale
   and time zone are the machine's — the account's Gmail language would need another settings
   endpoint. An HTML-only mail is reduced to text; Outlook's `[cid:…]` placeholders are dropped. A
