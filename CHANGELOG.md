@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-06
+
 ### Added
 - **A reply draft can quote the message it answers.** `create_draft` and `update_draft` take
   `quote: true` (replies only, off by default): the answered message goes below the body, under a
@@ -2464,7 +2466,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.30.0...HEAD
+[0.30.0]: https://github.com/csitte/mailwarden/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/csitte/mailwarden/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/csitte/mailwarden/compare/v0.28.0...v0.28.1
 [0.28.0]: https://github.com/csitte/mailwarden/compare/v0.27.2...v0.28.0
