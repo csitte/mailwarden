@@ -22,8 +22,20 @@ import { addressesOf } from "./signals.js";
 import { ToolError } from "./cli.js";
 import { dialogText } from "./confirm.js";
 
-/** The label that marks a draft mailwarden wrote. Only such drafts can be changed later. */
-export const DRAFT_LABEL = "MCP/Drafts";
+/**
+ * The label that marks a message mailwarden composed. It goes on the draft, and it stays on the mail
+ * once the user sends it, because Gmail keeps user labels when a draft becomes the sent message
+ * (seen 6 Nov 2026, two mailboxes). The name says what is true in both states; "Drafts", the name
+ * until 0.31.0, read as wrong on a sent mail. Only a draft carrying the mark can be changed later.
+ */
+export const DRAFT_LABEL = "MCP/Composed";
+/**
+ * The mark's name before 0.31.0. A draft still carrying it is accepted by update_draft and comes out
+ * marked under the new name; and no label tool may add it either, for as long as it is honoured.
+ */
+export const LEGACY_DRAFT_LABEL = "MCP/Drafts";
+/** Every name that marks a draft as mailwarden's, lower-cased for comparison. */
+export const DRAFT_MARKS: readonly string[] = [DRAFT_LABEL, LEGACY_DRAFT_LABEL].map((l) => l.toLowerCase());
 
 /** Upper bounds: a draft is a message a person reads before sending, not a bulk payload. */
 export const MAX_RECIPIENTS = 50;

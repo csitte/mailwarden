@@ -457,8 +457,9 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   `quote: true` again. Off by default: a reply without it is what it was, plain text only.
 - **`create_draft`, new message:** omit `threadId`, pass `to` and `subject`.
 - **`update_draft`:** replaces the text of a draft `create_draft` wrote. Such drafts carry the label
-  `MCP/Drafts`; a draft without it is refused, and no label tool can add that label, so a draft you
-  wrote yourself cannot be handed to it.
+  `MCP/Composed` (`MCP/Drafts` before 0.31.0; a draft still carrying that name is accepted and comes
+  out under the new one); a draft without either is refused, and no label tool can add either
+  label, so a draft you wrote yourself cannot be handed to it.
 - **Sender** (`from`, both tools): your main address or one of the account's verified Gmail send-as
   addresses, such as a band's or a firm's; any other is refused, and a new one is added and verified in
   Gmail's settings, not here. Without `from` a new draft goes from your main address and
@@ -528,8 +529,9 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
   HTML of your own — the body is plain text; only a quote adds an HTML rendering of that same text,
   so Gmail shows it as a quote block. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
-  refused. The label `MCP/Drafts` stays on the message after you send it (seen in Gmail): the label
-  tools can remove it, and nothing else reads it on a sent mail.
+  refused. The label `MCP/Composed` stays on the message after you send it (seen in Gmail), which is
+  why it is named for what holds in both states: the label tools can remove it, and nothing else
+  reads it on a sent mail.
 
 What it leaves to you is stated plainly in [SECURITY.md](SECURITY.md) (threats 10 and 11): a draft can carry
 what an injected mail asked for — the protection is you reading it before you press Send.

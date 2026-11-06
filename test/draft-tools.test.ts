@@ -10,7 +10,7 @@ import path from "node:path";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 import { Gmail } from "../src/gmail.js";
-import { DRAFT_LABEL } from "../src/draft.js";
+import { DRAFT_LABEL, LEGACY_DRAFT_LABEL } from "../src/draft.js";
 
 vi.mock("../src/auth.js", async (orig) => ({
   ...(await orig<typeof import("../src/auth.js")>()),
@@ -24,6 +24,7 @@ afterEach(() => {
 });
 
 const MARK = { id: "Label_mark", name: DRAFT_LABEL, type: "user" };
+const LEGACY = { id: "Label_legacy", name: LEGACY_DRAFT_LABEL, type: "user" };
 
 /** A mailbox with one thread and the calls a draft makes, recording what was written. */
 function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: string[]; threadTo?: string; aliases?: string[] } = {}) {
@@ -140,6 +141,20 @@ describe("Gmail — draft calls", () => {
     expect(noLabel.ownedByMailwarden).toBe(false);
   });
 
+  it("still owns a draft marked under the name from before 0.31.0, and re-marks it under the new one", async () => {
+    const { api, calls } = draftApi({ labels: [MARK, LEGACY], draftLabels: ["DRAFT", LEGACY.id] });
+    const g = new Gmail(api as gmail_v1.Gmail);
+    expect((await g.getDraft("r1")).ownedByMailwarden).toBe(true);
+    await g.updateDraft("r1", "x", "t1");
+    expect(calls.batch).toEqual([{ ids: ["dm2"], addLabelIds: ["Label_mark"] }]);
+    expect(calls.labelCreates).toBe(0);
+  });
+
+  it("the mark is MCP/Composed, and the old name is MCP/Drafts", () => {
+    expect(DRAFT_LABEL).toBe("MCP/Composed");
+    expect(LEGACY_DRAFT_LABEL).toBe("MCP/Drafts");
+  });
+
   it("answers the newest message that is not a draft, decoding its subject", async () => {
     const { messageId, source } = await new Gmail(draftApi().api).replySource("t1");
     expect(messageId).toBe("m1");
@@ -149,8 +164,11 @@ describe("Gmail — draft calls", () => {
 });
 
 describe("the draft mark is out of reach of every label tool", () => {
-  it.each([[DRAFT_LABEL], ["mcp/drafts"], [" MCP/Drafts "], ["Label_mark"]])("refuses to add %j", async (label) => {
-    const { api } = draftApi();
+  it.each([
+    [DRAFT_LABEL], ["mcp/composed"], [" MCP/Composed "], ["Label_mark"],
+    [LEGACY_DRAFT_LABEL], ["mcp/drafts"], [" MCP/Drafts "], ["Label_legacy"],
+  ])("refuses to add %j", async (label) => {
+    const { api } = draftApi({ labels: [MARK, LEGACY] });
     await expect(new Gmail(api as gmail_v1.Gmail).resolveLabelIds([label], [])).rejects.toThrow(/marks the drafts mailwarden wrote/);
   });
 
@@ -160,6 +178,11 @@ describe("the draft mark is out of reach of every label tool", () => {
     expect(await g.resolveLabelIds(["STARRED", "Label_7"], [DRAFT_LABEL])).toEqual({
       addLabelIds: ["STARRED", "Label_7"],
       removeLabelIds: ["Label_mark"],
+    });
+    const both = new Gmail(draftApi({ labels: [MARK, LEGACY] }).api as gmail_v1.Gmail);
+    expect(await both.resolveLabelIds([], [LEGACY_DRAFT_LABEL, DRAFT_LABEL])).toEqual({
+      addLabelIds: [],
+      removeLabelIds: ["Label_legacy", "Label_mark"],
     });
   });
 });

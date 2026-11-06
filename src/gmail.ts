@@ -6,7 +6,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { deriveSignals, mailboxOf, type Signal } from "./signals.js";
 import { decodeRfc2047 } from "./rfc2047.js";
-import { DRAFT_LABEL, type ReplySource } from "./draft.js";
+import { DRAFT_LABEL, DRAFT_MARKS, LEGACY_DRAFT_LABEL, type ReplySource } from "./draft.js";
 import { inAttachDir } from "./attach.js";
 import { decodeCharset } from "./charset.js";
 
@@ -580,8 +580,8 @@ function headerValue(headers: gmail_v1.Schema$MessagePartHeader[] | undefined, n
 function reservedMark(): ToolError {
   return new ToolError(
     "forbidden_operation",
-    `${DRAFT_LABEL} marks the drafts mailwarden wrote and is set only by create_draft and update_draft. ` +
-      "No label tool may add it; nothing was changed.",
+    `${DRAFT_LABEL} marks the drafts mailwarden wrote (as ${LEGACY_DRAFT_LABEL} did before 0.31.0) and is set only by ` +
+      "create_draft and update_draft. No label tool may add either; nothing was changed.",
   );
 }
 
@@ -1395,15 +1395,17 @@ export class Gmail {
     }
 
     // The draft mark is what lets update_draft overwrite a draft, so no label tool may set it:
-    // a prompt-injected "label that draft MCP/Drafts" would otherwise hand a draft the user wrote
-    // to the next update. By name here; by id below, once the id is known.
-    const markKey = DRAFT_LABEL.toLowerCase();
-    if (add.some((s) => s.trim().toLowerCase() === markKey)) throw reservedMark();
+    // a prompt-injected "label that draft MCP/Composed" would otherwise hand a draft the user wrote
+    // to the next update. Both names, the current and the one honoured from before 0.31.0; by name
+    // here, by id below, once the ids are known.
+    if (add.some((s) => DRAFT_MARKS.includes(s.trim().toLowerCase()))) throw reservedMark();
     if (!needsLookup && add.some((s) => /^Label_/.test(s))) {
       for (const l of await this.listLabels()) byName.set(l.name.toLowerCase(), l.id);
     }
-    const markId = byName.get(markKey);
-    if (markId && add.includes(markId)) throw reservedMark();
+    for (const key of DRAFT_MARKS) {
+      const markId = byName.get(key);
+      if (markId && add.includes(markId)) throw reservedMark();
+    }
 
     const addLabelIds: string[] = [];
     for (const s of add) {
@@ -1983,14 +1985,17 @@ export class Gmail {
       this.listLabels(),
     ]);
     const m = res.data.message ?? {};
-    const mark = labels.find((l) => l.name.toLowerCase() === DRAFT_LABEL.toLowerCase())?.id;
+    // The current mark or the one from before 0.31.0: a draft saved under the old name stays
+    // mailwarden's, and the next update marks it under the new one (Gmail drops user labels on
+    // drafts.update, markDraft sets the current name).
+    const marks = labels.filter((l) => DRAFT_MARKS.includes(l.name.toLowerCase())).map((l) => l.id);
     const labelIds = m.labelIds ?? [];
     const h = (name: string) => headerValue(m.payload?.headers, name);
     return {
       draftId: res.data.id ?? draftId,
       messageId: m.id ?? "",
       threadId: m.threadId ?? "",
-      ownedByMailwarden: mark !== undefined && labelIds.includes(mark),
+      ownedByMailwarden: marks.some((id) => labelIds.includes(id)),
       trashed: labelIds.includes("TRASH"),
       from: h("From"),
       to: h("To"),

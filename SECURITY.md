@@ -376,9 +376,10 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
   before a byte is written, recipients are re-emitted as bare, validated addresses rather than copied
   from the thread, and the body is base64-encoded — so neither a subject nor a body nor a hostile
   `From` can add a `Bcc:` line that the confirmation would not have shown.
-- **Only its own drafts.** `update_draft` overwrites only drafts carrying the label `MCP/Drafts`, which
-  only the draft tools set; every label tool refuses to add it, by name or by id, so an injected
-  "label that draft" cannot hand one of the user's own drafts to an overwrite.
+- **Only its own drafts.** `update_draft` overwrites only drafts carrying the label `MCP/Composed`
+  (or `MCP/Drafts`, its name before 0.31.0, still honoured), which only the draft tools set; every
+  label tool refuses to add either, by name or by id, so an injected "label that draft" cannot hand
+  one of the user's own drafts to an overwrite.
 - **What it does not defend against.** A reply's recipient is the thread's sender — and the sender of
   an injected mail is exactly that. (Files attached from the disk are the subject of threat 11.) A reply within the thread is therefore not asked about unless
   `MAILWARDEN_CONFIRM` says so, and its text can contain whatever the model was steered into

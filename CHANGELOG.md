@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **The draft mark is now `MCP/Composed`, not `MCP/Drafts`.** Gmail keeps user labels when a draft
+  becomes the sent message, so the mark stays on the mail after you send it (seen 6 Nov 2026 in two
+  mailboxes), and a sent mail labelled "Drafts" read as wrong; the new name says what holds in both
+  states, that mailwarden composed it, which is also useful: the mailbox shows which sent mail a
+  session pre-wrote. `create_draft` sets the new label; `update_draft` accepts a draft still carrying
+  `MCP/Drafts` and marks it under the new name; no label tool may add either name, by name or by id.
+  Asked for by Chris after the first drafts in a business mailbox (Bridge thread `582`, the
+  gmail-csitte deployment); a deployment that already labelled its sent mail by hand needs nothing
+  changed, the server finds the label by name.
+
 ## [0.30.0] - 2026-11-06
 
 ### Added
