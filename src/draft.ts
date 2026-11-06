@@ -452,7 +452,9 @@ export function quoteLines(text: string): string[] {
     .replace(/\r\n?/g, "\n")
     .replace(/\[cid:[^\]\n]{1,300}\]/gi, "")
     .split("\n")
-    .map((l) => l.replace(/[ \t]+$/, ""));
+    // Trailing whitespace of every kind, NBSP included: the same rule that decides which lines
+    // around the text are empty.
+    .map((l) => l.replace(/\s+$/, ""));
   while (lines.length && !lines[0].trim()) lines.shift();
   while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
   return lines;
@@ -482,20 +484,21 @@ const htmlLines = (lines: readonly string[]) => lines.map(escapeHtml).join("<br>
  * The reply as HTML: the body, then the quote in the markup Gmail writes itself (`gmail_quote`,
  * `gmail_attr`, the `blockquote` with Gmail's border). Gmail's editor and the reader's view then
  * show it as a quote block, the way Gmail's own replies look. What the markup does NOT do is make
- * Gmail fold the quote behind "...": Gmail folds only text that repeats an earlier message of the
- * thread, whatever the markup, so a quote folds where its lines match Gmail's own rendering of the
- * quoted mail and stays open where they do not (two sent-and-received tests, 6 Nov 2026: a text
- * quote and this HTML quote of the same Outlook mail both folded from the signature on). Full
- * folding would need the quoted mail's own HTML, images included, which is exactly what is kept
- * out: everything in the HTML is the text of the plain part, escaped — no markup, image, link or
- * style of the quoted mail is carried over, so the two parts show the same.
+ * Gmail fold the quote behind "...": in two sent-and-received tests (6 Nov 2026, a text quote and
+ * this HTML quote of the same Outlook mail) Gmail folded only the lines that repeated an earlier
+ * message of the thread, both times from the signature on, whatever the markup. Quoting the mail's
+ * own HTML, images included, might fold more; it is exactly what is kept out: everything in the
+ * HTML is the text of the plain part, escaped — no markup, image, link or style of the quoted mail
+ * is carried over, so the two parts show the same. `white-space: pre-wrap` keeps runs of spaces
+ * and indentation as the text part has them (an Outlook table in a quote), where HTML would
+ * otherwise collapse them.
  */
 export function quoteHtml(body: string, attribution: string, lines: readonly string[]): string {
   return (
     `<div dir="auto">${htmlLines(body.replace(/\r\n?/g, "\n").split("\n"))}</div><br>` +
     `<div class="gmail_quote gmail_quote_container">` +
     `<div dir="auto" class="gmail_attr">${escapeHtml(attribution)}<br></div>` +
-    `<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">` +
+    `<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex;white-space:pre-wrap">` +
     `${htmlLines(lines)}</blockquote></div>`
   );
 }

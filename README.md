@@ -441,13 +441,14 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   <ann@example.org> wrote:" and the message. The draft then carries the content twice, as
   `multipart/alternative`: as plain text with every line prefixed `> `, and as HTML in the markup
   Gmail itself writes for a quote (`gmail_quote`), so Gmail's editor and the reader see a quote
-  block like one of Gmail's own. What the markup does not do is fold the quote behind "...": Gmail
-  folds only text that repeats an earlier mail of the thread, so a quote folds where its lines
-  match Gmail's own rendering of that mail and stays open where they do not — an Outlook mail
-  folded from its signature on (sent and received in Gmail). Full folding would need the quoted
-  mail's own HTML, images included, which is exactly what is kept out: the HTML holds nothing but
-  that text, escaped — no markup, image, link or style of the quoted mail is carried over. The
-  line names the sender as the mail's `From` does, and its language and time
+  block like one of Gmail's own. What the markup does not do is fold the quote behind "...": in
+  two tests (sent and received in Gmail, a text quote and the HTML quote of the same Outlook mail)
+  Gmail folded only the lines that repeated an earlier mail of the thread, both times from the
+  signature on, so a quote may stay partly open. Quoting the mail's own HTML, images included,
+  might fold more; it is exactly what is kept out: the HTML holds nothing but that text, escaped —
+  no markup, image, link or style of the quoted mail is carried over. Runs of spaces and
+  indentation stay as the text has them. The line names the sender as the mail's `From` does, and
+  its language and time
   come from the computer mailwarden runs on (German there gives "Am Do., 5. Nov. 2026 um 09:56 Uhr
   schrieb …"; any language other than German and English gets the English wording). A mail with
   only HTML is reduced to text first; Outlook's placeholders for inline images (`[cid:…]`) are left

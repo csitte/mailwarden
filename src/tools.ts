@@ -1895,7 +1895,7 @@ const FROM_NOTE =
   "The result always names `from`; for a reply to a mail sent to one of the aliases it offers that alias as `suggestedFrom` — pass it as `from` only when the user wants it. ";
 
 const QUOTE_NOTE =
-  "QUOTE (optional, replies only): quote: true puts the answered message below the body, as a mail client does — a line like \"On <date> <sender> wrote:\" and the message, as plain text with every line prefixed \"> \" and the same as HTML in Gmail's own quote markup, so Gmail shows it as a quote block (it folds only text that repeats an earlier mail of the thread, so a quote may stay partly open); " +
+  "QUOTE (optional, replies only): quote: true puts the answered message below the body, as a mail client does — a line like \"On <date> <sender> wrote:\" and the message, as plain text with every line prefixed \"> \" and the same as HTML in Gmail's own quote markup, so Gmail shows it as a quote block (Gmail folds a quote only where its lines repeat an earlier mail of the thread, so it may stay partly open); " +
   "the line is in the language and time zone of the computer mailwarden runs on, and names the sender as the mail's From does. Do not type a quote into body yourself. " +
   "If the message has no readable text the draft is saved without the quote, and the result says so (quoted: false). ";
 
@@ -1970,7 +1970,7 @@ function registerDraftTools(
         "Recipients come from that message — Reply-To, else From; the original To when the message is the user's own; replyAll adds the other To/Cc. " +
         "Subject defaults to \"Re: <subject>\", In-Reply-To/References are set so it threads. cc/bcc add recipients; `to` is not accepted for a reply. " +
         "NEW MESSAGE: omit threadId, pass to and subject. " +
-        "Plain text body only. Addresses are saved bare (no display names). " +
+        "Plain text body only (a quote adds an HTML rendering of that same text, nothing else). Addresses are saved bare (no display names). " +
         QUOTE_NOTE +
         ATTACH_NOTE +
         FROM_NOTE +

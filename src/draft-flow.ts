@@ -19,6 +19,7 @@ import {
   buildMime,
   checkAttachments,
   checkFilename,
+  checkContent,
   checkTotalBytes,
   draftDialog,
   isMimeType,
@@ -570,6 +571,9 @@ async function quoteFor(
   which: { messageId?: string; rfcMessageId?: string },
   body: string,
 ): Promise<{ body: string; html?: string; quotes?: string; reason?: string }> {
+  // A body over the limit fails in buildMime whatever the quote does; said here, before a
+  // threads.get is spent on it and before "too long to quote" would blame the quoted mail.
+  checkContent("", body);
   const q = await gmail.quoteSource(threadId, which);
   if (!q) return { body, reason: "the message this draft answers is no longer in the thread" };
   const text = q.plaintextBody.trim() ? q.plaintextBody : htmlToText(q.htmlBody);

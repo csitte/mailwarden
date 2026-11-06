@@ -75,7 +75,7 @@ describe("quotedText", () => {
   });
 });
 
-describe("quoteHtml — the quote in Gmail's own markup, so Gmail folds it", () => {
+describe("quoteHtml — the quote in Gmail's own markup, so Gmail shows it as a quote block", () => {
   const ATTR = "On Thu, 5 Nov 2026 at 8:56 Jürgen Müller <jm@example.com> wrote:";
 
   it("wraps the body, the attribution line and the quoted lines the way Gmail does", () => {
@@ -84,7 +84,7 @@ describe("quoteHtml — the quote in Gmail's own markup, so Gmail folds it", () 
       '<div dir="auto">Thanks!<br>See you.</div><br>' +
         '<div class="gmail_quote gmail_quote_container">' +
         '<div dir="auto" class="gmail_attr">On Thu, 5 Nov 2026 at 8:56 Jürgen Müller &lt;jm@example.com&gt; wrote:<br></div>' +
-        '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">' +
+        '<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex;white-space:pre-wrap">' +
         "Hello again,<br><br>&gt; earlier</blockquote></div>",
     );
   });
@@ -105,6 +105,12 @@ describe("quoteHtml — the quote in Gmail's own markup, so Gmail folds it", () 
 
   it("quoteLines: the cleaned lines the text quote and the HTML quote share", () => {
     expect(quoteLines(`${CR}${LF}Hi  ${CR}${LF}[cid:image001.png@x]${CR}${LF}> old${CR}${LF}${CR}${LF}`)).toEqual(["Hi", "", "> old"]);
+  });
+
+  it("quoteLines: one whitespace rule for line ends and empty lines, NBSP included (round 1, 6 Nov 2026)", () => {
+    const NBSP = String.fromCharCode(0xa0);
+    expect(quoteLines(`a${NBSP}${LF}${NBSP}`)).toEqual(["a"]);
+    expect(quoteLines(`a${LF}${NBSP}${LF}b`)).toEqual(["a", "", "b"]);
   });
 });
 
@@ -253,6 +259,15 @@ describe("saveReplyDraft — quote", () => {
     await saveReplyDraft(gmail, { threadId: "t1", body: "x", quote: true }, "off", vi.fn(async () => false));
     expect(bodyOf(created[0])).toMatch(/\n> Hallo\n> A B\n$/);
     expect(htmlOf(created[0])).toMatch(/<blockquote class="gmail_quote" [^>]*>Hallo<br>A B<\/blockquote>/);
+  });
+
+  it("refuses a body over the limit before the thread is read for the quote", async () => {
+    const { gmail, created, quoteSource } = fakeGmail();
+    const err = await saveReplyDraft(gmail, { threadId: "t1", body: "x".repeat(MAX_BODY_CHARS + 1), quote: true }, "off", vi.fn(async () => false)).catch((e) => e);
+    expect(err).toBeInstanceOf(ToolError);
+    expect(err.message).toMatch(/body is longer than/);
+    expect(quoteSource).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
   });
 
   it("saves the reply without a quote, and says why, when the message has no text", async () => {

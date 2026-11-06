@@ -15,19 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   plain text with every line prefixed `> `, and the same as HTML in Gmail's own quote markup
   (`gmail_quote`), so Gmail's editor and the reader see a quote block like Gmail's own. It does not
   make Gmail fold the quote behind "...": two sent-and-received tests (6 Nov 2026, Gmail web, a
-  text quote and the HTML quote of the same Outlook mail) showed Gmail folding only text that
-  repeats an earlier mail of the thread, whatever the markup — both folded from the signature on
-  and stayed open above it. Full folding would need the quoted mail's own HTML, images included,
-  which is kept out on purpose (decided 6 Nov 2026): the HTML is that text escaped, nothing of the
-  quoted mail's markup, images, links or styles. The line
+  text quote and the HTML quote of the same Outlook mail) showed Gmail folding only the lines
+  that repeated an earlier mail of the thread, whatever the markup — both folded from the
+  signature on and stayed open above it. Quoting the mail's own HTML, images included, might fold
+  more; it is kept out on purpose (decided 6 Nov 2026): the HTML is that text escaped, nothing of
+  the quoted mail's markup, images, links or styles, with runs of spaces kept as the text has them
+  (`white-space: pre-wrap`). The line
   names the sender as `From` does, so a contact form stays "Name via site <noreply@…>"; its locale
   and time zone are the machine's — the account's Gmail language would need another settings
   endpoint. An HTML-only mail is reduced to text; Outlook's `[cid:…]` placeholders are dropped. A
   mail without readable text, or one too long to fit the body limit, is answered without the quote
   and the result says so (`quoted: false` and the reason in `note`). `update_draft` finds the
   answered message by the draft's `In-Reply-To`. The text comes from a second `threads.get`, in
-  `full` format, made only when a quote is asked for: no new endpoint. The dialog names the quoted
-  mail. Without `quote` a draft is what it was: plain text only. Asked for by the gmail deployment;
+  `full` format, made only when a quote is asked for: no new endpoint. When a dialog is shown, it
+  names the quoted mail. A body over the limit is refused before that read is spent. Without
+  `quote` a draft is what it was: plain text only. Asked for by the gmail deployment;
   measured read-only on real mails beforehand, then sent and received once.
 
 ### Fixed
