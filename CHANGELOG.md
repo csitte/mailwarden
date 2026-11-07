@@ -18,6 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   gmail-csitte deployment); a deployment that already labelled its sent mail by hand needs nothing
   changed, the server finds the label by name.
 
+- **`update_draft` takes the draft's `messageId` and refuses a draft changed since.** Pass the
+  `messageId` the last `create_draft` or `update_draft` returned. Every save gives a draft a new one,
+  Gmail's editor too, and Gmail keeps the `MCP/Composed` label when you edit the draft there
+  (measured 7 Nov 2026) — so before, an update overwrote your edits without a word. Now it is refused
+  with `invalid_input`, naming the current `messageId`, and nothing is written. The field is
+  required: a call without it is rejected. Found by the grok-mailwarden review of 0.25.0 (L13).
+
 ### Fixed
 - **A quote falls back to the HTML part when the text part holds nothing but Outlook's `[cid:…]`
   image placeholders.** Such a mail was answered without its quote although its HTML was readable;

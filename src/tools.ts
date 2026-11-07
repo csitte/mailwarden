@@ -2045,10 +2045,12 @@ function registerDraftTools(
         FROM_NOTE +
         "from omitted keeps the draft's sender. " +
         updateConfirmation +
-        "USE WHEN: the user wants changes to a draft you wrote (draftId from create_draft). " +
-        "SIDE EFFECTS: overwrites the draft — the previous text is not kept. Gmail gives the draft a new messageId. Nothing is sent.",
+        "messageId is required: the one the last create_draft or update_draft returned for this draft. Every save gives a draft a new messageId, Gmail's editor too, so a different one means the draft was changed since — most likely by the user in Gmail — and the update is refused with invalid_input, naming the current messageId; read the draft with get_thread and ask the user before replacing their edits. " +
+        "USE WHEN: the user wants changes to a draft you wrote (draftId and messageId from create_draft, or messageId from the last update_draft). " +
+        "SIDE EFFECTS: overwrites the draft — the previous text is not kept. Gmail gives the draft a new messageId; pass that one on the next update. Nothing is sent.",
       inputSchema: {
         draftId: z.string(),
+        messageId: z.string(),
         from: fromAddress.optional(),
         to: recipientList.optional(),
         cc: recipientList.optional(),
@@ -2061,11 +2063,11 @@ function registerDraftTools(
       outputSchema: draftOutput,
       annotations: { title: "Update draft", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ draftId, from, to, cc, bcc, subject, body, quote, attachments }) =>
+    async ({ draftId, messageId, from, to, cc, bcc, subject, body, quote, attachments }) =>
       ok(
         await reviseDraft(
           await client(),
-          { draftId, from, to, cc, bcc, subject, body, quote, attachments },
+          { draftId, messageId, from, to, cc, bcc, subject, body, quote, attachments },
           confirmMode,
           confirm,
           selfWithoutDialog,

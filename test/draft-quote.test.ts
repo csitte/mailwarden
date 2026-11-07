@@ -303,7 +303,7 @@ describe("saveReplyDraft — quote", () => {
 describe("reviseDraft — quote", () => {
   it("quotes again the message the draft answers, found by its In-Reply-To", async () => {
     const { gmail, updated, quoteSource } = fakeGmail();
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "Better text.", quote: true }, "off", vi.fn(async () => false));
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "Better text.", quote: true }, "off", vi.fn(async () => false));
     expect(quoteSource).toHaveBeenCalledWith("t1", { rfcMessageId: "<m2@example.org>" });
     expect(bodyOf(updated[0])).toMatch(/^Better text\.\n\n.*\n> Can you play on the 13th\?/);
     expect(htmlOf(updated[0])).toMatch(/^<div dir="auto">Better text\.<\/div><br><div class="gmail_quote/);
@@ -312,7 +312,7 @@ describe("reviseDraft — quote", () => {
 
   it("says so when the answered message is gone from the thread", async () => {
     const { gmail, updated } = fakeGmail({ quoteSource: async () => undefined });
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "x", quote: true }, "off", vi.fn(async () => false));
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", quote: true }, "off", vi.fn(async () => false));
     expect(bodyOf(updated[0])).toBe("x");
     expect(r).toMatchObject({ quoted: false, note: expect.stringMatching(/no longer in the thread/) });
   });
@@ -321,7 +321,7 @@ describe("reviseDraft — quote", () => {
     const { gmail, updated, quoteSource } = fakeGmail({
       getDraft: async (draftId) => ({ draftId, messageId: "dm1", threadId: "t9", ownedByMailwarden: true, trashed: false, to: "a@example.org", subject: "Hi", attachments: [] }),
     });
-    const err = await reviseDraft(gmail, { draftId: "r1", body: "x", quote: true }, "off", vi.fn(async () => true)).catch((e) => e);
+    const err = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", quote: true }, "off", vi.fn(async () => true)).catch((e) => e);
     expect(err).toBeInstanceOf(ToolError);
     expect(err.message).toMatch(/nothing to quote/);
     expect(quoteSource).not.toHaveBeenCalled();

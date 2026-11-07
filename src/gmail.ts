@@ -2001,6 +2001,8 @@ export class Gmail {
       from: h("From"),
       to: h("To"),
       cc: h("Cc"),
+      // Gmail returns a draft's Bcc header (measured 7 Nov 2026, also after an edit in Gmail), so an
+      // update that leaves bcc out keeps it.
       bcc: h("Bcc"),
       subject: decodeRfc2047(h("Subject") ?? ""),
       inReplyTo: h("In-Reply-To"),

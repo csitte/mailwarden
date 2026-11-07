@@ -255,7 +255,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
 | `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. `from` picks one of the account's send-as addresses; `quote` quotes the answered message below a reply. A new message, any address the thread did not already contain, any file from the disk and any sender other than the main address is confirmed in a client dialog; the exceptions are a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`, and every draft with `MAILWARDEN_DRAFT_CONFIRM=off` ([details](#drafts-opt-in--written-here-sent-by-you)) |
-| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused. Attachments not mentioned, and the sender, are kept; `quote` quotes the answered message again. A new address, a new file or a new alias sender is confirmed like one in `create_draft` |
+| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused, and so is one changed in Gmail since (it takes the draft's last `messageId`). Attachments not mentioned, and the sender, are kept; `quote` quotes the answered message again. A new address, a new file or a new alias sender is confirmed like one in `create_draft` |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
 alongside the same JSON as fenced text — clients never have to parse prose.
@@ -459,7 +459,10 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
 - **`update_draft`:** replaces the text of a draft `create_draft` wrote. Such drafts carry the label
   `MCP/Composed` (`MCP/Drafts` before 0.31.0; a draft still carrying that name is accepted and comes
   out under the new one); a draft without either is refused, and no label tool can add either
-  label, so a draft you wrote yourself cannot be handed to it.
+  label, so a draft you wrote yourself cannot be handed to it. It also takes the draft's
+  `messageId` from the last `create_draft` or `update_draft`: every save gives a draft a new one,
+  Gmail's editor too, and Gmail keeps the label when you edit the draft there — so a draft you
+  changed in Gmail since is refused, with its current `messageId`, instead of overwritten.
 - **Sender** (`from`, both tools): your main address or one of the account's verified Gmail send-as
   addresses, such as a band's or a firm's; any other is refused, and a new one is added and verified in
   Gmail's settings, not here. Without `from` a new draft goes from your main address and

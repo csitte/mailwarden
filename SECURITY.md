@@ -379,7 +379,11 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
 - **Only its own drafts.** `update_draft` overwrites only drafts carrying the label `MCP/Composed`
   (or `MCP/Drafts`, its name before 0.31.0, still honoured), which only the draft tools set; every
   label tool refuses to add either, by name or by id, so an injected "label that draft" cannot hand
-  one of the user's own drafts to an overwrite.
+  one of the user's own drafts to an overwrite. The label alone does not tell mailwarden's text from
+  the user's: Gmail keeps it when the user edits the draft in Gmail (measured 7 November 2026). So
+  `update_draft` also takes the `messageId` the last save returned and refuses when the draft now
+  has another one; before 0.31.0 an edit made in Gmail was overwritten without a word. This is a
+  brake, not a lock: the refusal names the current `messageId`, and a model can pass it.
 - **What it does not defend against.** A reply's recipient is the thread's sender — and the sender of
   an injected mail is exactly that. (Files attached from the disk are the subject of threat 11.) A reply within the thread is therefore not asked about unless
   `MAILWARDEN_CONFIRM` says so, and its text can contain whatever the model was steered into

@@ -449,7 +449,7 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
   it("omitted: every attachment of the draft is written again, and nothing is asked for them", async () => {
     const { gmail, updated, fetched } = fake();
     const confirm = vi.fn(async () => false);
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "Neuer Text" }, "off", confirm);
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "Neuer Text" }, "off", confirm);
     expect(confirm).toHaveBeenCalledWith("off", expect.stringContaining("old.pdf (3 bytes, already in the draft)"));
     expect(fetched).toEqual(["dm1/d-1", "dm1/d-2"]);
     expect(r.attachments.map((a) => [a.filename, a.source])).toEqual([
@@ -461,7 +461,7 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
 
   it("[] removes them all and writes a plain message", async () => {
     const { gmail, updated, fetched } = fake();
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [] }, "off", vi.fn(async () => false));
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", attachments: [] }, "off", vi.fn(async () => false));
     expect(r.attachments).toEqual([]);
     expect(fetched).toEqual([]);
     expect(updated[0].raw).not.toMatch(/multipart/);
@@ -470,7 +470,7 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
   it("a list replaces them: `kept` keeps one by name, a new file is asked about", async () => {
     const { gmail, fetched } = fake();
     const confirm = vi.fn(async () => true);
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ kept: "old.jpg" }, { path: "scan.pdf" }] }, "off", confirm, false, readFile);
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", attachments: [{ kept: "old.jpg" }, { path: "scan.pdf" }] }, "off", confirm, false, readFile);
     expect(fetched).toEqual(["dm1/d-2"]);
     expect(r.attachments.map((a) => [a.filename, a.source])).toEqual([
       ["old.jpg", "kept"],
@@ -481,7 +481,7 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
 
   it("takes an attachment from the draft's own thread for a reply draft", async () => {
     const { gmail } = fake();
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", vi.fn(async () => false));
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", vi.fn(async () => false));
     expect(r.attachments[0].source).toBe("message");
   });
 
@@ -489,13 +489,13 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
     // The gap SECURITY.md named for 0.28.0: an address already in the draft was not asked about again.
     const { gmail } = fake({ draft: { to: "ann@example.org", cc: "lawyer@example.net" } });
     const confirm = vi.fn(async () => true);
-    await reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", confirm);
+    await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", confirm);
     expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("never went to lawyer@example.net"));
   });
 
   it("refuses an unknown `kept` name and lists what the draft has", async () => {
     const { gmail, updated } = fake();
-    await expect(reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ kept: "nope" }] }, "off", vi.fn(async () => true))).rejects.toThrow(
+    await expect(reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", attachments: [{ kept: "nope" }] }, "off", vi.fn(async () => true))).rejects.toThrow(
       /no attachment named "nope"; it has: "old.pdf", "old.jpg"/,
     );
     expect(updated).toEqual([]);
@@ -504,7 +504,7 @@ describe("reviseDraft with attachments — omitted keeps, a list replaces", () =
   it("refuses an attachment from a mail for a draft of a new message", async () => {
     const { gmail } = fake({ draft: { inReplyTo: undefined, references: undefined } });
     await expect(
-      reviseDraft(gmail, { draftId: "r1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", vi.fn(async () => true)),
+      reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", attachments: [{ fromMessage: "m1", filename: "Foto.jpg" }] }, "off", vi.fn(async () => true)),
     ).rejects.toThrow(/only go into a reply/);
   });
 });

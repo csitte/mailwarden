@@ -151,6 +151,12 @@ export interface NewInput {
 
 export interface UpdateInput {
   draftId: string;
+  /**
+   * The draft's messageId as the last create_draft or update_draft returned it. Every save gives a
+   * draft a new one — Gmail's editor too — so a different one now means someone changed the draft
+   * since, most likely the user in Gmail, and the update is refused instead of overwriting that.
+   */
+  messageId: string;
   /** Omitted: the draft keeps the sender it has. */
   from?: string;
   to?: string[];
@@ -502,6 +508,17 @@ export async function reviseDraft(
   }
   if (before.trashed) {
     throw new ToolError("invalid_input", `Draft ${input.draftId} is in the trash. Nothing was changed.`);
+  }
+  // Edited in Gmail since mailwarden last saved it: the mark stays on (measured 7 Nov 2026), so
+  // without this the update would replace the user's edits without a word.
+  if (before.messageId !== input.messageId) {
+    throw new ToolError(
+      "invalid_input",
+      `Draft ${input.draftId} was changed since messageId ${input.messageId} — its messageId is now ${before.messageId}, ` +
+        "most likely because the user edited it in Gmail. Nothing was changed. Read it with get_thread " +
+        `(threadId ${before.threadId}) and ask the user before replacing their edits; to replace them, call ` +
+        `update_draft again with messageId ${before.messageId}.`,
+    );
   }
   const old: Recipients = {
     to: normalizeLenient(before.to),

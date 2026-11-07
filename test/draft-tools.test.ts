@@ -336,8 +336,22 @@ describe("create_draft / update_draft over MCP", () => {
     const { api, calls } = draftApi({ draftLabels: ["DRAFT"] });
     (getAuth as Mock).mockResolvedValue(api);
     const { client } = await connect({ action: "accept", content: { confirm: true } });
-    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", body: "x" } });
+    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm1", body: "x" } });
     expect(text(res)).toMatch(/forbidden_operation/);
+    expect(calls.updated).toEqual([]);
+  });
+
+  it("update_draft requires the messageId, and refuses a stale one before writing", async () => {
+    vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
+    const { api, calls } = draftApi();
+    (getAuth as Mock).mockResolvedValue(api);
+    const { client } = await connect({ action: "accept", content: { confirm: true } });
+    const missing: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", body: "x" } });
+    expect(missing.isError).toBe(true);
+    expect(text(missing)).toMatch(/messageId/);
+    const stale: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm0", body: "x" } });
+    expect(text(stale)).toMatch(/invalid_input/);
+    expect(text(stale)).toMatch(/messageId is now dm1/);
     expect(calls.updated).toEqual([]);
   });
 
@@ -346,7 +360,7 @@ describe("create_draft / update_draft over MCP", () => {
     const { api, calls } = draftApi();
     (getAuth as Mock).mockResolvedValue(api);
     const { client } = await connect();
-    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", body: "Neu" } });
+    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm1", body: "Neu" } });
     expect(res.isError).toBeFalsy();
     expect(calls.updated[0].requestBody.message.threadId).toBe("t1");
     expect(res.structuredContent).toMatchObject({ kind: "reply", messageId: "dm2", marked: true, sent: false });
@@ -482,17 +496,17 @@ describe("MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG — drafts to the owner's own add
 
   it("update_draft: adding only the owner is saved unasked when on, refused when off, refused with a stranger", async () => {
     const on = await setup("1", { action: "decline" });
-    const saved: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["Me@Example.com"], body: "Neu" } });
+    const saved: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm1", cc: ["Me@Example.com"], body: "Neu" } });
     expect(saved.isError).toBeFalsy();
     expect(on.asked).toEqual([]);
     expect(on.calls.updated).toHaveLength(1);
-    const stranger: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["me@example.com", "zoe@example.com"], body: "Neu" } });
+    const stranger: any = await on.client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm1", cc: ["me@example.com", "zoe@example.com"], body: "Neu" } });
     expect(text(stranger)).toMatch(/declined_by_user/);
     expect(on.calls.updated).toHaveLength(1);
     vi.unstubAllEnvs();
     vi.clearAllMocks();
     const off = await setup(undefined);
-    const refused: any = await off.client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["me@example.com"], body: "Neu" } });
+    const refused: any = await off.client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm1", cc: ["me@example.com"], body: "Neu" } });
     expect(text(refused)).toMatch(/declined_by_user/);
     expect(off.calls.updated).toEqual([]);
   });
@@ -552,7 +566,7 @@ describe("MAILWARDEN_DRAFT_CONFIRM=off — the operator's review in Gmail is the
 
   it("update_draft adds a stranger unasked", async () => {
     const { client, calls, asked } = await setup({ action: "decline" });
-    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", cc: ["zoe@example.com"], body: "Neu" } });
+    const res: any = await client.callTool({ name: "update_draft", arguments: { draftId: "r1", messageId: "dm1", cc: ["zoe@example.com"], body: "Neu" } });
     expect(res.isError).toBeFalsy();
     expect(asked).toEqual([]);
     expect(calls.updated).toHaveLength(1);

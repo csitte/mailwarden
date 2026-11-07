@@ -543,20 +543,34 @@ describe("reviseDraft", () => {
   it("refuses a draft mailwarden did not write, without asking or writing", async () => {
     const { gmail, updated } = fakeGmail({ draft: { ownedByMailwarden: false } });
     const confirm = vi.fn(async () => true);
-    await expect(reviseDraft(gmail, { draftId: "r9", body: "x" }, "off", confirm)).rejects.toThrow(/not written by mailwarden/);
+    await expect(reviseDraft(gmail, { draftId: "r9", messageId: "dm1", body: "x" }, "off", confirm)).rejects.toThrow(/not written by mailwarden/);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(updated).toEqual([]);
+  });
+
+  // L13 (Grok round 5): Gmail's editor keeps the mark on a draft it saves (measured 7 Nov 2026), so
+  // the messageId is what tells the user's edit apart from mailwarden's last save.
+  it("refuses a draft changed since the given messageId, naming the current one, without asking or writing", async () => {
+    const { gmail, updated } = fakeGmail();
+    const confirm = vi.fn(async () => true);
+    const err = await reviseDraft(gmail, { draftId: "r1", messageId: "dm0", body: "x" }, "off", confirm).catch((e) => e);
+    expect(err).toMatchObject({ code: "invalid_input" });
+    expect(err.message).toMatch(/changed since messageId dm0/);
+    expect(err.message).toMatch(/messageId dm1\./);
+    expect(err.message).toMatch(/get_thread \(threadId t1\)/);
     expect(confirm).not.toHaveBeenCalled();
     expect(updated).toEqual([]);
   });
 
   it("refuses a trashed draft", async () => {
     const { gmail } = fakeGmail({ draft: { trashed: true } });
-    await expect(reviseDraft(gmail, { draftId: "r1", body: "x" }, "off", vi.fn(async () => true))).rejects.toThrow(/trash/);
+    await expect(reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x" }, "off", vi.fn(async () => true))).rejects.toThrow(/trash/);
   });
 
   it("keeps recipients, subject, threading and the thread of a reply draft", async () => {
     const { gmail, updated } = fakeGmail();
     const confirm = vi.fn(async () => false);
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "New text" }, "off", confirm);
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "New text" }, "off", confirm);
     expect(confirm).toHaveBeenCalledWith("off", expect.any(String));
     expect(updated[0].threadId).toBe("t1");
     const { head, body } = decodeRaw(updated[0].raw);
@@ -569,7 +583,7 @@ describe("reviseDraft", () => {
 
   it("does not pass a thread for a draft of a new message", async () => {
     const { gmail, updated } = fakeGmail({ draft: { inReplyTo: undefined, references: undefined, subject: "Hi" } });
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "x" }, "off", vi.fn(async () => false));
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x" }, "off", vi.fn(async () => false));
     expect(updated[0].threadId).toBeUndefined();
     expect(r.kind).toBe("new");
   });
@@ -577,10 +591,10 @@ describe("reviseDraft", () => {
   it("forces a confirmation for an address the draft did not have; dropping one does not", async () => {
     const { gmail } = fakeGmail({ draft: { to: "ann@example.org, bob@example.net" } });
     const add = vi.fn(async () => true);
-    await reviseDraft(gmail, { draftId: "r1", body: "x", cc: ["new@example.net"] }, "off", add);
+    await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", cc: ["new@example.net"] }, "off", add);
     expect(add).toHaveBeenCalledWith("require", expect.stringContaining("new@example.net (new)"));
     const drop = vi.fn(async () => false);
-    await reviseDraft(gmail, { draftId: "r1", body: "x", to: ["bob@example.net"] }, "off", drop);
+    await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x", to: ["bob@example.net"] }, "off", drop);
     expect(drop).toHaveBeenCalledWith("off", expect.any(String));
   });
 
@@ -588,7 +602,7 @@ describe("reviseDraft", () => {
     const { gmail } = fakeGmail({
       updateDraft: async (draftId) => ({ draftId, messageId: "dm3", threadId: "t1", marked: false }),
     });
-    const r = await reviseDraft(gmail, { draftId: "r1", body: "x" }, "off", vi.fn(async () => false));
+    const r = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x" }, "off", vi.fn(async () => false));
     expect(r.marked).toBe(false);
     expect(r.note).toMatch(/update_draft will refuse/);
   });
@@ -715,25 +729,25 @@ describe("from", () => {
   it("update_draft keeps the alias a draft has without asking again, checks it is still allowed, and asks for a new one", async () => {
     const kept = withAliases({ draft: { from: `Band <${BAND}>` } });
     const confirm = vi.fn(async () => true);
-    const r = await reviseDraft(kept.gmail, { draftId: "r1", body: "y" }, "off", confirm);
+    const r = await reviseDraft(kept.gmail, { draftId: "r1", messageId: "dm1", body: "y" }, "off", confirm);
     expect(confirm).toHaveBeenCalledWith("off", expect.stringContaining(`From: ${BAND}`));
     expect(decodeRaw(kept.updated[0].raw).head).toMatch(new RegExp(`^From: ${BAND}\r?$`, "m"));
     expect(r.from).toBe(BAND);
 
     const fresh = withAliases({ draft: { from: "Me Myself <me@example.com>" } });
     const confirmFresh = vi.fn(async () => true);
-    await reviseDraft(fresh.gmail, { draftId: "r1", body: "y", from: BAND }, "off", confirmFresh);
+    await reviseDraft(fresh.gmail, { draftId: "r1", messageId: "dm1", body: "y", from: BAND }, "off", confirmFresh);
     expect(confirmFresh).toHaveBeenCalledWith("require", expect.any(String));
 
     const back = withAliases({ draft: { from: BAND } });
     const confirmBack = vi.fn(async () => true);
-    const rb = await reviseDraft(back.gmail, { draftId: "r1", body: "y", from: "me@example.com" }, "off", confirmBack);
+    const rb = await reviseDraft(back.gmail, { draftId: "r1", messageId: "dm1", body: "y", from: "me@example.com" }, "off", confirmBack);
     expect(confirmBack).toHaveBeenCalledWith("off", expect.any(String));
     expect(decodeRaw(back.updated[0].raw).head).not.toMatch(/^From:/m);
     expect(rb.from).toBe("me@example.com");
 
     const gone = fakeGmail({ draft: { from: BAND } });
-    await expect(reviseDraft(gone.gmail, { draftId: "r1", body: "y" }, "off", vi.fn(async () => true))).rejects.toThrow(
+    await expect(reviseDraft(gone.gmail, { draftId: "r1", messageId: "dm1", body: "y" }, "off", vi.fn(async () => true))).rejects.toThrow(
       /not an address this account may send from/,
     );
     expect(gone.updated).toEqual([]);
