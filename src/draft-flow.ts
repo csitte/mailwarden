@@ -511,15 +511,7 @@ export async function reviseDraft(
   }
   // Edited in Gmail since mailwarden last saved it: the mark stays on (measured 7 Nov 2026), so
   // without this the update would replace the user's edits without a word.
-  if (before.messageId !== input.messageId) {
-    throw new ToolError(
-      "invalid_input",
-      `Draft ${input.draftId} was changed since messageId ${input.messageId} — its messageId is now ${before.messageId}, ` +
-        "most likely because the user edited it in Gmail. Nothing was changed. Read it with get_thread " +
-        `(threadId ${before.threadId}) and ask the user before replacing their edits; to replace them, call ` +
-        `update_draft again with messageId ${before.messageId}.`,
-    );
-  }
+  unchangedSince(before, input);
   const old: Recipients = {
     to: normalizeLenient(before.to),
     cc: normalizeLenient(before.cc),
@@ -570,6 +562,10 @@ export async function reviseDraft(
   const widens = reachesNew(attachments) || (from !== undefined && from !== had);
   const self = await selfOnly(selfWithoutDialog, unknown, async () => [main], recipients, widens);
   const confirmedByUser = await confirm(modeFor(configured, unknown, self, widens), draftDialog("update", content, unknown));
+  // Checked again right before the write: the user may have edited the draft in Gmail while the
+  // dialog was open, or while attachments and the quote were fetched (Grok review of 0.31.0, L15).
+  // What remains is the moment between this read and the write.
+  unchangedSince(await gmail.getDraft(input.draftId), input);
   // A draft that answers a thread is passed its thread again — without it Gmail moves the
   // updated draft into a thread of its own (measured 29 Oct 2026).
   const ref = await gmail.updateDraft(input.draftId, raw, threading.inReplyTo ? before.threadId : undefined);
@@ -632,6 +628,18 @@ function normalizeLenient(value: string | undefined): string[] {
 }
 
 /** The threading a saved draft already carries, passed through the same msg-id filter as a reply. */
+/** Refuses a draft whose messageId is no longer the one the caller last saw: someone changed it since. */
+function unchangedSince(now: DraftInfo, input: UpdateInput): void {
+  if (now.messageId === input.messageId) return;
+  throw new ToolError(
+    "invalid_input",
+    `Draft ${input.draftId} was changed since messageId ${input.messageId} — its messageId is now ${now.messageId}, ` +
+      "most likely because the user edited it in Gmail. Nothing was changed. Read it with get_thread " +
+      `(threadId ${now.threadId}) and ask the user before replacing their edits; to replace them, call ` +
+      `update_draft again with messageId ${now.messageId}.`,
+  );
+}
+
 function threadingOf(d: DraftInfo): { inReplyTo?: string; references?: string } {
   if (!d.inReplyTo) return {};
   return replyThreading({ messageId: d.inReplyTo, references: d.references });

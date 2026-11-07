@@ -562,6 +562,19 @@ describe("reviseDraft", () => {
     expect(updated).toEqual([]);
   });
 
+  it("checks the messageId again right before the write: an edit while the dialog was open is not overwritten", async () => {
+    const { gmail, updated } = fakeGmail();
+    const first = gmail.getDraft;
+    let reads = 0;
+    gmail.getDraft = async (id) => ({ ...(await first(id)), ...(++reads > 1 ? { messageId: "dm9" } : {}) });
+    const confirm = vi.fn(async () => true);
+    const err = await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x" }, "ask", confirm).catch((e) => e);
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(err).toMatchObject({ code: "invalid_input" });
+    expect(err.message).toMatch(/messageId is now dm9/);
+    expect(updated).toEqual([]);
+  });
+
   it("refuses a trashed draft", async () => {
     const { gmail } = fakeGmail({ draft: { trashed: true } });
     await expect(reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: "x" }, "off", vi.fn(async () => true))).rejects.toThrow(/trash/);

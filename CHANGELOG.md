@@ -22,8 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `messageId` the last `create_draft` or `update_draft` returned. Every save gives a draft a new one,
   Gmail's editor too, and Gmail keeps the `MCP/Composed` label when you edit the draft there
   (measured 7 Nov 2026) — so before, an update overwrote your edits without a word. Now it is refused
-  with `invalid_input`, naming the current `messageId`, and nothing is written. The field is
-  required: a call without it is rejected. Found by the grok-mailwarden review of 0.25.0 (L13).
+  with `invalid_input`, naming the current `messageId`, and nothing is written. The check runs
+  twice, before the dialog and again right before the write, so an edit made while the dialog was
+  open is not overwritten either. The field is required: a call without it is rejected. Found by
+  the grok-mailwarden review of 0.25.0 (L13); the second check by its review of this release (L15).
 
 ### Fixed
 - **A quote falls back to the HTML part when the text part holds nothing but Outlook's `[cid:…]`

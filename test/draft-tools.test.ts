@@ -42,6 +42,7 @@ function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: 
             messages: [
               {
                 id: "m1",
+                threadId: "t1",
                 labelIds: ["INBOX"],
                 payload: {
                   headers: [
@@ -52,7 +53,7 @@ function draftApi(opts: { labels?: unknown[]; failMark?: boolean; draftLabels?: 
                   ],
                 },
               },
-              { id: "d0", labelIds: ["DRAFT"], payload: { headers: [{ name: "From", value: "me@example.com" }] } },
+              { id: "d0", threadId: "t1", labelIds: ["DRAFT"], payload: { headers: [{ name: "From", value: "me@example.com" }] } },
             ],
           },
         }),
@@ -162,6 +163,14 @@ describe("Gmail — draft calls", () => {
     await expect(new Gmail(draftApi().api).replySource("t1", "nope")).rejects.toThrow(/not part of thread/);
     // Grok review N34: a draft named by id is no answered message either.
     await expect(new Gmail(draftApi().api).replySource("t1", "d0")).rejects.toThrow(/or it is a draft/);
+  });
+
+  // Grok review of 0.31.0, N37: the quote source leaves a draft out the same way, also by id.
+  it("never quotes a draft, also when it is named by id", async () => {
+    const g = new Gmail(draftApi().api);
+    expect(await g.quoteSource("t1", { messageId: "d0" })).toBeUndefined();
+    expect(await g.quoteSource("t1", { messageId: "m1" })).toMatchObject({ address: "ann@example.org" });
+    expect(await g.quoteSource("t1", {})).toMatchObject({ address: "ann@example.org" });
   });
 });
 
