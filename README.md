@@ -254,8 +254,8 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `preview_filter` | Check a filter before creating it: how many messages its criteria match today (`currentMatches`, from the same index an `applyToExisting` sweep would use), which existing filters have exactly the same criteria (`sameCriteria`) and which share a `from`/`to`/`subject`/`query` value with it (`overlapping`, with the shared fields named), which `addLabels` names would be created, and whether the action trashes every future match. Read-only; same validation as `create_filter` |
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
-| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. `from` picks one of the account's send-as addresses; `quote` quotes the answered message below a reply. A new message, any address the thread did not already contain, any file from the disk and any sender other than the main address is confirmed in a client dialog; the exceptions are a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`, and every draft with `MAILWARDEN_DRAFT_CONFIRM=off` ([details](#drafts-opt-in--written-here-sent-by-you)) |
-| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused, and so is one changed in Gmail since (it takes the draft's last `messageId`). Attachments not mentioned, and the sender, are kept; `quote` quotes the answered message again. A new address, a new file or a new alias sender is confirmed like one in `create_draft` |
+| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. `from` picks one of the account's send-as addresses; `quote` quotes the answered message below a reply; the sender's signature from Gmail's settings is added unless `signature: false`. A new message, any address the thread did not already contain, any file from the disk and any sender other than the main address is confirmed in a client dialog; the exceptions are a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`, and every draft with `MAILWARDEN_DRAFT_CONFIRM=off` ([details](#drafts-opt-in--written-here-sent-by-you)) |
+| `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused, and so is one changed in Gmail since (it takes the draft's last `messageId`). Attachments not mentioned, and the sender, are kept; `quote` quotes the answered message again, and the signature is added again unless `signature: false`. A new address, a new file or a new alias sender is confirmed like one in `create_draft` |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
 alongside the same JSON as fenced text — clients never have to parse prose.
@@ -454,7 +454,16 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   only HTML is reduced to text first; Outlook's placeholders for inline images (`[cid:…]`) are left
   out. A mail with no readable text is answered without the quote, and the result says so
   (`quoted: false`). `update_draft` replaces the whole text, quote included, so it takes
-  `quote: true` again. Off by default: a reply without it is what it was, plain text only.
+  `quote: true` again. Off by default.
+- **Signature** (`signature`, both tools, on by default): the signature Gmail's settings hold for the
+  sender — the alias's own when the draft goes from an alias — goes below the text, after a `-- `
+  line, and in a reply above the quote, where Gmail puts it. The draft then also carries an HTML
+  rendering, with the signature as Gmail stores it: links and formatting included, since you wrote it
+  in Gmail's settings and no mailwarden tool can change those. `signature: false` leaves it out; an
+  account without a signature gets none, and a signature that is only an image is left out, because
+  the text part would carry nothing of it. A text that already ends with the signature, say one read
+  back from the draft, is not signed twice. The result says `signed`. A draft without signature and
+  without quote is plain text only, as before.
 - **`create_draft`, new message:** omit `threadId`, pass `to` and `subject`.
 - **`update_draft`:** replaces the text of a draft `create_draft` wrote. Such drafts carry the label
   `MCP/Composed` (`MCP/Drafts` before 0.31.0; a draft still carrying that name is accepted and comes
@@ -530,8 +539,9 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   attachment with its size and origin.
 - **What it does not do.** No sending, no files from anywhere but `MAILWARDEN_ATTACH_DIR`, no
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
-  HTML of your own — the body is plain text; only a quote adds an HTML rendering of that same text,
-  so Gmail shows it as a quote block. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
+  HTML of your own — the body is plain text; only a quote or the signature adds an HTML rendering
+  of that same text (plus the signature's own HTML from Gmail's settings), so Gmail shows the quote
+  as a quote block and the signature as its signature. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
   refused. The label `MCP/Composed` stays on the message after you send it (seen in Gmail), which is
   why it is named for what holds in both states: the label tools can remove it, and nothing else
   reads it on a sent mail.

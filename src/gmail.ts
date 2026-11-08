@@ -2070,11 +2070,15 @@ export class Gmail {
    * (measured 4 Nov 2026 with a token narrowed to that one scope), and only the drafts tier may make
    * the call (src/egress.ts).
    */
-  async sendAsAddresses(): Promise<{ address: string; primary: boolean }[]> {
+  async sendAsAddresses(): Promise<{ address: string; primary: boolean; signature?: string }[]> {
     const res = await this.req(() => this.api.users.settings.sendAs.list({ userId: "me" }));
     return (res.data.sendAs ?? [])
       .filter((s) => s.sendAsEmail && (s.isPrimary || s.verificationStatus === "accepted"))
-      .map((s) => ({ address: (s.sendAsEmail ?? "").toLowerCase(), primary: s.isPrimary === true }));
+      .map((s) => ({
+        address: (s.sendAsEmail ?? "").toLowerCase(),
+        primary: s.isPrimary === true,
+        ...(s.signature ? { signature: s.signature } : {}),
+      }));
   }
 
   /**

@@ -1899,6 +1899,10 @@ const QUOTE_NOTE =
   "the line is in the language and time zone of the computer mailwarden runs on, and names the sender as the mail's From does. Do not type a quote into body yourself. " +
   "If the message has no readable text the draft is saved without the quote, and the result says so (quoted: false). ";
 
+const SIGNATURE_NOTE =
+  "SIGNATURE (on by default): the signature Gmail's settings hold for the sender (the alias's own for an alias) goes below the body, after a \"-- \" line, and the draft then also carries an HTML rendering with the signature as Gmail stores it — links and formatting included; a reply's quote goes below it. " +
+  "signature: false leaves it out; an account without one gets none. Do not type the signature into body yourself; a body that already ends with it is not signed twice. The result says signed: true or false. ";
+
 const fromAddress = z.string().max(320);
 
 const draftOutput = {
@@ -1925,6 +1929,7 @@ const draftOutput = {
   ),
   attachmentBytes: z.number(),
   quoted: z.boolean().optional(),
+  signed: z.boolean(),
   sent: z.literal(false),
   note: z.string(),
 };
@@ -1970,8 +1975,9 @@ function registerDraftTools(
         "Recipients come from that message — Reply-To, else From; the original To when the message is the user's own; replyAll adds the other To/Cc. " +
         "Subject defaults to \"Re: <subject>\" (kept as it is when it already starts with a reply prefix: Re:, AW:, SV:, Antw:, Odp:, YNT:), In-Reply-To/References are set so it threads. cc/bcc add recipients; `to` is not accepted for a reply. " +
         "NEW MESSAGE: omit threadId, pass to and subject. " +
-        "Plain text body only (a quote adds an HTML rendering of that same text, nothing else). Addresses are saved bare (no display names). " +
+        "Plain text body only (a quote or the signature adds an HTML rendering of that same text, plus the signature's own HTML, nothing else). Addresses are saved bare (no display names). " +
         QUOTE_NOTE +
+        SIGNATURE_NOTE +
         ATTACH_NOTE +
         FROM_NOTE +
         createConfirmation +
@@ -1989,12 +1995,13 @@ function registerDraftTools(
         subject: z.string().max(MAX_SUBJECT_CHARS).optional(),
         body: z.string().max(MAX_BODY_CHARS),
         quote: z.boolean().default(false),
+        signature: z.boolean().default(true),
         attachments: createAttachments.optional(),
       },
       outputSchema: draftOutput,
       annotations: { title: "Create draft", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, quote, attachments }) => {
+    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, quote, signature, attachments }) => {
       const gmail = await client();
       if (threadId) {
         if (to?.length) {
@@ -2006,7 +2013,7 @@ function registerDraftTools(
         return ok(
           await saveReplyDraft(
             gmail,
-            { threadId, messageId, replyAll, from, cc, bcc, subject, body, quote, attachments },
+            { threadId, messageId, replyAll, from, cc, bcc, subject, body, quote, signature, attachments },
             confirmMode,
             confirm,
             selfWithoutDialog,
@@ -2021,7 +2028,7 @@ function registerDraftTools(
         throw new ToolError("invalid_input", "A new message needs `to` and `subject` (or pass threadId to reply).");
       }
       return ok(
-        await saveNewDraft(gmail, { from, to, cc, bcc, subject, body, attachments }, confirm, {
+        await saveNewDraft(gmail, { from, to, cc, bcc, subject, body, signature, attachments }, confirm, {
           configured: confirmMode,
           selfWithoutDialog,
           readFile,
@@ -2039,6 +2046,8 @@ function registerDraftTools(
         "A reply draft stays in its thread. " +
         "quote: true quotes the message the draft answers below the new body again — body replaces the old text and its quote, so pass quote: true on every update of a quoted reply. " +
         QUOTE_NOTE +
+        SIGNATURE_NOTE +
+        "signature is added to the new body on every update unless signature: false. " +
         "attachments: omitted keeps every file the draft carries; a list replaces them all — name one to keep as {kept: filename}; [] removes them. " +
         ATTACH_NOTE +
         "A file kept from the draft is not asked about again; a new file from the disk is. " +
@@ -2058,16 +2067,17 @@ function registerDraftTools(
         subject: z.string().max(MAX_SUBJECT_CHARS).optional(),
         body: z.string().max(MAX_BODY_CHARS),
         quote: z.boolean().default(false),
+        signature: z.boolean().default(true),
         attachments: updateAttachments.optional(),
       },
       outputSchema: draftOutput,
       annotations: { title: "Update draft", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ draftId, messageId, from, to, cc, bcc, subject, body, quote, attachments }) =>
+    async ({ draftId, messageId, from, to, cc, bcc, subject, body, quote, signature, attachments }) =>
       ok(
         await reviseDraft(
           await client(),
-          { draftId, messageId, from, to, cc, bcc, subject, body, quote, attachments },
+          { draftId, messageId, from, to, cc, bcc, subject, body, quote, signature, attachments },
           confirmMode,
           confirm,
           selfWithoutDialog,

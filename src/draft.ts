@@ -22,6 +22,7 @@ import { addressesOf } from "./signals.js";
 import { ToolError } from "./cli.js";
 import { dialogText } from "./confirm.js";
 import { isReplySubject } from "./quoted.js";
+import { htmlToText } from "./export.js";
 
 /**
  * The label that marks a message mailwarden composed. It goes on the draft, and it stays on the mail
@@ -499,6 +500,71 @@ export function escapeHtml(s: string): string {
 const htmlLines = (lines: readonly string[]) => lines.map(escapeHtml).join("<br>");
 
 /**
+ * The signature Gmail's settings hold for a send-as address: the HTML as Gmail stores it, and the
+ * same reduced to text for the text part. The account owner wrote it in Gmail's settings, which no
+ * tool of mailwarden can change (src/egress.ts), so unlike a quoted mail's HTML it is carried as it
+ * is — links, formatting and images included, as Gmail itself would carry it.
+ */
+export interface Signature {
+  text: string;
+  html: string;
+}
+
+/** Gmail's limit on a signature; one longer than that did not come from Gmail's settings. */
+export const MAX_SIGNATURE_CHARS = 10_000;
+
+/**
+ * A signature from Gmail's `sendAs.signature`, or `undefined` when there is none to add: empty, too
+ * long, or nothing left as text (a signature that is only an image is left out, since the text part
+ * would carry nothing of it). Pure.
+ */
+export function signatureOf(html: string | undefined): Signature | undefined {
+  if (!html || html.length > MAX_SIGNATURE_CHARS) return undefined;
+  const text = htmlToText(html)
+    .replace(/\r\n?/g, "\n")
+    .split("\n")
+    .map((l) => l.replace(/\s+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+  return text ? { text, html } : undefined;
+}
+
+/**
+ * The signature as Gmail writes it below a body: in the text part after the "-- " line (RFC 3676
+ * §4.3, the line clients recognise to leave a signature out of a quote), in HTML inside the
+ * `gmail_signature` block Gmail's editor recognises as the signature.
+ */
+const signatureText = (sig: Signature) => `-- \n${sig.text}`;
+const signatureHtml = (sig: Signature) =>
+  `<br><span class="gmail_signature_prefix">-- </span><br>` +
+  `<div dir="ltr" class="gmail_signature" data-smartmail="gmail_signature">${sig.html}</div>`;
+
+/**
+ * The body without a signature it already ends with: the same signature text, with or without the
+ * "-- " line above it. A model that read a saved draft back and passes its text again would
+ * otherwise sign it twice. Only that exact text at the very end is taken off. Pure.
+ */
+export function unsigned(body: string, sig: Signature): string {
+  const norm = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[ \t]+$/gm, "").replace(/\s+$/, "");
+  const text = norm(body);
+  if (!text.endsWith(sig.text)) return body;
+  const head = text.slice(0, text.length - sig.text.length);
+  if (head !== "" && !head.endsWith("\n")) return body;
+  return head.replace(/(^|\n)--[ ]?\n?$/, "$1").replace(/\s+$/, "");
+}
+
+/** The body with the signature below it, as text and as HTML. Pure. */
+export function withSignature(body: string, sig: Signature): { body: string; html: string } | { reason: string } {
+  const text = unsigned(body, sig).replace(/\s+$/, "");
+  const full = `${text}\n\n${signatureText(sig)}\n`;
+  if (full.length > MAX_BODY_CHARS) return { reason: `body and signature together pass ${MAX_BODY_CHARS} characters` };
+  return { body: full, html: `${bodyHtml(text)}${signatureHtml(sig)}` };
+}
+
+const bodyHtml = (text: string) => `<div dir="auto">${htmlLines(text.replace(/\r\n?/g, "\n").split("\n"))}</div>`;
+
+/**
  * The reply as HTML: the body, then the quote in the markup Gmail writes itself (`gmail_quote`,
  * `gmail_attr`, the `blockquote` with Gmail's border). Gmail's editor and the reader's view then
  * show it as a quote block, the way Gmail's own replies look. What the markup does NOT do is make
@@ -511,9 +577,9 @@ const htmlLines = (lines: readonly string[]) => lines.map(escapeHtml).join("<br>
  * and indentation as the text part has them (an Outlook table in a quote), where HTML would
  * otherwise collapse them.
  */
-export function quoteHtml(body: string, attribution: string, lines: readonly string[]): string {
+export function quoteHtml(body: string, attribution: string, lines: readonly string[], sig?: Signature): string {
   return (
-    `<div dir="auto">${htmlLines(body.replace(/\r\n?/g, "\n").split("\n"))}</div><br>` +
+    `${bodyHtml(body)}${sig ? signatureHtml(sig) : ""}<br>` +
     `<div class="gmail_quote gmail_quote_container">` +
     `<div dir="auto" class="gmail_attr">${escapeHtml(attribution)}<br></div>` +
     `<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex;white-space:pre-wrap">` +
@@ -524,23 +590,26 @@ export function quoteHtml(body: string, attribution: string, lines: readonly str
 /**
  * The body with the quote below it, as text and as HTML, or why it was left out: the message had
  * no text to quote, or the two together would pass the body limit. The limit is checked on the
- * text; the HTML is the same text with its markup, a bounded multiple of it.
+ * text; the HTML is the same text with its markup, a bounded multiple of it. A signature goes
+ * between the body and the quote, where Gmail puts it in a reply.
  */
 export function withQuote(
   body: string,
   q: QuoteSource,
   locale: string,
   timeZone: string,
+  sig?: Signature,
 ): { body: string; html: string; attribution: string } | { reason: string } {
   const lines = quoteLines(q.text);
   if (!lines.length) return { reason: "the answered message has no text mailwarden can read (no text part, and its HTML reduced to nothing)" };
   const attribution = quoteAttribution(q, locale, timeZone);
-  const text = body.replace(/\s+$/, "");
-  const full = `${text}\n\n${attribution}\n${prefixed(lines)}\n`;
+  const text = (sig ? unsigned(body, sig) : body).replace(/\s+$/, "");
+  const signed = sig ? `${text}\n\n${signatureText(sig)}` : text;
+  const full = `${signed}\n\n${attribution}\n${prefixed(lines)}\n`;
   if (full.length > MAX_BODY_CHARS) {
     return { reason: `the answered message is too long to quote (body and quote together pass ${MAX_BODY_CHARS} characters)` };
   }
-  return { body: full, html: quoteHtml(text, attribution, lines), attribution };
+  return { body: full, html: quoteHtml(text, attribution, lines, sig), attribution };
 }
 
 export interface DraftContent extends Recipients {
@@ -553,9 +622,11 @@ export interface DraftContent extends Recipients {
   body: string;
   /** The line above the quote the body ends with, for the dialog; omitted when it quotes nothing. */
   quotes?: string;
+  /** The signature's text, for the dialog; omitted when the draft carries none. */
+  signature?: string;
   /**
-   * The same content as HTML, when a reply quotes (`quoteHtml`): the message then carries text and
-   * HTML as `multipart/alternative`. Omitted: text only, byte for byte what it was before.
+   * The same content as HTML, when a reply quotes (`quoteHtml`) or a signature is added: the message
+   * then carries text and HTML as `multipart/alternative`. Omitted: text only.
    */
   html?: string;
   inReplyTo?: string;
@@ -698,6 +769,7 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
     ...(files.length ? [`Attachments: ${files.join("; ")}`] : []),
     `Subject: ${dialogText(d.subject, 120)}`,
     `Text: ${dialogText(d.body, 300)}`,
+    ...(d.signature !== undefined ? [`Signature from Gmail's settings: ${dialogText(d.signature, 120)}`] : []),
     ...(d.quotes !== undefined ? [`Quoted below the text: ${dialogText(d.quotes, 200)}`] : []),
   ].join("\n");
 }

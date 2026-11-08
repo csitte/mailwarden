@@ -541,14 +541,17 @@ describe("saveNewDraft — the self opt-in picks the mode", () => {
       expect(confirm).toHaveBeenCalledWith("require", expect.any(String));
     }
   });
-  it("reads the profile once, to name the sender, and the send-as list not at all", async () => {
+  it("reads the profile once, to name the sender, and the send-as list once for the signature, or not at all without one", async () => {
     const { gmail } = fakeGmail();
     const spy = own(gmail);
     const list = vi.spyOn(gmail, "sendAsAddresses");
     const r = await saveNewDraft(gmail, { to: ["me@example.com"], subject: "Hi", body: "x" }, vi.fn(async () => true));
     expect(spy).toHaveBeenCalledTimes(1);
-    expect(list).not.toHaveBeenCalled();
+    expect(list).toHaveBeenCalledTimes(1);
     expect(r.from).toBe("me@example.com");
+    list.mockClear();
+    await saveNewDraft(gmail, { to: ["me@example.com"], subject: "Hi", body: "x", signature: false }, vi.fn(async () => true));
+    expect(list).not.toHaveBeenCalled();
   });
 });
 

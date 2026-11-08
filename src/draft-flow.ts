@@ -33,6 +33,9 @@ import {
   replyThreading,
   unknownRecipients,
   withQuote,
+  withSignature,
+  signatureOf,
+  type Signature,
   type AttachmentSource,
   type DraftAttachment,
   type DraftContent,
@@ -63,6 +66,8 @@ export interface DraftGmail {
 export interface SendAs {
   address: string;
   primary: boolean;
+  /** The signature Gmail's settings hold for this address, as HTML; empty or absent when none. */
+  signature?: string;
 }
 
 /** Reads one file from MAILWARDEN_ATTACH_DIR (`readAttachmentFile` in attach.ts, a fake in tests). */
@@ -121,6 +126,8 @@ export interface DraftResult extends Recipients {
   attachmentBytes: number;
   /** Only when a quote was asked for: whether the body ends with one. The note says why not. */
   quoted?: boolean;
+  /** Whether the draft carries the sender's signature from Gmail's settings. */
+  signed: boolean;
   sent: false;
   note: string;
 }
@@ -136,6 +143,8 @@ export interface ReplyInput {
   body: string;
   /** Quote the answered message below the body, as a mail client does. */
   quote?: boolean;
+  /** Add the sender's signature from Gmail's settings below the body. Default: yes. */
+  signature?: boolean;
   attachments?: AttachmentInput[];
 }
 
@@ -146,6 +155,8 @@ export interface NewInput {
   bcc?: string[];
   subject: string;
   body: string;
+  /** Add the sender's signature from Gmail's settings below the body. Default: yes. */
+  signature?: boolean;
   attachments?: AttachmentInput[];
 }
 
@@ -166,6 +177,8 @@ export interface UpdateInput {
   body: string;
   /** Quote the message the draft answers below the body again; the new body replaces the old quote too. */
   quote?: boolean;
+  /** Add the sender's signature below the new body again. Default: yes; a body that ends with it already is not signed twice. */
+  signature?: boolean;
   /** Omitted: the draft keeps the attachments it has. Given: the new list, `[]` for none. */
   attachments?: AttachmentInput[];
 }
@@ -360,7 +373,7 @@ function sendAsOnce(gmail: DraftGmail): () => Promise<SendAs[]> {
     const out: SendAs[] = [];
     for (const s of await gmail.sendAsAddresses()) {
       try {
-        out.push({ address: normalizeRecipient(s.address), primary: s.primary });
+        out.push({ address: normalizeRecipient(s.address), primary: s.primary, signature: s.signature });
       } catch {
         // not an address mailwarden can write: never offered, never matched
       }
@@ -438,13 +451,14 @@ export async function saveReplyDraft(
   const threadAddresses = [...normalizeLenient(source.from), ...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const unknown = unknownRecipients(recipients, threadAddresses);
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
-  const quote = input.quote ? await quoteFor(gmail, input.threadId, { messageId: answered }, input.body) : undefined;
+  const sig = await signatureFor(input.signature, sendAs, from ?? main);
+  const quote = input.quote ? await quoteFor(gmail, input.threadId, { messageId: answered }, input.body, sig) : undefined;
+  const text = composeText(input.body, sig, quote);
   const content: DraftContent = {
     ...recipients,
     from,
     subject: input.subject ?? replySubject(source.subject),
-    body: quote?.body ?? input.body,
-    ...(quote?.quotes !== undefined ? { quotes: quote.quotes, html: quote.html } : {}),
+    ...text.content,
     ...replyThreading(source),
     attachments,
   };
@@ -458,9 +472,12 @@ export async function saveReplyDraft(
   // other than the main address is confirmed in the dialog.
   const addressed = [...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const suggestedFrom = aliases.find((a) => addressed.includes(a) && a !== from);
-  return withQuoteResult(
-    { ...result(ref, "reply", content, unknown, confirmedByUser, main), ...(suggestedFrom ? { suggestedFrom } : {}) },
-    quote,
+  return withSignNote(
+    withQuoteResult(
+      { ...result(ref, "reply", content, unknown, confirmedByUser, main), ...(suggestedFrom ? { suggestedFrom } : {}) },
+      quote,
+    ),
+    text.signNote,
   );
 }
 
@@ -476,9 +493,11 @@ export async function saveNewDraft(
     bcc: normalizeRecipients(input.bcc),
   };
   const main = (await gmail.getProfile()).emailAddress.toLowerCase();
-  const from = input.from === undefined ? undefined : await checkFrom(input.from, main, sendAsOnce(gmail));
+  const sendAs = sendAsOnce(gmail);
+  const from = input.from === undefined ? undefined : await checkFrom(input.from, main, sendAs);
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { readFile: opts.readFile ?? noFiles });
-  const content: DraftContent = { ...recipients, from, subject: input.subject, body: input.body, attachments };
+  const text = composeText(input.body, await signatureFor(input.signature, sendAs, from ?? main), undefined);
+  const content: DraftContent = { ...recipients, from, subject: input.subject, ...text.content, attachments };
   const raw = buildMime(content);
   const unknown = unknownRecipients(recipients, []);
   // A new message has no thread to vouch for anyone: always asked, never written unasked — unless
@@ -487,7 +506,7 @@ export async function saveNewDraft(
   const self = await selfOnly(opts.selfWithoutDialog ?? false, unknown, async () => [main], recipients, widens);
   const confirmedByUser = await confirm(modeFor(opts.configured ?? "off", unknown, self, widens), draftDialog("new", content, unknown));
   const ref = await gmail.createDraft(raw);
-  return result(ref, "new", content, unknown, confirmedByUser, main);
+  return withSignNote(result(ref, "new", content, unknown, confirmedByUser, main), text.signNote);
 }
 
 export async function reviseDraft(
@@ -529,7 +548,8 @@ export async function reviseDraft(
   const had = normalizeLenient(before.from)[0] ?? main;
   // Omitted keeps it — checked again all the same, so an alias removed since is not written back
   // as if it still held.
-  const from = await checkFrom(input.from ?? had, main, sendAsOnce(gmail));
+  const sendAs = sendAsOnce(gmail);
+  const from = await checkFrom(input.from ?? had, main, sendAs);
   const threading = threadingOf(before);
   if (input.quote && !threading.inReplyTo) {
     throw new ToolError("invalid_input", `Draft ${input.draftId} is a new message, not a reply, so it has nothing to quote. Nothing was changed.`);
@@ -543,16 +563,17 @@ export async function reviseDraft(
         readFile,
       })
     : await keepAll(gmail, before);
+  const sig = await signatureFor(input.signature, sendAs, from ?? main);
   const quote =
     input.quote && threading.inReplyTo
-      ? await quoteFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body)
+      ? await quoteFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body, sig)
       : undefined;
+  const text = composeText(input.body, sig, quote);
   const content: DraftContent = {
     ...recipients,
     from,
     subject: input.subject ?? before.subject,
-    body: quote?.body ?? input.body,
-    ...(quote?.quotes !== undefined ? { quotes: quote.quotes, html: quote.html } : {}),
+    ...text.content,
     ...threading,
     attachments,
   };
@@ -569,7 +590,43 @@ export async function reviseDraft(
   // A draft that answers a thread is passed its thread again — without it Gmail moves the
   // updated draft into a thread of its own (measured 29 Oct 2026).
   const ref = await gmail.updateDraft(input.draftId, raw, threading.inReplyTo ? before.threadId : undefined);
-  return withQuoteResult(result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main), quote);
+  return withSignNote(
+    withQuoteResult(result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main), quote),
+    text.signNote,
+  );
+}
+
+/**
+ * The signature for the address the draft goes out from, unless the caller said no: the one Gmail's
+ * settings hold for that send-as address (the main address's for a draft without an alias). None
+ * when the address has none. Reads the send-as list, which a reply reads anyway.
+ */
+async function signatureFor(wanted: boolean | undefined, sendAs: () => Promise<SendAs[]>, address: string): Promise<Signature | undefined> {
+  if (wanted === false) return undefined;
+  return signatureOf((await sendAs()).find((s) => s.address === address)?.signature);
+}
+
+/**
+ * The draft's text and HTML: the body, the signature, the quote. A quote that was made carries the
+ * signature already (between body and quote); without one the signature is added here. A body too
+ * long to take the signature is saved without it, and the note says so.
+ */
+function composeText(
+  body: string,
+  sig: Signature | undefined,
+  quote: { body: string; html?: string; quotes?: string } | undefined,
+): { content: Pick<DraftContent, "body" | "html" | "quotes" | "signature">; signNote?: string } {
+  if (quote?.quotes !== undefined) {
+    return { content: { body: quote.body, html: quote.html, quotes: quote.quotes, ...(sig ? { signature: sig.text } : {}) } };
+  }
+  if (!sig) return { content: { body } };
+  const r = withSignature(body, sig);
+  if ("reason" in r) return { content: { body }, signNote: r.reason };
+  return { content: { body: r.body, html: r.html, signature: sig.text } };
+}
+
+function withSignNote(r: DraftResult, reason: string | undefined): DraftResult {
+  return reason ? { ...r, note: `${r.note} No signature was added: ${reason}.` } : r;
 }
 
 /**
@@ -584,6 +641,7 @@ async function quoteFor(
   threadId: string,
   which: { messageId?: string; rfcMessageId?: string },
   body: string,
+  sig?: Signature,
 ): Promise<{ body: string; html?: string; quotes?: string; reason?: string }> {
   // A body over the limit fails in buildMime whatever the quote does; said here, before a
   // threads.get is spent on it and before "too long to quote" would blame the quoted mail.
@@ -595,7 +653,7 @@ async function quoteFor(
   // but Outlook's `[cid:…]` placeholders counts as empty (Grok review N35, 6 Nov 2026).
   const text = quoteLines(q.plaintextBody).length ? q.plaintextBody : htmlToText(q.htmlBody);
   const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
-  const r = withQuote(body, { name: q.name, address: q.address, date: q.date, text }, locale, timeZone);
+  const r = withQuote(body, { name: q.name, address: q.address, date: q.date, text }, locale, timeZone, sig);
   return "reason" in r ? { body, reason: r.reason } : { body: r.body, html: r.html, quotes: r.attribution };
 }
 
@@ -673,6 +731,7 @@ function result(
       source: a.source,
     })),
     attachmentBytes: attachmentBytes(content.attachments ?? []),
+    signed: content.signature !== undefined,
     sent: false,
     note: ref.marked
       ? "Saved as a draft, not sent. The user reviews and sends it from Gmail's Drafts."

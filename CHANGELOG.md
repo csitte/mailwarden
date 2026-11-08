@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Drafts carry the sender's signature.** `create_draft` and `update_draft` add the signature
+  Gmail's settings hold for the sender (`sendAs.signature`; an alias's own for an alias) below the
+  body, after a `-- ` line, and in a reply between the body and the quote, where Gmail puts it. On by
+  default; `signature: false` leaves it out. The draft then carries text and HTML: the body escaped
+  as before, the signature as Gmail stores it, inside the `gmail_signature` block Gmail's editor
+  recognises. The signature's HTML is carried as it is, unlike a quoted mail's: the account owner
+  wrote it in Gmail's settings, and the egress guard keeps every write to those settings shut. A
+  signature that is only an image is left out (the text part would carry nothing of it); a body that
+  already ends with the signature is not signed twice; a body too long to take it is saved without
+  it, and the note says so. The result reports `signed`. The send-as list a new message reads for it
+  is the same `GET settings/sendAs` a reply already made; no endpoint and no scope is added. From
+  taylorwilsdon's and agentcomms' servers, both sign by default; found in the comparison round of
+  8 Nov 2026. Whether Gmail would add a signature itself when you open such a draft was not
+  measured.
+
 ### Changed
 - **The draft mark is now `MCP/Composed`, not `MCP/Drafts`.** Gmail keeps user labels when a draft
   becomes the sent message, so the mark stays on the mail after you send it (seen 6 Nov 2026 in two
