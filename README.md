@@ -556,9 +556,9 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   them.
 - **What it does not do.** No sending, no files from anywhere but `MAILWARDEN_ATTACH_DIR`, no
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
-  HTML of your own — the body is plain text; only a quote or the signature adds an HTML rendering
-  of that same text (plus the signature's own HTML from Gmail's settings), so Gmail shows the quote
-  as a quote block and the signature as its signature. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
+  HTML of your own — the body is plain text; only a quote, a forward or the signature adds an HTML
+  rendering of that same text (plus the signature's own HTML from Gmail's settings), so Gmail shows
+  the quote as a quote block and the signature as its signature. Drafts are not deleted: Gmail's `drafts.delete` deletes for good and stays
   refused. The label `MCP/Composed` stays on the message after you send it (seen in Gmail), which is
   why it is named for what holds in both states: the label tools can remove it, and nothing else
   reads it on a sent mail.

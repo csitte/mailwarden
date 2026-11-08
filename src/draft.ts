@@ -149,8 +149,8 @@ const dedupe = (xs: string[]) => [...new Set(xs)];
 /**
  * `Re: ` once — not `Re: Re: Re:`. A subject that already says "reply", in any of the languages
  * `isReplySubject` knows ("AW: Termin", "SV: Möte", "[EXT] Re: x"), stays exactly as it is: the
- * other side's client wrote that prefix, and the subject they see stays theirs. Gmail itself writes
- * "Re: AW: Termin" here; both thread the same, since the reply also carries In-Reply-To.
+ * other side's client wrote that prefix, and the subject they see stays theirs. Either way it
+ * threads, since the reply also carries In-Reply-To.
  */
 export function replySubject(subject: string | undefined): string {
   const s = (subject ?? "").replace(HEADER_UNSAFE_GLOBAL, " ").trim();
