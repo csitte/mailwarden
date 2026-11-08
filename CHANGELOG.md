@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-08
+
 ### Added
 - **Drafts carry the sender's signature.** `create_draft` and `update_draft` add the signature
   Gmail's settings hold for the sender (`sendAs.signature`; an alias's own for an alias) below the
@@ -2580,7 +2582,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/csitte/mailwarden/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/csitte/mailwarden/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/csitte/mailwarden/compare/v0.28.1...v0.29.0
 [0.28.1]: https://github.com/csitte/mailwarden/compare/v0.28.0...v0.28.1
