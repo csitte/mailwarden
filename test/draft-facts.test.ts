@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import type { gmail_v1 } from "@googleapis/gmail";
 import { describeFacts, editDistance, lookalikeOf, searchableAddress, staticFacts } from "../src/draft.js";
-import { saveNewDraft, saveReplyDraft, type DraftGmail } from "../src/draft-flow.js";
+import { reviseDraft, saveNewDraft, saveReplyDraft, type DraftGmail } from "../src/draft-flow.js";
 import { Gmail } from "../src/gmail.js";
 
 describe("editDistance and lookalikeOf", () => {
@@ -134,6 +134,31 @@ describe("the dialog and the result say what is known about a new recipient", ()
     );
     expect(sentTo).not.toHaveBeenCalled();
     expect(r.recipientNotes).toBeUndefined();
+  });
+
+  it("update_draft compares a new recipient's domain with the account's aliases too", async () => {
+    const r = await reviseDraft(
+      fakeGmail({
+        sendAsAddresses: async () => [
+          { address: "me@example.com", primary: true },
+          { address: "info@rockband.example", primary: false },
+        ],
+        getDraft: async (draftId) => ({
+          draftId,
+          messageId: "dm1",
+          threadId: "t9",
+          ownedByMailwarden: true,
+          trashed: false,
+          to: "x@else.example",
+          subject: "s",
+          attachments: [],
+        }),
+      }),
+      { draftId: "r1", messageId: "dm1", body: "b", to: ["fan@rokband.example"] },
+      "off",
+      vi.fn(async () => true),
+    );
+    expect(r.recipientNotes).toEqual(["fan@rokband.example: looks like rockband.example"]);
   });
 });
 

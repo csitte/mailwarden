@@ -167,6 +167,15 @@ describe("drafts carry the sender's signature", () => {
     expect(text.indexOf("-- ")).toBeLessThan(text.indexOf("> Kannst du?"));
   });
 
+  it("a quote that cannot be made still leaves the draft signed", async () => {
+    const { gmail, created } = fakeGmail(ACCOUNT, {
+      quoteSource: async () => ({ name: "Ann", address: "ann@example.org", date: AT, plaintextBody: "", htmlBody: "" }),
+    });
+    const r = await saveReplyDraft(gmail, { threadId: "t1", body: "Ja", quote: true }, "off", vi.fn(async () => true));
+    expect(r).toMatchObject({ signed: true, quoted: false });
+    expect(partOf(created[0], "text/plain")).toBe(["Ja", "", "-- ", "Chris", ""].join(LF));
+  });
+
   it("update_draft signs the new body again, and not twice when the body was read back with its signature", async () => {
     const { gmail, updated } = fakeGmail(ACCOUNT);
     await reviseDraft(gmail, { draftId: "r1", messageId: "dm1", body: `Neu${LF}${LF}-- ${LF}Chris` }, "off", vi.fn(async () => true));

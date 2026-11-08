@@ -616,7 +616,7 @@ export async function reviseDraft(
       ? await forwardFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body, sig)
       : undefined;
   const text = forwarded ?? composeText(input.body, sig, quote);
-  const facts = await factsFor(gmail, unknown, [...old.to, ...old.cc, ...old.bcc, main]);
+  const facts = await factsFor(gmail, unknown, [...old.to, ...old.cc, ...old.bcc, main, ...(await aliasesOf(sendAs, main))]);
   const content: DraftContent = {
     ...recipients,
     from,
@@ -677,12 +677,13 @@ export async function saveForwardDraft(
   const threadAddresses = [...normalizeLenient(source.from), ...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const unknown = unknownRecipients(recipients, threadAddresses);
   const facts = await factsFor(gmail, unknown, [...threadAddresses, main, ...aliases]);
+  // The text first: a mail too long to forward is refused before a byte of its attachments is fetched.
+  const sig = await signatureFor(input.signature, sendAs, from ?? main);
+  const text = await forwardFor(gmail, input.threadId, { messageId: forwardedId }, input.body, sig);
   const carried = input.forwardAttachments === false ? [] : await forwardedAttachments(gmail, input.threadId, forwardedId);
   const extra = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
   const attachments = [...carried, ...extra];
   checkAttachments(attachments);
-  const sig = await signatureFor(input.signature, sendAs, from ?? main);
-  const text = await forwardFor(gmail, input.threadId, { messageId: forwardedId }, input.body, sig);
   const content: DraftContent = {
     ...recipients,
     from,

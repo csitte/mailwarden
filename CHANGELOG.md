@@ -20,8 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   it, and the note says so. The result reports `signed`. The send-as list a new message reads for it
   is the same `GET settings/sendAs` a reply already made; no endpoint and no scope is added. From
   taylorwilsdon's and agentcomms' servers, both sign by default; found in the comparison round of
-  8 Nov 2026. Whether Gmail would add a signature itself when you open such a draft was not
-  measured.
+  8 Nov 2026. Not tried against Gmail: neither test mailbox has a signature, and mailwarden cannot
+  set one. Whether Gmail would add a signature itself when you open such a draft was not measured.
 
 - **A mail can be forwarded as a draft.** `create_draft` with `threadId`, `forward: true` and `to`
   forwards a mail of the thread (`messageId`, default the newest real message) to the recipients you
@@ -34,8 +34,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `forward: true` to forward it again below a new body. A recipient the mail never went to is new
   and asked about, and so is each attachment going to them, as the reply rules already had it; the
   result says `kind: "forward"`. From taylorwilsdon's server (forward as a draft with attachments)
-  and agentcomms' (without); found in the comparison round of 8 Nov 2026. Not tried against Gmail
-  yet: how Gmail's editor shows such a draft was not looked at.
+  and agentcomms' (without); found in the comparison round of 8 Nov 2026. Tried on 8 Nov 2026
+  against a live mailbox, a forward to the account's own address: subject, the German header block,
+  the thread, In-Reply-To, both attachments and the `gmail_quote` block as described. The mail's text
+  is read before its attachments are fetched, so one too long to forward costs no download.
 - **The draft dialog says what is known about each new recipient.** Next to "(new)" it now names:
   never written to / written to before (one `messages.list` of the sent mail per address, the first
   ten; `messages.list`, not `threads.list`; a failed lookup says nothing rather than "never" and does
@@ -75,10 +77,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A reply keeps a subject that already says "reply" in another language.** "AW: Termin" was
   answered as "Re: AW: Termin"; now a subject whose outermost prefix is a reply prefix — Re (also
   `Re[2]:`), AW (German), SV (Nordic), Antw (Dutch), Odp (Polish), YNT (Turkish), after tags such as
-  "[EXT]" — stays as it is, and the other side sees their own subject. Gmail itself writes
-  "Re: AW: Termin"; both thread the same, the reply carries In-Reply-To. A forward prefix ("WG:",
-  "Fwd:") still gets its "Re:", and so does "VS:", which answers in Finnish but forwards elsewhere in
-  the Nordics. From agentcomms' subject handling, found in the comparison round of 8 Nov 2026.
+  "[EXT]" — stays as it is, and the other side sees their own subject; it threads either way, the
+  reply carries In-Reply-To. A forward prefix ("WG:", "Fwd:") still gets its "Re:", and so does
+  "VS:", which answers in Finnish but forwards elsewhere in the Nordics. From agentcomms' subject handling, found in the comparison round of 8 Nov 2026.
 
 ### Fixed
 - **A file a mailer marks `inline` is still an attachment unless it is an image.** A hotel's

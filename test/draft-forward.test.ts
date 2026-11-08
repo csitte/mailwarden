@@ -79,6 +79,14 @@ describe("forwardHeader and withForward", () => {
     expect(r.body.endsWith("Cc: bob@partner.example" + LF)).toBe(true);
   });
 
+  it("puts the signature between the body and the forwarded mail, in both parts", () => {
+    const r = withForward("FYI", mail, "en-GB", "UTC", { text: "Chris", html: "<b>Chris</b>" });
+    expect(r.body.split(LF).slice(0, 6)).toEqual(["FYI", "", "-- ", "Chris", "", "---------- Forwarded message ---------"]);
+    expect(r.html.indexOf("<b>Chris</b>")).toBeLessThan(r.html.indexOf("gmail_quote"));
+    // A body read back with its signature is not signed twice.
+    expect(withForward(`FYI${LF}${LF}-- ${LF}Chris`, mail, "en-GB", "UTC", { text: "Chris", html: "<b>Chris</b>" }).body).toBe(r.body);
+  });
+
   it("refuses rather than shortens a forward that would pass the body limit", () => {
     expect(() => withForward("x", { ...mail, text: "y".repeat(MAX_BODY_CHARS) }, "en-GB", "UTC")).toThrow(/too long to forward/);
   });
@@ -180,6 +188,19 @@ describe("saveForwardDraft", () => {
       /forwardAttachments: false/,
     );
     expect(attachmentBytes).not.toHaveBeenCalled();
+  });
+
+  it("refuses a mail too long to forward before fetching its attachments", async () => {
+    const attachmentBytes = vi.fn(async () => Buffer.from("pdf"));
+    const { gmail, created } = fakeGmail({
+      attachmentBytes,
+      quoteSource: async () => ({ name: "Ann", address: "ann@partner.example", date: AT, plaintextBody: "y".repeat(MAX_BODY_CHARS), htmlBody: "", subject: "Invoice 42" }),
+    });
+    await expect(saveForwardDraft(gmail, { threadId: "t1", to: ["carl@else.example"], body: "x" }, "off", vi.fn(async () => true))).rejects.toThrow(
+      /too long to forward/,
+    );
+    expect(attachmentBytes).not.toHaveBeenCalled();
+    expect(created).toEqual([]);
   });
 
   it("refuses when the mail is gone by the time its text is read", async () => {
