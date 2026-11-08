@@ -79,6 +79,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the Nordics. From agentcomms' subject handling, found in the comparison round of 8 Nov 2026.
 
 ### Fixed
+- **A file a mailer marks `inline` is still an attachment unless it is an image.** A hotel's
+  booking mail carried its PDF with `Content-Disposition: inline` and a Content-ID its text never
+  referenced; mailwarden counted it as an inline asset and left it out of `get_thread`, the
+  search's attachment list and a forward, while Gmail's own forward of the same mail carried it as
+  an attachment. Now `inline` drops only an image, and a Content-ID the text references drops any
+  part, as before. Found in a live test of forwarding, 8 Nov 2026.
 - **A reply never answers a Gmail emoji reaction.** A reaction is a mail of its own in the thread,
   and when it was the newest one, `create_draft` without `messageId` answered it: the reply went to
   whoever reacted, hung off a chip Gmail does not show as a message, and a quote quoted the

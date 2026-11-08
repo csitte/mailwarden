@@ -64,6 +64,22 @@ describe("collectAttachments — Bug 1: inline images must not count", () => {
     expect(isRealAttachment(inlineLogo)).toBe(false);
   });
 
+  it("keeps a file that is not an image even when the mailer calls it inline (a hotel's PDF, 8 Nov 2026)", () => {
+    const pdf = (cid: string): gmail_v1.Schema$MessagePart => ({
+      filename: "booking.pdf",
+      mimeType: "application/pdf",
+      headers: [
+        { name: "Content-Disposition", value: 'inline; filename="booking.pdf"' },
+        { name: "Content-ID", value: `<${cid}>` },
+      ],
+      body: { attachmentId: "att-booking", size: 1174983 },
+    });
+    expect(isRealAttachment(pdf("d8bbafed"))).toBe(true);
+    expect(isRealAttachment({ ...pdf("x"), mimeType: "IMAGE/PNG" })).toBe(false);
+    // Referenced in the text, it is shown there, whatever its type.
+    expect(isRealAttachment(pdf("d8bbafed"), new Set(["d8bbafed"]))).toBe(false);
+  });
+
   it("includes the real PDF attachment", () => {
     expect(isRealAttachment(realPdf)).toBe(true);
   });

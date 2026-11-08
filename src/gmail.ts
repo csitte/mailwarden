@@ -685,7 +685,8 @@ function walkParts(
  * True when a part carries a downloadable file rather than an inline asset
  * (logo / tracking pixel). A real attachment needs a filename + attachmentId.
  *
- * Disposition decides when explicit: `attachment` → keep, `inline` → drop.
+ * Disposition decides when explicit: `attachment` → keep, `inline` → drop an image, keep any
+ * other file (a referenced Content-ID drops either).
  * When the part has no `Content-Disposition` header (common — many mailers omit
  * it), it counts as inline ONLY if its `Content-ID` is actually referenced via
  * `cid:<id>` in the message body (`refCids`). An unreferenced Content-ID — or no
@@ -703,10 +704,14 @@ export function isRealAttachment(
   if (!p.filename || !p.body?.attachmentId) return false;
   const disposition = partHeader(p, "Content-Disposition")?.trim().toLowerCase();
   if (disposition?.startsWith("attachment")) return true;
-  if (disposition?.startsWith("inline")) return false;
-  // No explicit disposition → inline only if its Content-ID is referenced in the body.
   const cid = normalizeCid(partHeader(p, "Content-ID"));
   if (cid && refCids.has(cid)) return false;
+  // `inline` drops an image, which a mail shows in its text. A file that is not an image is
+  // never shown there, so `inline` on it is the mailer's label and not a fact: a hotel's
+  // booking mail carried its PDF as `inline` with an unreferenced Content-ID, and Gmail's own
+  // forward of that mail carried the PDF as `attachment` (measured 8 Nov 2026).
+  if (disposition?.startsWith("inline")) return !(p.mimeType ?? "").toLowerCase().startsWith("image/");
+  // No explicit disposition → inline only if its Content-ID is referenced in the body.
   return true;
 }
 
