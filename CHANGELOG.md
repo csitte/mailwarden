@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the grok-mailwarden review of 0.25.0 (L13); the second check by its review of this release (L15).
 
 ### Fixed
+- **`create_draft` no longer risks saving a draft twice.** Every Gmail call is retried on a 5xx,
+  a reset or a timeout, and so was `drafts.create` — but such a failure can come after Gmail saved
+  the draft, and the retry then saved a second copy. Most likely with a large attachment, whose
+  upload takes long. `drafts.create` is now retried only when the failure proves nothing was saved
+  (a rate-limit answer, a refused connection, a name that did not resolve); otherwise it fails at
+  once with `retryable: false` and asks to look in Gmail's Drafts before trying again.
+  `drafts.update` keeps the retries: writing the same content twice changes nothing. Found in the
+  draft-focused comparison round of 8 Nov 2026, from the code, not measured; taylorwilsdon's
+  server retries its draft create the same way.
 - **A quote falls back to the HTML part when the text part holds nothing but Outlook's `[cid:…]`
   image placeholders.** Such a mail was answered without its quote although its HTML was readable;
   the same rule now decides both whether the text part has lines and whether there is anything to

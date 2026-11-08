@@ -321,6 +321,18 @@ const RETRYABLE_NET_CODES = new Set([
   "ERR_STREAM_PREMATURE_CLOSE",
 ]);
 
+/**
+ * The network failures that happen before a request reaches Google: the connection was refused or
+ * the name did not resolve. Only these, and a rate-limit answer, prove that a call did nothing.
+ * A reset, a timeout or a 5xx can come after Google acted on the request.
+ */
+const UNSENT_NET_CODES = new Set(["ECONNREFUSED", "EAI_AGAIN", "ENOTFOUND"]);
+
+function isUnsentNetworkError(err: unknown): boolean {
+  const e = err as { code?: unknown };
+  return typeof e?.code === "string" && UNSENT_NET_CODES.has(e.code);
+}
+
 function isRetryableNetworkError(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown };
   if (typeof e?.code === "string" && RETRYABLE_NET_CODES.has(e.code)) return true;
@@ -504,9 +516,13 @@ export function filterCriteriaToQuery(c: FilterCriteria): string {
 }
 
 /**
- * Run `fn`, retrying 429/5xx responses with exponential backoff + jitter.
- * Anything else (4xx, network errors, non-HTTP failures) is thrown immediately.
- * `sleep` is injectable so tests don't have to wait real time.
+ * Run `fn`, retrying 429/5xx responses and transient network errors with exponential backoff +
+ * jitter. Anything else (4xx, non-HTTP failures) is thrown immediately. `sleep` is injectable so
+ * tests don't have to wait real time.
+ *
+ * `onlyIfUnsent` is for a call that must not run twice: it is retried only when the failure proves
+ * Google did nothing — a rate-limit answer, a refused connection, a name that did not resolve. A
+ * 5xx, a reset or a timeout may come after the call took effect, and is thrown at once.
  *
  * Gmail's per-user quota gets its own budget, because it is a different kind of
  * wait. The ordinary staffel — 400ms, 800ms, 1.6s — is built for a blip and is
@@ -532,6 +548,7 @@ export async function withBackoff<T>(
     baseMs?: number;
     quotaRetries?: number;
     quotaBaseMs?: number;
+    onlyIfUnsent?: boolean;
     sleep?: (ms: number) => Promise<void>;
   } = {},
 ): Promise<T> {
@@ -548,10 +565,9 @@ export async function withBackoff<T>(
     } catch (err) {
       const quota = isRateLimitError(err);
       const status = statusOf(err);
-      const retryable =
-        quota ||
-        (status !== undefined && RETRYABLE_STATUS.has(status)) ||
-        isRetryableNetworkError(err);
+      const retryable = opts.onlyIfUnsent
+        ? quota || status === 429 || isUnsentNetworkError(err)
+        : quota || (status !== undefined && RETRYABLE_STATUS.has(status)) || isRetryableNetworkError(err);
       if (!retryable) throw err;
       if (quota) {
         if (quotaAttempt >= quotaRetries) throw err;
@@ -1008,10 +1024,10 @@ export class Gmail {
       : gmailApi({ version: "v1", auth: authOrApi });
   }
 
-  /** Every API call goes through here: 429/5xx are retried with backoff. */
-  private async req<T>(fn: () => Promise<T>): Promise<T> {
+  /** Every API call goes through here: 429/5xx are retried with backoff (see `withBackoff`). */
+  private async req<T>(fn: () => Promise<T>, opts: { onlyIfUnsent?: boolean } = {}): Promise<T> {
     try {
-      return await withBackoff(fn);
+      return await withBackoff(fn, opts);
     } catch (err) {
       // Turn a dead/revoked refresh token into an actionable message instead of
       // a cryptic OAuth error on the first Gmail call.
@@ -1946,13 +1962,32 @@ export class Gmail {
    * only means mailwarden cannot change it later, the safe side of the two.
    */
   async createDraft(raw: string, threadId?: string): Promise<DraftRef> {
-    const res = await this.req(() =>
-      this.api.users.drafts.create({
-        userId: "me",
-        requestBody: { message: { raw: toBase64Url(raw), ...(threadId ? { threadId } : {}) } },
-      }),
-    );
-    return this.markDraft(res.data);
+    let draft: gmail_v1.Schema$Draft;
+    try {
+      // Not retried blindly: a reset or a 5xx can come after Gmail saved the draft, and a second
+      // create would save it twice. Most likely with a large attachment, whose upload takes long.
+      const res = await this.req(
+        () =>
+          this.api.users.drafts.create({
+            userId: "me",
+            requestBody: { message: { raw: toBase64Url(raw), ...(threadId ? { threadId } : {}) } },
+          }),
+        { onlyIfUnsent: true },
+      );
+      draft = res.data;
+    } catch (err) {
+      const status = statusOf(err);
+      const upstream = status !== undefined && status >= 500;
+      if (!upstream && !isRetryableNetworkError(err)) throw err;
+      const why = err instanceof Error ? err.message : String(err);
+      throw new ToolError(
+        upstream ? "upstream_unavailable" : "network_error",
+        `Saving the draft failed in a way that does not say whether Gmail saved it (${why}). Do not call ` +
+          "create_draft again yet: ask the user to look in Gmail's Drafts first, or a second copy may be saved.",
+        false,
+      );
+    }
+    return this.markDraft(draft);
   }
 
   /**

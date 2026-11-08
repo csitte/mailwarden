@@ -10,6 +10,7 @@ import path from "node:path";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 import { Gmail } from "../src/gmail.js";
+import { ToolError } from "../src/cli.js";
 import { DRAFT_LABEL, LEGACY_DRAFT_LABEL } from "../src/draft.js";
 
 vi.mock("../src/auth.js", async (orig) => ({
@@ -124,6 +125,53 @@ describe("Gmail — draft calls", () => {
     expect(ref.marked).toBe(false);
     expect(ref.draftId).toBe("r1");
   });
+
+  it("does not save a draft twice: a failure after which Gmail may have saved it is not retried", async () => {
+    for (const err of [
+      Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
+      Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
+      Object.assign(new Error("bad gateway"), { status: 502 }),
+      Object.assign(new Error("backend"), { status: 500 }),
+    ]) {
+      let creates = 0;
+      const api: any = {
+        users: {
+          drafts: {
+            create: async () => {
+              creates++;
+              throw err;
+            },
+          },
+        },
+      };
+      const failure = await new Gmail(api as gmail_v1.Gmail).createDraft("x").catch((e) => e);
+      expect(creates).toBe(1);
+      expect(failure).toBeInstanceOf(ToolError);
+      expect(failure.retryable).toBe(false);
+      expect(failure.message).toMatch(/does not say whether Gmail saved it/);
+      expect(failure.message).toMatch(/Drafts first/);
+    }
+  });
+
+  it("retries a create that provably did nothing (refused connection, rate limit)", async () => {
+    for (const err of [
+      Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }),
+      Object.assign(new Error("too many"), { status: 429 }),
+    ]) {
+      let creates = 0;
+      const { api } = draftApi();
+      const create = api.users.drafts.create;
+      api.users.drafts.create = async (args: unknown) => {
+        if (creates++ === 0) throw err;
+        return create(args);
+      };
+      const g = new Gmail(api as gmail_v1.Gmail);
+      // The backoff sleeps for real here: one wait of about half a second.
+      const ref = await g.createDraft("x");
+      expect(creates).toBe(2);
+      expect(ref.draftId).toBe("r1");
+    }
+  }, 10_000);
 
   it("updates with the thread passed again and marks the new message id", async () => {
     const { api, calls } = draftApi();
