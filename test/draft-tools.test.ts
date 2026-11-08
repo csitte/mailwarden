@@ -130,6 +130,11 @@ describe("Gmail — draft calls", () => {
     for (const err of [
       Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }),
       Object.assign(new Error("timeout"), { code: "ETIMEDOUT" }),
+      // Without a code: the general error mapper calls these retryable network errors, so they
+      // must not reach it raw from a create.
+      Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
+      new Error("request timed out"),
+      Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
       Object.assign(new Error("bad gateway"), { status: 502 }),
       Object.assign(new Error("backend"), { status: 500 }),
     ]) {

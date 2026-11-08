@@ -352,6 +352,21 @@ function isUnsentNetworkError(err: unknown): boolean {
   return typeof e?.code === "string" && UNSENT_NET_CODES.has(e.code);
 }
 
+const NETWORK_FAILURE = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|ENOTFOUND|socket hang up|aborted|timed? ?out/i;
+
+/**
+ * True for the transport-level failures where the request never got an answer — what the error
+ * mapper reports as a retryable `network_error`. Wider than `isRetryableNetworkError` (which decides
+ * the backoff's own retries): it also takes an abort or a timeout that carries no code. `createDraft`
+ * uses it so that no such failure reaches the model as "safe to try again".
+ */
+export function isNetworkError(err: unknown): boolean {
+  const e = err as { code?: unknown; name?: unknown; message?: unknown };
+  if (typeof e?.code === "string" && NETWORK_FAILURE.test(e.code)) return true;
+  if (e?.name === "AbortError" || e?.name === "TimeoutError") return true;
+  return typeof e?.message === "string" && NETWORK_FAILURE.test(e.message);
+}
+
 function isRetryableNetworkError(err: unknown): boolean {
   const e = err as { code?: unknown; message?: unknown };
   if (typeof e?.code === "string" && RETRYABLE_NET_CODES.has(e.code)) return true;
@@ -2008,8 +2023,9 @@ export class Gmail {
       const status = statusOf(err);
       const upstream = status !== undefined && status >= 500;
       // A refused connection that outlasted its retries still proves nothing was saved: it fails
-      // as the network error it is, safe to try again, not as "look in Drafts first".
-      if (isUnsentNetworkError(err) || (!upstream && !isRetryableNetworkError(err))) throw err;
+      // as the network error it is, safe to try again, not as "look in Drafts first". Every other
+      // network failure — with or without a code, an abort and a timeout too — may have saved it.
+      if (isUnsentNetworkError(err) || (!upstream && !isNetworkError(err))) throw err;
       const why = err instanceof Error ? err.message : String(err);
       throw new ToolError(
         upstream ? "upstream_unavailable" : "network_error",

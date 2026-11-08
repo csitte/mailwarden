@@ -11,7 +11,7 @@
  * testable against real error shapes without a mailbox.
  */
 import { ToolError, type ToolErrorCode } from "./cli.js";
-import { isInsufficientScope, isInvalidGrant, isRateLimitError, statusOf } from "./gmail.js";
+import { isInsufficientScope, isInvalidGrant, isNetworkError, isRateLimitError, statusOf } from "./gmail.js";
 
 export interface ToolFailure {
   code: ToolErrorCode;
@@ -26,15 +26,6 @@ export interface ToolFailure {
   retryAfterSeconds?: number;
 }
 
-const RETRYABLE_NET = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|ENOTFOUND|socket hang up|aborted|timed? ?out/i;
-
-/** True for the transport-level failures where the request never got an answer. */
-function isNetworkError(err: unknown): boolean {
-  const e = err as { code?: unknown; name?: unknown; message?: unknown };
-  if (typeof e?.code === "string" && RETRYABLE_NET.test(e.code)) return true;
-  if (e?.name === "AbortError" || e?.name === "TimeoutError") return true;
-  return typeof e?.message === "string" && RETRYABLE_NET.test(e.message);
-}
 
 /**
  * Classify one thrown error.
