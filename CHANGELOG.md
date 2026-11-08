@@ -55,7 +55,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   what a session read, which mailwarden does not keep. The sent-mail query was measured on 8 Nov 2026
   against a live mailbox: a known recipient has hits, a made-up address none. An address with a
   character the search would read as syntax (`{`, `}`, a quote, a bracket, which RFC 5322 allows in
-  the local part) is not looked up and gets no history fact rather than a wrong one.
+  the local part, or a leading `-`, which might read as negation) is not looked up and gets no history fact rather than a wrong one.
 
 ### Changed
 - **The draft mark is now `MCP/Composed`, not `MCP/Drafts`.** Gmail keeps user labels when a draft

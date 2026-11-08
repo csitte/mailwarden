@@ -117,7 +117,8 @@ describe("the dialog and the result say what is known about a new recipient", ()
     expect(sentTo.mock.calls).toEqual([["bob@else.example"]]);
     expect(r.recipientNotes).toEqual(["bob@else.example: written to before"]);
     expect(searchableAddress("x.y+tag%z-1@xn--mnchen-3ya.example")).toBe(true);
-    for (const a of ["a}b@x.example", 'a"b@x.example', "a(b)@x.example", "a b@x.example", "a:b@x.example"]) {
+    // A leading "-" could read as negation after "to:" (grok-mailwarden N39, not measured): not looked up.
+    for (const a of ["a}b@x.example", 'a"b@x.example', "a(b)@x.example", "a b@x.example", "a:b@x.example", "-a@x.example"]) {
       expect(searchableAddress(a)).toBe(false);
     }
   });

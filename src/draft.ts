@@ -272,7 +272,8 @@ export function describeFacts(f: RecipientFacts | undefined): string[] {
  * rather than a wrong one. The domain is already ASCII here (xn-- for an IDN).
  */
 export function searchableAddress(address: string): boolean {
-  return /^[a-z0-9._%+-]+@[a-z0-9.-]+$/i.test(address);
+  // No leading "-": after `to:` it might read as negation (grok-mailwarden N39, not measured).
+  return /^[a-z0-9._%+][a-z0-9._%+-]*@[a-z0-9.-]+$/i.test(address);
 }
 
 /**
