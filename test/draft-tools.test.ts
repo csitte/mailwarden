@@ -173,6 +173,25 @@ describe("Gmail — draft calls", () => {
     }
   }, 10_000);
 
+  it("a refused connection that outlasts its retries fails as a network error, not as 'look in Drafts first'", async () => {
+    let creates = 0;
+    const err = Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" });
+    const api: any = {
+      users: {
+        drafts: {
+          create: async () => {
+            creates++;
+            throw err;
+          },
+        },
+      },
+    };
+    // The backoff sleeps for real here: three waits, under three seconds together.
+    const failure = await new Gmail(api as gmail_v1.Gmail).createDraft("x").catch((e) => e);
+    expect(creates).toBeGreaterThan(1);
+    expect(failure).toBe(err);
+  }, 10_000);
+
   it("updates with the thread passed again and marks the new message id", async () => {
     const { api, calls } = draftApi();
     const ref = await new Gmail(api as gmail_v1.Gmail).updateDraft("r1", "x", "t1");

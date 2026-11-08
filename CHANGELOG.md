@@ -101,7 +101,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the draft, and the retry then saved a second copy. Most likely with a large attachment, whose
   upload takes long. `drafts.create` is now retried only when the failure proves nothing was saved
   (a rate-limit answer, a refused connection, a name that did not resolve); otherwise it fails at
-  once with `retryable: false` and asks to look in Gmail's Drafts before trying again.
+  once with `retryable: false` and asks to look in Gmail's Drafts before trying again. A refused
+  connection that outlasts its retries fails as the ordinary network error, since it still proves
+  nothing was saved.
   `drafts.update` keeps the retries: writing the same content twice changes nothing. Found in the
   draft-focused comparison round of 8 Nov 2026, from the code, not measured; taylorwilsdon's
   server retries its draft create the same way.

@@ -2007,7 +2007,9 @@ export class Gmail {
     } catch (err) {
       const status = statusOf(err);
       const upstream = status !== undefined && status >= 500;
-      if (!upstream && !isRetryableNetworkError(err)) throw err;
+      // A refused connection that outlasted its retries still proves nothing was saved: it fails
+      // as the network error it is, safe to try again, not as "look in Drafts first".
+      if (isUnsentNetworkError(err) || (!upstream && !isRetryableNetworkError(err))) throw err;
       const why = err instanceof Error ? err.message : String(err);
       throw new ToolError(
         upstream ? "upstream_unavailable" : "network_error",
@@ -2096,8 +2098,9 @@ export class Gmail {
   /**
    * Whether a mail of this account went to `address` before, as To, Cc or Bcc: one `messages.list`
    * of the sent mail, one result. `messages.list`, not `threads.list`, which can answer from a
-   * stale thread state (docs/gmail-thread-read-state-drift.md). The address is a bare, checked
-   * addr-spec, so it cannot widen the query.
+   * stale thread state (docs/gmail-thread-read-state-drift.md). The address goes into the query
+   * unquoted, so only one `searchableAddress` (src/draft.ts) accepts may be passed: a checked
+   * addr-spec can still carry `{` or `}`, which the query would read as syntax (N38).
    */
   async sentTo(address: string): Promise<boolean> {
     const res = await this.req(() =>
