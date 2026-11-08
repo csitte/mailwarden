@@ -1967,7 +1967,7 @@ export class Gmail {
    * Drafts and emoji reactions are left out whichever way the message is named, as `replySource`
    * leaves them out.
    * `undefined` when nothing in the thread matches. A second `threads.get`, in `full` format, made
-   * only when a quote is asked for.
+   * only when a quote or a forward is asked for.
    */
   async quoteSource(
     threadId: string,

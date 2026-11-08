@@ -8,7 +8,8 @@
  * `messages.attachments.get` for an attachment taken from the thread or kept from the draft, and
  * `settings.sendAs.list` to check a sender, to know the account's own addresses and to read the
  * signature, `messages.list` of the sent mail to say whether a new recipient was written to before,
- * and a second `threads.get` in `full` format when a reply quotes the message it answers);
+ * and a second `threads.get` in `full` format when a reply quotes the message it answers or a draft
+ * forwards one);
  * `drafts.send` and `messages.send` stay refused in src/egress.ts whatever is enabled.
  */
 
@@ -646,7 +647,7 @@ export async function reviseDraft(
 /**
  * A draft that forwards a mail of the thread: the caller names the recipients, the subject becomes
  * "Fwd: …", and below the body (and the signature) comes the forwarded mail's header block and its
- * text — never its HTML. Its attachments come along unless `forwardAttachments: false`; each is one
+ * text — the text part, or its HTML reduced to text when it has none; never its markup. Its attachments come along unless `forwardAttachments: false`; each is one
  * that mail carried, so the dialog asks when a recipient never received that mail, which for a
  * forward is the rule. The draft goes into the mail's thread, as Gmail files a forward (measured
  * 4 Nov 2026), with In-Reply-To and References naming the mail, so update_draft can find it again.

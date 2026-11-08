@@ -26,10 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A mail can be forwarded as a draft.** `create_draft` with `threadId`, `forward: true` and `to`
   forwards a mail of the thread (`messageId`, default the newest real message) to the recipients you
   name: subject `Fwd: …` (one that already says forward stays), below the body and signature the
-  mail's From/Date/Subject/To/Cc block and its plain text — never its HTML, the same rule as a quote
+  mail's From/Date/Subject/To/Cc block and its text — the text part, or the HTML reduced to text
+  when there is none, never markup, images or styles, the same rule as a quote
   — in German for a German locale and English otherwise, and its attachments unless
-  `forwardAttachments: false`. More than ten attachments, or more than 25 MB, is refused before a
-  byte is fetched; a forward too long for the body limit is refused rather than cut. The draft goes
+  `forwardAttachments: false` (none from a mail in the trash or spam). More than ten of the mail's
+  attachments, or more than 25 MB of them, is refused before a byte is fetched; a forward too long for the body limit is refused rather than cut. The draft goes
   into the mail's thread with In-Reply-To and References naming the mail; `update_draft` takes
   `forward: true` to forward it again below a new body. A recipient the mail never went to is new
   and asked about, and so is each attachment going to them, as the reply rules already had it; the
@@ -41,7 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The draft dialog says what is known about each new recipient.** Next to "(new)" it now names:
   never written to / written to before (one `messages.list` of the sent mail per address, the first
   ten; `messages.list`, not `threads.list`; a failed lookup says nothing rather than "never" and does
-  not hold up the draft), only in the answered mail's `Reply-To`, looks like a known domain (one edit
+  not fail the draft, though a rate-limited one can delay it by about 20 seconds), only in the answered mail's `Reply-To`, looks like a known domain (one edit
   off a domain of the thread, the draft's old recipients or the account for a domain under ten
   characters, two from there on — `gmx.at` and `gmx.de` are two apart and not flagged; a domain that
   is itself one of those is never flagged, so a thread with a company's `.de` and `.at` addresses
@@ -81,7 +82,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `Re[2]:`), AW (German), SV (Nordic), Antw (Dutch), Odp (Polish), YNT (Turkish), after tags such as
   "[EXT]" — stays as it is, and the other side sees their own subject; it threads either way, the
   reply carries In-Reply-To. A forward prefix ("WG:", "Fwd:") still gets its "Re:", and so does
-  "VS:", which answers in Finnish but forwards elsewhere in the Nordics. From agentcomms' subject handling, found in the comparison round of 8 Nov 2026.
+  "VS:", which answers in Finnish but forwards elsewhere in the Nordics. From agentcomms' subject
+  handling, found in the comparison round of 8 Nov 2026.
 
 ### Fixed
 - **A file a mailer marks `inline` is still an attachment unless it is an image.** A hotel's
@@ -89,7 +91,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   referenced; mailwarden counted it as an inline asset and left it out of `get_thread`, the
   search's attachment list and a forward, while Gmail's own forward of the same mail carried it as
   an attachment. Now `inline` drops only an image, and a Content-ID the text references drops any
-  part, as before. Found in a live test of forwarding, 8 Nov 2026.
+  part not marked `attachment`, as before. Found in a live test of forwarding, 8 Nov 2026.
 - **A reply never answers a Gmail emoji reaction.** A reaction is a mail of its own in the thread,
   and when it was the newest one, `create_draft` without `messageId` answered it: the reply went to
   whoever reacted, hung off a chip Gmail does not show as a message, and a quote quoted the

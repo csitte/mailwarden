@@ -796,7 +796,8 @@ export interface DraftContent extends Recipients {
   /** For a forward: the forwarded mail's From line, for the dialog. */
   forwards?: string;
   /**
-   * The same content as HTML, when a reply quotes (`quoteHtml`) or a signature is added: the message
+   * The same content as HTML, when a reply quotes (`quoteHtml`), a draft forwards (`withForward`) or a
+   * signature is added: the message
    * then carries text and HTML as `multipart/alternative`. Omitted: text only.
    */
   html?: string;

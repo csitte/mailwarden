@@ -254,7 +254,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `preview_filter` | Check a filter before creating it: how many messages its criteria match today (`currentMatches`, from the same index an `applyToExisting` sweep would use), which existing filters have exactly the same criteria (`sameCriteria`) and which share a `from`/`to`/`subject`/`query` value with it (`overlapping`, with the shared fields named), which `addLabels` names would be created, and whether the action trashes every future match. Read-only; same validation as `create_filter` |
 | `create_filter` | Create a server-side auto-triage rule (criteria → label actions only; **no forwarding** — see below). Optionally `applyToExisting` to also sweep matching mail already in the mailbox |
 | `delete_filter` | Delete a filter by id |
-| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, `Re:` subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. `from` picks one of the account's send-as addresses; `quote` quotes the answered message below a reply; the sender's signature from Gmail's settings is added unless `signature: false`; `forward: true` forwards a mail of the thread, with its attachments, to the people you name. A new message, any address the thread did not already contain, any file from the disk and any sender other than the main address is confirmed in a client dialog; the exceptions are a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`, and every draft with `MAILWARDEN_DRAFT_CONFIRM=off` ([details](#drafts-opt-in--written-here-sent-by-you)) |
+| `create_draft` | **`drafts` tier, off by default.** Save a reply (recipients, subject and threading taken from the thread) or a new message as a Gmail draft, optionally with attachments — files from `MAILWARDEN_ATTACH_DIR`, or attachments of a message in the reply's thread. Never sent — you send it from Gmail. `from` picks one of the account's send-as addresses; `quote` quotes the answered message below a reply; the sender's signature from Gmail's settings is added unless `signature: false`; `forward: true` forwards a mail of the thread, with its attachments, to the people you name. A new message, any address the thread did not already contain, any file from the disk and any sender other than the main address is confirmed in a client dialog; the exceptions are a draft to your own address alone with `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1`, and every draft with `MAILWARDEN_DRAFT_CONFIRM=off` ([details](#drafts-opt-in--written-here-sent-by-you)) |
 | `update_draft` | **`drafts` tier.** Replace the text, and optionally the subject, recipients or attachments, of a draft `create_draft` wrote; any other draft is refused, and so is one changed in Gmail since (it takes the draft's last `messageId`). Attachments not mentioned, and the sender, are kept; `quote` quotes the answered message again (`forward` forwards the mail again), and the signature is added again unless `signature: false`. A new address, a new file or a new alias sender is confirmed like one in `create_draft` |
 
 All tools declare an `outputSchema` and return **structured content** (validated, machine-readable)
@@ -434,7 +434,8 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
 
 - **`create_draft`, reply:** pass a `threadId`. The recipients come from the message being answered
   (`Reply-To`, else `From`; the original `To` when that message is yours; `replyAll` adds the other
-  `To` and `Cc`), the subject becomes `Re: …`, and `In-Reply-To`/`References` keep it in the thread.
+  `To` and `Cc`), the subject becomes `Re: …` (one that already says reply, "AW:" or "SV:" for
+  example, stays), and `In-Reply-To`/`References` keep it in the thread.
   `cc`/`bcc` add people.
 - **Quote** (`quote: true`, replies only, both tools): the answered message goes below the text,
   the way a mail client quotes it — a line such as "On Thu, 5 Nov 2026 at 9:56 Ann
@@ -459,19 +460,21 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   sender — the alias's own when the draft goes from an alias — goes below the text, after a `-- `
   line, and in a reply above the quote, where Gmail puts it. The draft then also carries an HTML
   rendering, with the signature as Gmail stores it: links and formatting included, since you wrote it
-  in Gmail's settings and no mailwarden tool can change those. `signature: false` leaves it out; an
+  in Gmail's settings and no mailwarden tool can change it. `signature: false` leaves it out; an
   account without a signature gets none, and a signature that is only an image is left out, because
   the text part would carry nothing of it. A text that already ends with the signature, say one read
-  back from the draft, is not signed twice. The result says `signed`. A draft without signature and
-  without quote is plain text only, as before.
+  back from the draft, is not signed twice. The result says `signed`. A draft without signature, quote
+  or forward is plain text only, as before.
 - **`create_draft`, new message:** omit `threadId`, pass `to` and `subject`.
 - **`create_draft`, forward:** pass a `threadId`, `forward: true` and `to` (and optionally the
   `messageId` of the mail; default the newest message that is neither a draft nor an emoji
   reaction). The subject becomes `Fwd: …` (a subject that already says forward, "WG:" or "TR:" for
   example, stays), and below the text and the signature comes the forwarded mail's
-  From/Date/Subject/To/Cc block and its plain text — never its HTML, images or styles; in German
+  From/Date/Subject/To/Cc block and its text (the text part, or the HTML reduced to text when there
+  is none; never its markup, images or styles); in German
   for a German locale, in English otherwise. Its attachments come along unless
-  `forwardAttachments: false` (inline images are not attachments). The draft goes into the mail's
+  `forwardAttachments: false` (inline images are not attachments; a mail in the trash or spam
+  forwards without its attachments). The draft goes into the mail's
   thread, as Gmail files a forward. A recipient the mail never went to is new and asked about, and
   so is every attachment going to them. `update_draft` takes `forward: true` to forward the mail
   again below a new text, like `quote`.
@@ -606,7 +609,7 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
   `MAILWARDEN_ALLOW_NO_TOKEN=1` to override on a trusted, isolated network. On a loopback bind it
   also validates the `Host` header (DNS-rebinding defense). For remote hosting, set `MAILWARDEN_HOST`
   and front it with TLS.
-- **No send tools — by design.** mailwarden cannot send, reply, or forward, and by default it cannot
+- **No send tools — by design.** mailwarden cannot send anything (no reply, no forward, no new message), and by default it cannot
   compose either; only the opt-in `drafts` tier writes drafts, which you send yourself. A prompt-injected
   instruction inside an email has no exfiltration path through this server. `create_filter` follows
   the same rule: it can label, archive, trash, star or mark mail, but **never** creates a *forwarding*
@@ -903,7 +906,7 @@ those rules come from).
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (2210 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (2294 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 
