@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import type { gmail_v1 } from "@googleapis/gmail";
-import { describeFacts, editDistance, lookalikeOf, staticFacts } from "../src/draft.js";
+import { describeFacts, editDistance, lookalikeOf, searchableAddress, staticFacts } from "../src/draft.js";
 import { saveNewDraft, saveReplyDraft, type DraftGmail } from "../src/draft-flow.js";
 import { Gmail } from "../src/gmail.js";
 
@@ -100,6 +100,18 @@ describe("the dialog and the result say what is known about a new recipient", ()
     expect(confirm.mock.calls[1][1]).toContain("To: bob@else.example (new)");
     expect(r2.recipientNotes).toBeUndefined();
     expect(r2.draftId).toBe("r1");
+  });
+
+  it("does not look up an address the sent-mail search would read as syntax (N38)", async () => {
+    const sentTo = vi.fn(async () => true);
+    const odd = "a}b{c@else.example";
+    const r = await saveNewDraft(fakeGmail({ sentTo }), { to: [odd, "bob@else.example"], subject: "s", body: "b" }, vi.fn(async () => true));
+    expect(sentTo.mock.calls).toEqual([["bob@else.example"]]);
+    expect(r.recipientNotes).toEqual(["bob@else.example: written to before"]);
+    expect(searchableAddress("x.y+tag%z-1@xn--mnchen-3ya.example")).toBe(true);
+    for (const a of ["a}b@x.example", 'a"b@x.example', "a(b)@x.example", "a b@x.example", "a:b@x.example"]) {
+      expect(searchableAddress(a)).toBe(false);
+    }
   });
 
   it("looks up at most ten new recipients", async () => {

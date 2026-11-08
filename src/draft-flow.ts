@@ -25,6 +25,7 @@ import {
   quoteLines,
   describeFacts,
   draftDialog,
+  searchableAddress,
   staticFacts,
   type RecipientFacts,
   isMimeType,
@@ -758,7 +759,8 @@ const MAX_HISTORY_LOOKUPS = 10;
 /**
  * What is known about each new recipient: the facts that need no call (`staticFacts`), and whether
  * the account wrote to the address before — one `messages.list` of the sent mail each, for the
- * first ten. A failed lookup says nothing rather than "never": the draft is not held up by it.
+ * first ten. A failed lookup says nothing rather than "never": the draft is not held up by it. Nor
+ * does an address whose characters the search would read as syntax (`searchableAddress`).
  */
 async function factsFor(
   gmail: DraftGmail,
@@ -768,7 +770,7 @@ async function factsFor(
 ): Promise<Record<string, RecipientFacts>> {
   const facts = staticFacts(unknown, known, replyTo);
   if (!gmail.sentTo) return facts;
-  const lookups = unknown.slice(0, MAX_HISTORY_LOOKUPS);
+  const lookups = unknown.filter(searchableAddress).slice(0, MAX_HISTORY_LOOKUPS);
   const answers = await Promise.all(lookups.map((a) => gmail.sentTo!(a).catch(() => undefined)));
   lookups.forEach((a, i) => {
     if (answers[i] !== undefined) facts[a] = { ...facts[a], writtenTo: answers[i] };

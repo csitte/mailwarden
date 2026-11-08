@@ -263,6 +263,17 @@ export function describeFacts(f: RecipientFacts | undefined): string[] {
 }
 
 /**
+ * Whether an address can go into the sent-mail search `in:sent {to:A cc:A bcc:A}` as it is. RFC 5322
+ * allows `{`, `}`, `(`, `"` and more in the local part, and Gmail's query language reads some of
+ * them as syntax: a `}` could close the group early and answer "written to before" for a different
+ * query (Grok's N38, 8 Nov 2026). Such an address is not looked up, so it gets no history fact
+ * rather than a wrong one. The domain is already ASCII here (xn-- for an IDN).
+ */
+export function searchableAddress(address: string): boolean {
+  return /^[a-z0-9._%+-]+@[a-z0-9.-]+$/i.test(address);
+}
+
+/**
  * The facts about each new recipient that need no Gmail call: a near miss of a known domain, an
  * internationalised domain, an address only the answered mail's Reply-To names. `known` is every
  * address the draft can vouch for — the thread's, the draft's old recipients, the account's own.
