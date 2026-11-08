@@ -6,8 +6,9 @@
  * Nothing in this file sends. The Gmail calls it can reach are `drafts.create`, `drafts.update`
  * and `drafts.get` (plus the read and label calls the rest of mailwarden uses,
  * `messages.attachments.get` for an attachment taken from the thread or kept from the draft, and
- * `settings.sendAs.list` to check a sender and to know the account's own addresses, and a second
- * `threads.get` in `full` format when a reply quotes the message it answers);
+ * `settings.sendAs.list` to check a sender, to know the account's own addresses and to read the
+ * signature, `messages.list` of the sent mail to say whether a new recipient was written to before,
+ * and a second `threads.get` in `full` format when a reply quotes the message it answers);
  * `drafts.send` and `messages.send` stay refused in src/egress.ts whatever is enabled.
  */
 
@@ -22,7 +23,10 @@ import {
   checkContent,
   checkTotalBytes,
   quoteLines,
+  describeFacts,
   draftDialog,
+  staticFacts,
+  type RecipientFacts,
   isMimeType,
   mimeTypeFor,
   normalizeRecipient,
@@ -56,6 +60,8 @@ export interface DraftGmail {
   threadAttachments(threadId: string): Promise<ThreadAttachment[]>;
   attachmentBytes(messageId: string, attachmentId: string): Promise<Buffer>;
   sendAsAddresses(): Promise<SendAs[]>;
+  /** Whether a mail of this account went to the address before; `undefined` when that cannot be said. */
+  sentTo?(address: string): Promise<boolean | undefined>;
   quoteSource(
     threadId: string,
     which: { messageId?: string; rfcMessageId?: string },
@@ -116,6 +122,8 @@ export interface DraftResult extends Recipients {
   subject: string;
   /** Addresses that were not in the thread (reply) or in the draft before (update). */
   newRecipients: string[];
+  /** What is known about the new recipients: "x@y: never written to, looks like z" — only when there is something to say. */
+  recipientNotes?: string[];
   /** Whether the person was shown a dialog and said yes. */
   confirmedByUser: boolean;
   /** The mark that lets update_draft change this draft later. */
@@ -450,6 +458,7 @@ export async function saveReplyDraft(
   // may carry the Unicode one.
   const threadAddresses = [...normalizeLenient(source.from), ...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
   const unknown = unknownRecipients(recipients, threadAddresses);
+  const facts = await factsFor(gmail, unknown, [...threadAddresses, main, ...aliases], normalizeLenient(source.replyTo));
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
   const sig = await signatureFor(input.signature, sendAs, from ?? main);
   const quote = input.quote ? await quoteFor(gmail, input.threadId, { messageId: answered }, input.body, sig) : undefined;
@@ -461,6 +470,7 @@ export async function saveReplyDraft(
     ...text.content,
     ...replyThreading(source),
     attachments,
+    facts,
   };
   const raw = buildMime(content);
   await markNewReach(attachments, recipients, async () => [emailAddress]);
@@ -497,9 +507,10 @@ export async function saveNewDraft(
   const from = input.from === undefined ? undefined : await checkFrom(input.from, main, sendAs);
   const attachments = await resolveAttachments(gmail, input.attachments ?? [], { readFile: opts.readFile ?? noFiles });
   const text = composeText(input.body, await signatureFor(input.signature, sendAs, from ?? main), undefined);
-  const content: DraftContent = { ...recipients, from, subject: input.subject, ...text.content, attachments };
-  const raw = buildMime(content);
   const unknown = unknownRecipients(recipients, []);
+  const facts = await factsFor(gmail, unknown, [main, ...(await aliasesOf(sendAs, main))]);
+  const content: DraftContent = { ...recipients, from, subject: input.subject, ...text.content, attachments, facts };
+  const raw = buildMime(content);
   // A new message has no thread to vouch for anyone: always asked, never written unasked — unless
   // the opt-in is on and every recipient is the owner's own address (see `modeFor`).
   const widens = reachesNew(attachments) || from !== undefined;
@@ -569,6 +580,7 @@ export async function reviseDraft(
       ? await quoteFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body, sig)
       : undefined;
   const text = composeText(input.body, sig, quote);
+  const facts = await factsFor(gmail, unknown, [...old.to, ...old.cc, ...old.bcc, main]);
   const content: DraftContent = {
     ...recipients,
     from,
@@ -576,6 +588,7 @@ export async function reviseDraft(
     ...text.content,
     ...threading,
     attachments,
+    facts,
   };
   const raw = buildMime(content);
   await markNewReach(attachments, recipients, async () => [main]);
@@ -594,6 +607,30 @@ export async function reviseDraft(
     withQuoteResult(result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main), quote),
     text.signNote,
   );
+}
+
+/** At most this many new recipients are looked up in the sent mail: one `messages.list` each. */
+const MAX_HISTORY_LOOKUPS = 10;
+
+/**
+ * What is known about each new recipient: the facts that need no call (`staticFacts`), and whether
+ * the account wrote to the address before — one `messages.list` of the sent mail each, for the
+ * first ten. A failed lookup says nothing rather than "never": the draft is not held up by it.
+ */
+async function factsFor(
+  gmail: DraftGmail,
+  unknown: readonly string[],
+  known: readonly string[],
+  replyTo: readonly string[] = [],
+): Promise<Record<string, RecipientFacts>> {
+  const facts = staticFacts(unknown, known, replyTo);
+  if (!gmail.sentTo) return facts;
+  const lookups = unknown.slice(0, MAX_HISTORY_LOOKUPS);
+  const answers = await Promise.all(lookups.map((a) => gmail.sentTo!(a).catch(() => undefined)));
+  lookups.forEach((a, i) => {
+    if (answers[i] !== undefined) facts[a] = { ...facts[a], writtenTo: answers[i] };
+  });
+  return facts;
 }
 
 /**
@@ -623,6 +660,14 @@ function composeText(
   const r = withSignature(body, sig);
   if ("reason" in r) return { content: { body }, signNote: r.reason };
   return { content: { body: r.body, html: r.html, signature: sig.text } };
+}
+
+function notesOf(unknown: readonly string[], facts: Record<string, RecipientFacts> | undefined): { recipientNotes?: string[] } {
+  const notes = unknown.flatMap((a) => {
+    const said = describeFacts(facts?.[a]);
+    return said.length ? [`${a}: ${said.join(", ")}`] : [];
+  });
+  return notes.length ? { recipientNotes: notes } : {};
 }
 
 function withSignNote(r: DraftResult, reason: string | undefined): DraftResult {
@@ -722,6 +767,7 @@ function result(
     bcc: content.bcc,
     subject: content.subject,
     newRecipients: unknown,
+    ...notesOf(unknown, content.facts),
     confirmedByUser,
     marked: ref.marked,
     attachments: (content.attachments ?? []).map((a) => ({

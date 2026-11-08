@@ -372,7 +372,7 @@ describe("saveReplyDraft", () => {
       const { gmail, created } = withReplyTo("attacker@evil.example");
       const confirm = vi.fn(async () => true);
       const r = await saveReplyDraft(gmail, { threadId: "t1", body: "x" }, "off", confirm);
-      expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("attacker@evil.example (new)"));
+      expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("attacker@evil.example (new: only in the answered mail's Reply-To)"));
       expect(r).toMatchObject({ to: ["attacker@evil.example"], newRecipients: ["attacker@evil.example"], confirmedByUser: true });
       expect(created).toHaveLength(1);
     });
@@ -393,7 +393,7 @@ describe("saveReplyDraft", () => {
         const { gmail } = withReplyTo("attacker@evil.example");
         const confirm = vi.fn(async () => true);
         await saveReplyDraft(gmail, { threadId: "t1", body: "x", ...extra }, "off", confirm);
-        expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("(new)"));
+        expect(confirm).toHaveBeenCalledWith("require", expect.stringContaining("(new"));
       }
     });
 
@@ -541,7 +541,7 @@ describe("saveNewDraft — the self opt-in picks the mode", () => {
       expect(confirm).toHaveBeenCalledWith("require", expect.any(String));
     }
   });
-  it("reads the profile once, to name the sender, and the send-as list once for the signature, or not at all without one", async () => {
+  it("reads the profile once, to name the sender, and the send-as list once, for the signature and the account's own domains", async () => {
     const { gmail } = fakeGmail();
     const spy = own(gmail);
     const list = vi.spyOn(gmail, "sendAsAddresses");
@@ -551,7 +551,7 @@ describe("saveNewDraft — the self opt-in picks the mode", () => {
     expect(r.from).toBe("me@example.com");
     list.mockClear();
     await saveNewDraft(gmail, { to: ["me@example.com"], subject: "Hi", body: "x", signature: false }, vi.fn(async () => true));
-    expect(list).not.toHaveBeenCalled();
+    expect(list).toHaveBeenCalledTimes(1);
   });
 });
 

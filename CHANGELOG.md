@@ -23,6 +23,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   8 Nov 2026. Whether Gmail would add a signature itself when you open such a draft was not
   measured.
 
+- **The draft dialog says what is known about each new recipient.** Next to "(new)" it now names:
+  never written to / written to before (one `messages.list` of the sent mail per address, the first
+  ten; `messages.list`, not `threads.list`; a failed lookup says nothing rather than "never" and does
+  not hold up the draft), only in the answered mail's `Reply-To`, looks like a known domain (one edit
+  off a domain of the thread, the draft's old recipients or the account for a domain under ten
+  characters, two from there on — `gmx.at` and `gmx.de` are two apart and not flagged), and an
+  internationalised domain (`xn--`). The result repeats them as `recipientNotes`, only when there is
+  something to say, so a deployment with `MAILWARDEN_DRAFT_CONFIRM=off` still gets them; the tool
+  descriptions ask the model to pass them on word for word. Facts, not verdicts: nothing is refused
+  because of them. From agentcomms' send dialog (EXTERNAL, FIRST-TIME, LOOKS LIKE), which asks only
+  at sending; mailwarden asks when the draft is saved. Its "seen in mail you read" needs a record of
+  what a session read, which mailwarden does not keep. The sent-mail query was measured on 8 Nov 2026
+  against a live mailbox: a known recipient has hits, a made-up address none.
+
 ### Changed
 - **The draft mark is now `MCP/Composed`, not `MCP/Drafts`.** Gmail keeps user labels when a draft
   becomes the sent message, so the mark stays on the mail after you send it (seen 6 Nov 2026 in two

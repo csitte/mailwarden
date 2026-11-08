@@ -202,6 +202,84 @@ export function onlyOwnAddresses(unknown: readonly string[], own: readonly strin
   return unknown.length > 0 && unknown.every((a) => mine.has(a.toLowerCase()));
 }
 
+/** The domain of a bare address, lower-cased; "" when it has none. */
+export function domainOf(address: string): string {
+  const at = address.lastIndexOf("@");
+  return at === -1 ? "" : address.slice(at + 1).toLowerCase();
+}
+
+/** Levenshtein distance, given up past `cap`: only "is this one or two edits away" is asked. Pure. */
+export function editDistance(a: string, b: string, cap: number): number {
+  if (Math.abs(a.length - b.length) > cap) return cap + 1;
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) {
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    }
+    if (Math.min(...cur) > cap) return cap + 1;
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/**
+ * A known domain this one is a near miss of — `examp1e.com` for `example.com`, `example.co` for
+ * `example.com` — or `undefined`. One edit for a domain under ten characters, two from there on:
+ * on a short name two edits reach unrelated domains (`gmx.at` and `gmx.de`). Pure.
+ */
+export function lookalikeOf(domain: string, known: readonly string[]): string | undefined {
+  const cap = domain.length < 10 ? 1 : 2;
+  return [...new Set(known)].find((k) => k !== domain && k.length > 0 && editDistance(domain, k, cap) <= cap);
+}
+
+/** What the dialog and the result say about one new recipient, besides that it is new. */
+export interface RecipientFacts {
+  /** Whether a mail from this account went to the address before: true, false, or not known (the lookup failed). */
+  writtenTo?: boolean;
+  /** A known domain this address's domain is a near miss of. */
+  looksLike?: string;
+  /** The domain is internationalised (written as `xn--…`): letters from another script can pass for Latin ones. */
+  idn?: boolean;
+  /** For a reply: the address came from the answered mail's `Reply-To`, which only its sender chose. */
+  replyToOnly?: boolean;
+}
+
+/** The facts as a short phrase list, empty when there is nothing to say. Pure. */
+export function describeFacts(f: RecipientFacts | undefined): string[] {
+  if (!f) return [];
+  return [
+    ...(f.writtenTo === false ? ["never written to"] : f.writtenTo === true ? ["written to before"] : []),
+    ...(f.replyToOnly ? ["only in the answered mail's Reply-To"] : []),
+    ...(f.looksLike ? [`looks like ${f.looksLike}`] : []),
+    ...(f.idn ? ["international domain"] : []),
+  ];
+}
+
+/**
+ * The facts about each new recipient that need no Gmail call: a near miss of a known domain, an
+ * internationalised domain, an address only the answered mail's Reply-To names. `known` is every
+ * address the draft can vouch for — the thread's, the draft's old recipients, the account's own.
+ */
+export function staticFacts(
+  unknown: readonly string[],
+  known: readonly string[],
+  replyTo: readonly string[] = [],
+): Record<string, RecipientFacts> {
+  const domains = known.map(domainOf);
+  const out: Record<string, RecipientFacts> = {};
+  for (const a of unknown) {
+    const d = domainOf(a);
+    const looksLike = lookalikeOf(d, domains);
+    out[a] = {
+      ...(looksLike ? { looksLike } : {}),
+      ...(d.split(".").some((l) => l.startsWith("xn--")) ? { idn: true } : {}),
+      ...(replyTo.includes(a) ? { replyToOnly: true } : {}),
+    };
+  }
+  return out;
+}
+
 export function checkRecipients(r: Recipients): void {
   const n = r.to.length + r.cc.length + r.bcc.length;
   if (n === 0) {
@@ -624,6 +702,8 @@ export interface DraftContent extends Recipients {
   quotes?: string;
   /** The signature's text, for the dialog; omitted when the draft carries none. */
   signature?: string;
+  /** What is known about each new recipient, for the dialog. */
+  facts?: Record<string, RecipientFacts>;
   /**
    * The same content as HTML, when a reply quotes (`quoteHtml`) or a signature is added: the message
    * then carries text and HTML as `multipart/alternative`. Omitted: text only.
@@ -752,7 +832,11 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
           : "from a mail in the thread"
         : "already in the draft";
   const files = (d.attachments ?? []).map((a) => `${dialogText(a.filename, 80)} (${formatBytes(a.data.length)}, ${origin(a)})`);
-  const mark = (a: string) => (unknown.includes(a) ? `${a} (new)` : a);
+  const mark = (a: string) => {
+    if (!unknown.includes(a)) return a;
+    const said = describeFacts(d.facts?.[a]);
+    return `${a} (new${said.length ? `: ${said.join(", ")}` : ""})`;
+  };
   const list = (label: string, xs: string[]) => (xs.length ? [`${label}: ${xs.map(mark).join(", ")}`] : []);
   const head =
     kind === "reply"

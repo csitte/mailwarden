@@ -536,7 +536,14 @@ the `gmail.readonly` token of a `read` deployment; re-run `--auth` with the tier
   A dialog nobody answers gives up after ten minutes with a retryable `declined_by_user` that says
   it timed out; nothing is written.
   The dialog shows an alias sender first, then lists the recipients and marks the new ones, then each
-  attachment with its size and origin.
+  attachment with its size and origin. A new recipient comes with what is known about it: whether
+  the account wrote to it before (one search of the sent mail per address, for the first ten; a
+  failed search says nothing rather than "never"), whether only the answered mail's `Reply-To` names
+  it, whether its domain is one or two letters off a domain of the thread or the account
+  (`examp1e.com`, `example.co`; one letter for a domain under ten characters), and whether the
+  domain is internationalised (`xn--…`). The result repeats these as `recipientNotes`, so with the
+  dialog off the model can still pass them on. Facts, not verdicts: nothing is refused because of
+  them.
 - **What it does not do.** No sending, no files from anywhere but `MAILWARDEN_ATTACH_DIR`, no
   attachment of a mail outside the reply's thread, no display names (addresses are saved bare), no
   HTML of your own — the body is plain text; only a quote or the signature adds an HTML rendering

@@ -2082,6 +2082,19 @@ export class Gmail {
   }
 
   /**
+   * Whether a mail of this account went to `address` before, as To, Cc or Bcc: one `messages.list`
+   * of the sent mail, one result. `messages.list`, not `threads.list`, which can answer from a
+   * stale thread state (docs/gmail-thread-read-state-drift.md). The address is a bare, checked
+   * addr-spec, so it cannot widen the query.
+   */
+  async sentTo(address: string): Promise<boolean> {
+    const res = await this.req(() =>
+      this.api.users.messages.list({ userId: "me", q: `in:sent {to:${address} cc:${address} bcc:${address}}`, maxResults: 1 }),
+    );
+    return (res.data.messages ?? []).length > 0;
+  }
+
+  /**
    * The attachments a reply in this thread may take, each with whom its message went between. A
    * Gmail thread is a conversation, not a group of recipients: it also holds the owner's forwards to
    * others (measured 4 Nov 2026: a sent forward sits in the thread of the mail it forwards), drafts
