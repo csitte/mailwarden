@@ -100,6 +100,25 @@ export interface ThreadAttachment extends Attachment {
  */
 const NOT_ATTACHABLE = new Set(["DRAFT", "TRASH", "SPAM"]);
 
+/**
+ * The MIME type of a Gmail emoji reaction (Google's documented format: a mail with a part of this
+ * type). Gmail shows a reaction as a chip on the message it reacts to, not as a message of its own.
+ */
+export const REACTION_MIME_TYPE = "text/vnd.google.email-reaction+json";
+
+/** Whether a message is an emoji reaction: its payload, or a part of it, has the reaction type. Pure. */
+export function isReaction(p: gmail_v1.Schema$MessagePart | undefined): boolean {
+  if (!p) return false;
+  return p.mimeType?.toLowerCase() === REACTION_MIME_TYPE || (p.parts ?? []).some(isReaction);
+}
+
+/**
+ * What `replySource` reads: every header, and the MIME type of the parts three levels down, which
+ * is where a reaction's part sits — never a body. `metadata` format would give no part types at all.
+ * Measured 8 Nov 2026 against a live mailbox: the mask is accepted and no body data comes back.
+ */
+const REPLY_SOURCE_FIELDS = "messages(id,labelIds,payload(headers,mimeType,parts(mimeType,parts(mimeType,parts(mimeType)))))";
+
 /** An attachment as `search` lists it: enough to judge it, not enough to fetch it. */
 export interface AttachmentSummary {
   filename: string;
@@ -1893,21 +1912,18 @@ export class Gmail {
     messageId?: string,
   ): Promise<{ messageId: string; source: ReplySource }> {
     const res = await this.req(() =>
-      this.api.users.threads.get({
-        userId: "me",
-        id: threadId,
-        format: "metadata",
-        metadataHeaders: ["From", "Reply-To", "To", "Cc", "Subject", "Message-ID", "References"],
-      }),
+      this.api.users.threads.get({ userId: "me", id: threadId, format: "full", fields: REPLY_SOURCE_FIELDS }),
     );
-    const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT"));
+    // Neither a draft nor an emoji reaction is a message a reply answers: a reply to a reaction would
+    // hang off a chip Gmail does not show as a message, so the newest real message is answered.
+    const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT") && !isReaction(m.payload));
     const pick = messageId ? messages.find((m) => m.id === messageId) : messages[messages.length - 1];
     if (!pick?.id) {
       throw new ToolError(
         "not_found",
         messageId
-          ? `Message ${messageId} is not part of thread ${threadId}, or it is a draft; a reply answers a sent or received message.`
-          : `Thread ${threadId} has no message to reply to (only drafts).`,
+          ? `Message ${messageId} is not part of thread ${threadId}, or it is a draft or an emoji reaction; a reply answers a sent or received message.`
+          : `Thread ${threadId} has no message to reply to (only drafts and emoji reactions).`,
       );
     }
     const h = (name: string) => headerValue(pick.payload?.headers, name);
@@ -1928,7 +1944,8 @@ export class Gmail {
   /**
    * The message a reply quotes, with its text: by Gmail id (`messageId`), by its `Message-ID`
    * header (`rfcMessageId`, what a saved draft's `In-Reply-To` names), or else the newest message.
-   * Drafts are left out whichever way the message is named, as `replySource` leaves them out.
+   * Drafts and emoji reactions are left out whichever way the message is named, as `replySource`
+   * leaves them out.
    * `undefined` when nothing in the thread matches. A second `threads.get`, in `full` format, made
    * only when a quote is asked for.
    */
@@ -1937,7 +1954,7 @@ export class Gmail {
     which: { messageId?: string; rfcMessageId?: string },
   ): Promise<{ name: string; address: string; date: Date; plaintextBody: string; htmlBody: string } | undefined> {
     const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));
-    const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT"));
+    const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT") && !isReaction(m.payload));
     const pick = which.messageId
       ? messages.find((m) => m.id === which.messageId)
       : which.rfcMessageId

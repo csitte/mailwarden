@@ -1966,7 +1966,7 @@ function registerDraftTools(
     {
       description:
         "Save an email as a Gmail DRAFT for the user to review and send. mailwarden never sends: the draft waits in Gmail's Drafts until the user presses Send there. " +
-        "Two forms. REPLY: pass threadId (and optionally messageId of the message to answer; default the newest non-draft message). " +
+        "Two forms. REPLY: pass threadId (and optionally messageId of the message to answer; default the newest message that is neither a draft nor an emoji reaction). " +
         "Recipients come from that message — Reply-To, else From; the original To when the message is the user's own; replyAll adds the other To/Cc. " +
         "Subject defaults to \"Re: <subject>\", In-Reply-To/References are set so it threads. cc/bcc add recipients; `to` is not accepted for a reply. " +
         "NEW MESSAGE: omit threadId, pass to and subject. " +

@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
-import { Gmail } from "../src/gmail.js";
+import { Gmail, REACTION_MIME_TYPE, isReaction } from "../src/gmail.js";
 import { ToolError } from "../src/cli.js";
 import { DRAFT_LABEL, LEGACY_DRAFT_LABEL } from "../src/draft.js";
 
@@ -211,6 +211,43 @@ describe("Gmail — draft calls", () => {
     await expect(new Gmail(draftApi().api).replySource("t1", "nope")).rejects.toThrow(/not part of thread/);
     // Grok review N34: a draft named by id is no answered message either.
     await expect(new Gmail(draftApi().api).replySource("t1", "d0")).rejects.toThrow(/or it is a draft/);
+  });
+
+  it("never answers an emoji reaction: the newest real message is the one replied to", async () => {
+    const { api } = draftApi();
+    let asked: any;
+    const reaction = (depth: number) => {
+      let part: any = { mimeType: "text/vnd.google.email-reaction+json" };
+      for (let i = 0; i < depth; i++) part = { mimeType: "multipart/alternative", parts: [{ mimeType: "text/plain" }, part] };
+      return part;
+    };
+    for (const depth of [0, 1, 2]) {
+      api.users.threads.get = async (r: any) => {
+        asked = r;
+        return {
+          data: {
+            messages: [
+              { id: "m1", threadId: "t1", labelIds: ["INBOX"], payload: { mimeType: "text/plain", headers: [{ name: "From", value: "ann@example.org" }, { name: "Message-ID", value: "<m1@example.org>" }] } },
+              { id: "rx", threadId: "t1", labelIds: ["INBOX"], payload: { ...reaction(depth), headers: [{ name: "From", value: "bob@example.org" }] } },
+            ],
+          },
+        };
+      };
+      const g = new Gmail(api as gmail_v1.Gmail);
+      expect((await g.replySource("t1")).messageId).toBe("m1");
+      // Part types, never bodies: the mask names mimeType and headers only.
+      expect(asked.fields).toMatch(/mimeType/);
+      expect(asked.fields).not.toMatch(/body|data/);
+      await expect(g.replySource("t1", "rx")).rejects.toThrow(/emoji reaction/);
+      expect(await g.quoteSource("t1", { messageId: "rx" })).toBeUndefined();
+    }
+  });
+
+  it("isReaction looks at the payload and its parts, case-insensitively, and nothing else", () => {
+    expect(isReaction(undefined)).toBe(false);
+    expect(isReaction({ mimeType: "text/plain" })).toBe(false);
+    expect(isReaction({ mimeType: "TEXT/VND.GOOGLE.EMAIL-REACTION+JSON" })).toBe(true);
+    expect(isReaction({ mimeType: "multipart/mixed", parts: [{ mimeType: "multipart/alternative", parts: [{ mimeType: REACTION_MIME_TYPE }] }] })).toBe(true);
   });
 
   // Grok review of 0.31.0, N37: the quote source leaves a draft out the same way, also by id.

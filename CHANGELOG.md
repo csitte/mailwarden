@@ -28,6 +28,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the grok-mailwarden review of 0.25.0 (L13); the second check by its review of this release (L15).
 
 ### Fixed
+- **A reply never answers a Gmail emoji reaction.** A reaction is a mail of its own in the thread,
+  and when it was the newest one, `create_draft` without `messageId` answered it: the reply went to
+  whoever reacted, hung off a chip Gmail does not show as a message, and a quote quoted the
+  reaction. Reactions (a part of type `text/vnd.google.email-reaction+json`, Google's documented
+  format) are now left out like drafts, also when named by id. To see the part types, the reply
+  source is read in `full` format with a field mask that returns headers and part types only, no
+  body (measured 8 Nov 2026 against a live mailbox). Taken from taylorwilsdon's server
+  (`9d45fb35`), found in the comparison round of 8 Nov 2026; not measured with a real reaction,
+  none was at hand.
 - **`create_draft` no longer risks saving a draft twice.** Every Gmail call is retried on a 5xx,
   a reset or a timeout, and so was `drafts.create` — but such a failure can come after Gmail saved
   the draft, and the retry then saved a second copy. Most likely with a large attachment, whose
