@@ -56,7 +56,11 @@ describe("serverInstructions — what a tool-search client reads before it ever 
       const s = serverInstructions(t);
       expect(s).not.toMatch(/NO compose/);
       expect(s).toMatch(/nothing here SENDS/);
-      expect(s).toMatch(/no send\/forward tools/);
+      expect(s).toMatch(/no send tools/);
+      // Forwarding exists as a draft since 0.31.0: the instructions must not tell the model not to look.
+      expect(s).not.toMatch(/send\/forward tools/);
+      expect(s).toMatch(/forward a mail as a draft/);
+      expect(s).toMatch(/forwarded/);
       expect(s).toMatch(/no permanent delete \(trash only\)/);
       expect(s).toMatch(/write reply drafts/);
     }

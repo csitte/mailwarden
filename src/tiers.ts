@@ -102,7 +102,7 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   }
   if (tiers.has("drafts")) {
     jobs.push(
-      "write reply drafts and drafts of new messages, and revise drafts it wrote, with attachments from " +
+      "write reply drafts and drafts of new messages, forward a mail as a draft, and revise drafts it wrote, with attachments from " +
         "the operator's attachment folder or the reply's thread — saved in Gmail's Drafts for the user " +
         "to review and send; mailwarden itself never sends",
     );
@@ -110,7 +110,7 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   const triggers = ["asks about their Gmail inbox, specific emails, newsletters or what still needs a reply"];
   if (tiers.has("manage")) triggers.push("wants to organize, defer (snooze) or clean up mail");
   if (tiers.has("filters")) triggers.push("wants Gmail to auto-triage incoming mail with rules");
-  if (tiers.has("drafts")) triggers.push("wants a reply or a new message drafted");
+  if (tiers.has("drafts")) triggers.push("wants a reply or a new message drafted, or a mail forwarded");
   const scope =
     jobs.length === 0
       ? "No tools are enabled in this deployment."
@@ -118,7 +118,7 @@ export function serverInstructions(tiers: Set<ToolTier>): string {
   const which = tiers.has("read") ? " (call get_profile to confirm which)" : "";
   const compose = tiers.has("drafts")
     ? " By design nothing here SENDS: drafts are saved for the user to send from Gmail, and there are no " +
-      "send/forward tools and no permanent delete (trash only); do not look for them."
+      "send tools (a forward, like a reply, is only ever a draft) and no permanent delete (trash only); do not look for them."
     : " By design there are NO compose/reply/forward/send tools and no permanent delete (trash only); do " +
       "not look for them.";
   return (
