@@ -43,7 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   ten; `messages.list`, not `threads.list`; a failed lookup says nothing rather than "never" and does
   not hold up the draft), only in the answered mail's `Reply-To`, looks like a known domain (one edit
   off a domain of the thread, the draft's old recipients or the account for a domain under ten
-  characters, two from there on — `gmx.at` and `gmx.de` are two apart and not flagged), and an
+  characters, two from there on — `gmx.at` and `gmx.de` are two apart and not flagged; a domain that
+  is itself one of those is never flagged, so a thread with a company's `.de` and `.at` addresses
+  vouches for both), and an
   internationalised domain (`xn--`). The result repeats them as `recipientNotes`, only when there is
   something to say, so a deployment with `MAILWARDEN_DRAFT_CONFIRM=off` still gets them; the tool
   descriptions ask the model to pass them on word for word. Facts, not verdicts: nothing is refused

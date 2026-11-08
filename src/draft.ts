@@ -232,9 +232,11 @@ export function editDistance(a: string, b: string, cap: number): number {
 /**
  * A known domain this one is a near miss of — `examp1e.com` for `example.com`, `example.co` for
  * `example.com` — or `undefined`. One edit for a domain under ten characters, two from there on:
- * on a short name two edits reach unrelated domains (`gmx.at` and `gmx.de`). Pure.
+ * on a short name two edits reach unrelated domains (`gmx.at` and `gmx.de`). A domain that is
+ * itself known is none: a thread with a company's `.de` and `.at` addresses vouches for both. Pure.
  */
 export function lookalikeOf(domain: string, known: readonly string[]): string | undefined {
+  if (known.includes(domain)) return undefined;
   const cap = domain.length < 10 ? 1 : 2;
   return [...new Set(known)].find((k) => k !== domain && k.length > 0 && editDistance(domain, k, cap) <= cap);
 }

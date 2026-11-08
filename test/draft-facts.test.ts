@@ -20,9 +20,17 @@ describe("editDistance and lookalikeOf", () => {
     expect(lookalikeOf("example.com", [""])).toBeUndefined();
   });
 
+  it("a domain that is itself known is no lookalike of another known one", () => {
+    // A thread with a company's .de and .at addresses: a new one at .de is vouched for.
+    expect(lookalikeOf("softwaretechnik.de", ["softwaretechnik.de", "softwaretechnik.at"])).toBeUndefined();
+    expect(staticFacts(["bob@softwaretechnik.de"], ["ann@softwaretechnik.de", "eva@softwaretechnik.at"])).toEqual({
+      "bob@softwaretechnik.de": {},
+    });
+  });
+
   it("one edit only for a short domain: gmx.at is not a lookalike of gmx.de", () => {
     expect(lookalikeOf("gmx.at", ["gmx.de"])).toBeUndefined();
-    expect(lookalikeOf("gmx.de", ["gmx.de", "gmz.de"])).toBe("gmz.de");
+    expect(lookalikeOf("gmx.de", ["gmz.de"])).toBe("gmz.de");
   });
 });
 
