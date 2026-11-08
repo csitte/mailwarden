@@ -358,11 +358,13 @@ const NETWORK_FAILURE = /ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|ENOTF
  * True for the transport-level failures where the request never got an answer — what the error
  * mapper reports as a retryable `network_error`. Wider than `isRetryableNetworkError` (which decides
  * the backoff's own retries): it also takes an abort or a timeout that carries no code. `createDraft`
- * uses it so that no such failure reaches the model as "safe to try again".
+ * uses it so that no such failure reaches the model as "safe to try again". Every code the backoff
+ * retries counts here too, so the narrower check stays a subset by construction (a premature close
+ * once slipped between the two: grok-mailwarden L18).
  */
 export function isNetworkError(err: unknown): boolean {
   const e = err as { code?: unknown; name?: unknown; message?: unknown };
-  if (typeof e?.code === "string" && NETWORK_FAILURE.test(e.code)) return true;
+  if (typeof e?.code === "string" && (RETRYABLE_NET_CODES.has(e.code) || NETWORK_FAILURE.test(e.code))) return true;
   if (e?.name === "AbortError" || e?.name === "TimeoutError") return true;
   return typeof e?.message === "string" && NETWORK_FAILURE.test(e.message);
 }

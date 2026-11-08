@@ -135,6 +135,8 @@ describe("Gmail — draft calls", () => {
       Object.assign(new Error("The operation was aborted"), { name: "AbortError" }),
       new Error("request timed out"),
       Object.assign(new Error("write EPIPE"), { code: "EPIPE" }),
+      // In the backoff's own list; the wider check missed it once (grok-mailwarden L18).
+      Object.assign(new Error("Premature close"), { code: "ERR_STREAM_PREMATURE_CLOSE" }),
       Object.assign(new Error("bad gateway"), { status: 502 }),
       Object.assign(new Error("backend"), { status: 500 }),
     ]) {
