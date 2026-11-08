@@ -416,6 +416,10 @@ describe("create_draft / update_draft over MCP", () => {
     [{ replyAll: true, to: ["x@example.com"], subject: "s", body: "x" }, /only apply to a reply/],
     [{ to: ["x@example.com"], body: "x" }, /needs `to` and `subject`/],
     [{ subject: "s", body: "x" }, /needs `to` and `subject`/],
+    [{ forward: true, to: ["x@example.com"], body: "x" }, /needs the threadId of the mail to forward/],
+    [{ forward: true, threadId: "t1", body: "x" }, /A forward needs `to`/],
+    [{ forward: true, threadId: "t1", to: ["x@example.com"], quote: true, body: "x" }, /replyAll and quote are for a reply/],
+    [{ threadId: "t1", forwardAttachments: false, body: "x" }, /only applies to a forward/],
   ])("refuses a mixed-up call %j", async (args, why) => {
     vi.stubEnv("MAILWARDEN_TOOLS", "read,drafts");
     (getAuth as Mock).mockResolvedValue(draftApi().api);

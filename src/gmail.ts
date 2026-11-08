@@ -1952,7 +1952,10 @@ export class Gmail {
   async quoteSource(
     threadId: string,
     which: { messageId?: string; rfcMessageId?: string },
-  ): Promise<{ name: string; address: string; date: Date; plaintextBody: string; htmlBody: string } | undefined> {
+  ): Promise<
+    | { name: string; address: string; date: Date; plaintextBody: string; htmlBody: string; subject: string; to?: string; cc?: string }
+    | undefined
+  > {
     const res = await this.req(() => this.api.users.threads.get({ userId: "me", id: threadId, format: "full" }));
     const messages = (res.data.messages ?? []).filter((m) => !(m.labelIds ?? []).includes("DRAFT") && !isReaction(m.payload));
     const pick = which.messageId
@@ -1969,6 +1972,10 @@ export class Gmail {
       date: new Date(Number(pick.internalDate ?? 0)),
       plaintextBody: parsed.plaintextBody,
       htmlBody: parsed.htmlBody,
+      // What a forward's header block names; header text, decoded, never parsed as addresses here.
+      subject: decodeRfc2047(headerValue(pick.payload?.headers, "Subject") ?? ""),
+      to: decodeRfc2047(headerValue(pick.payload?.headers, "To") ?? "") || undefined,
+      cc: decodeRfc2047(headerValue(pick.payload?.headers, "Cc") ?? "") || undefined,
     };
   }
 

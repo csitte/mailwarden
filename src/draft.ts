@@ -21,7 +21,7 @@ import { domainToASCII } from "node:url";
 import { addressesOf } from "./signals.js";
 import { ToolError } from "./cli.js";
 import { dialogText } from "./confirm.js";
-import { isReplySubject } from "./quoted.js";
+import { isForwardSubject, isReplySubject } from "./quoted.js";
 import { htmlToText } from "./export.js";
 
 /**
@@ -157,6 +157,12 @@ export function replySubject(subject: string | undefined): string {
   return isReplySubject(s) ? s : `Re: ${s}`.trimEnd();
 }
 const HEADER_UNSAFE_GLOBAL = new RegExp(HEADER_UNSAFE.source, "g");
+
+/** `Fwd: ` once: a subject that already says "forward" ("Fwd:", "WG:", "TR:" …) stays as it is. */
+export function forwardSubject(subject: string | undefined): string {
+  const s = (subject ?? "").replace(HEADER_UNSAFE_GLOBAL, " ").trim();
+  return isForwardSubject(s) ? s : `Fwd: ${s}`.trimEnd();
+}
 
 /**
  * `References` for a reply: the parent's references plus its own Message-ID, as RFC 5322 §3.6.4
@@ -530,13 +536,83 @@ export interface QuoteSource {
  * The name and address come from the sender and are flattened to one line.
  */
 export function quoteAttribution(q: Pick<QuoteSource, "name" | "address" | "date">, locale: string, timeZone: string): string {
+  const who = sender(q);
+  if (/^de\b/i.test(locale)) return `Am ${when(q.date, locale, timeZone)} schrieb ${who}:`;
+  return `On ${when(q.date, locale, timeZone)} ${who} wrote:`;
+}
+
+/** "Name <address>", or the address alone, flattened to one line. */
+function sender(q: Pick<QuoteSource, "name" | "address">): string {
   const address = dialogText(q.address, 254);
   const name = dialogText(q.name, 100);
-  const who = name && name !== address ? `${name} <${address}>` : address;
-  const at = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale, { timeZone, ...opts }).format(q.date);
+  return name && name !== address ? `${name} <${address}>` : address;
+}
+
+/** "Do., 5. Nov. 2026 um 09:56 Uhr" / "Thu, 5 Nov 2026 at 8:56", in the given locale and time zone. */
+function when(date: Date, locale: string, timeZone: string): string {
+  const at = (opts: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat(locale, { timeZone, ...opts }).format(date);
   const day = at({ weekday: "short", day: "numeric", month: "short", year: "numeric" });
-  if (/^de\b/i.test(locale)) return `Am ${day} um ${at({ hour: "2-digit", minute: "2-digit" })} Uhr schrieb ${who}:`;
-  return `On ${day} at ${at({ hour: "numeric", minute: "2-digit" })} ${who} wrote:`;
+  if (/^de\b/i.test(locale)) return `${day} um ${at({ hour: "2-digit", minute: "2-digit" })} Uhr`;
+  return `${day} at ${at({ hour: "numeric", minute: "2-digit" })}`;
+}
+
+/** The message a forward carries: what a quote needs, and the header lines a forward names. */
+export interface ForwardSource extends QuoteSource {
+  subject: string;
+  to?: string;
+  cc?: string;
+}
+
+/**
+ * The block a forward puts below the body, as mail clients write it: a separator line, then From,
+ * Date, Subject, To and Cc of the forwarded mail, in German for a German locale and in English for
+ * every other. Every value is the sender's text flattened to one line; none reaches a header.
+ */
+export function forwardHeader(f: ForwardSource, locale: string, timeZone: string): string[] {
+  const de = /^de\b/i.test(locale);
+  const line = (label: string, value: string | undefined) => (value ? [`${label}: ${dialogText(value, 2000)}`] : []);
+  return [
+    de ? "---------- Weitergeleitete Nachricht ---------" : "---------- Forwarded message ---------",
+    ...line(de ? "Von" : "From", sender(f)),
+    ...line(de ? "Datum" : "Date", when(f.date, locale, timeZone)),
+    ...line(de ? "Betreff" : "Subject", f.subject),
+    ...line(de ? "An" : "To", f.to),
+    ...line("Cc", f.cc),
+  ];
+}
+
+/**
+ * The body with the forwarded mail below it, as text and as HTML: body, signature, then the header
+ * block and the mail's text unprefixed, the way a forward shows it. The HTML is that same text,
+ * escaped, inside Gmail's `gmail_quote` container — nothing of the forwarded mail's own HTML. A mail
+ * without readable text is forwarded with its header block alone. Refused, not shortened, when it
+ * would pass the body limit: a forward that silently lost its content would say something else.
+ */
+export function withForward(
+  body: string,
+  f: ForwardSource,
+  locale: string,
+  timeZone: string,
+  sig?: Signature,
+): { body: string; html: string; header: string } {
+  const header = forwardHeader(f, locale, timeZone);
+  const lines = quoteLines(f.text);
+  const text = (sig ? unsigned(body, sig) : body).replace(/\s+$/, "");
+  const signed = sig ? `${text}\n\n${signatureText(sig)}` : text;
+  const full = `${signed}\n\n${header.join("\n")}\n\n${lines.join("\n")}\n`.replace(/\n{3,}$/, "\n");
+  if (full.length > MAX_BODY_CHARS) {
+    throw new ToolError(
+      "invalid_input",
+      `The mail is too long to forward as text (body and forwarded text together pass ${MAX_BODY_CHARS} characters); nothing was written.`,
+    );
+  }
+  const html =
+    `${bodyHtml(text)}${sig ? signatureHtml(sig) : ""}<br>` +
+    `<div class="gmail_quote gmail_quote_container">` +
+    `<div dir="ltr" class="gmail_attr">${htmlLines(header)}<br></div><br>` +
+    `<div dir="auto" style="white-space:pre-wrap">${htmlLines(lines)}</div></div>`;
+  const subject = dialogText(f.subject, 120);
+  return { body: full, html, header: `from ${sender(f)}${subject ? `, "${subject}"` : ""}` };
 }
 
 /**
@@ -704,6 +780,8 @@ export interface DraftContent extends Recipients {
   signature?: string;
   /** What is known about each new recipient, for the dialog. */
   facts?: Record<string, RecipientFacts>;
+  /** For a forward: the forwarded mail's From line, for the dialog. */
+  forwards?: string;
   /**
    * The same content as HTML, when a reply quotes (`quoteHtml`) or a signature is added: the message
    * then carries text and HTML as `multipart/alternative`. Omitted: text only.
@@ -822,7 +900,7 @@ function keepEnds(s: string, max: number): string {
  * What the confirmation dialog says: the sender when it is an alias, the recipients, new ones
  * marked, the attachments, then the content.
  */
-export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, unknown: readonly string[]): string {
+export function draftDialog(kind: "reply" | "new" | "update" | "forward", d: DraftContent, unknown: readonly string[]): string {
   const origin = (a: DraftAttachment) =>
     a.source === "file"
       ? `new, from the file ${dialogPath(a.origin ?? a.filename)} on this computer`
@@ -843,7 +921,9 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
       ? "mailwarden wants to save a reply draft."
       : kind === "new"
         ? "mailwarden wants to save a draft of a new message."
-        : "mailwarden wants to change a draft it wrote.";
+        : kind === "forward"
+          ? "mailwarden wants to save a draft that forwards a mail."
+          : "mailwarden wants to change a draft it wrote.";
   return [
     `${head} It is not sent; you send it yourself from Gmail.`,
     ...(d.from !== undefined ? [`From: ${dialogText(d.from, 80)} (not your main address)`] : []),
@@ -855,5 +935,6 @@ export function draftDialog(kind: "reply" | "new" | "update", d: DraftContent, u
     `Text: ${dialogText(d.body, 300)}`,
     ...(d.signature !== undefined ? [`Signature from Gmail's settings: ${dialogText(d.signature, 120)}`] : []),
     ...(d.quotes !== undefined ? [`Quoted below the text: ${dialogText(d.quotes, 200)}`] : []),
+    ...(d.forwards !== undefined ? [`Forwarded below the text: the mail ${dialogText(d.forwards, 200)}`] : []),
   ].join("\n");
 }

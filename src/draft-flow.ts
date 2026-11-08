@@ -37,6 +37,8 @@ import {
   replyThreading,
   unknownRecipients,
   withQuote,
+  withForward,
+  forwardSubject,
   withSignature,
   signatureOf,
   type Signature,
@@ -65,7 +67,10 @@ export interface DraftGmail {
   quoteSource(
     threadId: string,
     which: { messageId?: string; rfcMessageId?: string },
-  ): Promise<{ name: string; address: string; date: Date; plaintextBody: string; htmlBody: string } | undefined>;
+  ): Promise<
+    | { name: string; address: string; date: Date; plaintextBody: string; htmlBody: string; subject?: string; to?: string; cc?: string }
+    | undefined
+  >;
 }
 
 /** One address the account may send from: the primary one, or an alias Gmail has verified. */
@@ -114,7 +119,7 @@ export interface DraftResult extends Recipients {
   draftId: string;
   messageId: string;
   threadId: string;
-  kind: "reply" | "new";
+  kind: "reply" | "new" | "forward";
   /** The address the draft goes out from: the main one, or the alias it names. */
   from: string;
   /** For a reply: an alias the answered mail was sent to, when the draft does not use it already. */
@@ -168,6 +173,24 @@ export interface NewInput {
   attachments?: AttachmentInput[];
 }
 
+export interface ForwardInput {
+  /** The thread of the mail to forward; the draft goes into that thread, as Gmail files a forward. */
+  threadId: string;
+  /** The mail to forward; default the newest message that is neither a draft nor an emoji reaction. */
+  messageId?: string;
+  from?: string;
+  to: string[];
+  cc?: string[];
+  bcc?: string[];
+  subject?: string;
+  body: string;
+  signature?: boolean;
+  /** Carry the forwarded mail's attachments along. Default: yes. */
+  forwardAttachments?: boolean;
+  /** Further attachments, as for a reply. */
+  attachments?: AttachmentInput[];
+}
+
 export interface UpdateInput {
   draftId: string;
   /**
@@ -187,6 +210,8 @@ export interface UpdateInput {
   quote?: boolean;
   /** Add the sender's signature below the new body again. Default: yes; a body that ends with it already is not signed twice. */
   signature?: boolean;
+  /** Forward the mail the draft refers to below the new body again (a draft create_draft saved with forward: true). */
+  forward?: boolean;
   /** Omitted: the draft keeps the attachments it has. Given: the new list, `[]` for none. */
   attachments?: AttachmentInput[];
 }
@@ -562,8 +587,14 @@ export async function reviseDraft(
   const sendAs = sendAsOnce(gmail);
   const from = await checkFrom(input.from ?? had, main, sendAs);
   const threading = threadingOf(before);
-  if (input.quote && !threading.inReplyTo) {
-    throw new ToolError("invalid_input", `Draft ${input.draftId} is a new message, not a reply, so it has nothing to quote. Nothing was changed.`);
+  if (input.quote && input.forward) {
+    throw new ToolError("invalid_input", "quote and forward exclude each other: a draft either answers a mail or forwards it. Nothing was changed.");
+  }
+  if ((input.quote || input.forward) && !threading.inReplyTo) {
+    throw new ToolError(
+      "invalid_input",
+      `Draft ${input.draftId} is a new message, not a reply or a forward, so it has nothing to ${input.quote ? "quote" : "forward"}. Nothing was changed.`,
+    );
   }
   // Omitted keeps what the draft carries: an update replaces the whole message, so without this
   // every correction to the text would drop the files without a word.
@@ -579,7 +610,11 @@ export async function reviseDraft(
     input.quote && threading.inReplyTo
       ? await quoteFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body, sig)
       : undefined;
-  const text = composeText(input.body, sig, quote);
+  const forwarded =
+    input.forward && threading.inReplyTo
+      ? await forwardFor(gmail, before.threadId, { rfcMessageId: threading.inReplyTo }, input.body, sig)
+      : undefined;
+  const text = forwarded ?? composeText(input.body, sig, quote);
   const facts = await factsFor(gmail, unknown, [...old.to, ...old.cc, ...old.bcc, main]);
   const content: DraftContent = {
     ...recipients,
@@ -603,10 +638,118 @@ export async function reviseDraft(
   // A draft that answers a thread is passed its thread again — without it Gmail moves the
   // updated draft into a thread of its own (measured 29 Oct 2026).
   const ref = await gmail.updateDraft(input.draftId, raw, threading.inReplyTo ? before.threadId : undefined);
-  return withSignNote(
-    withQuoteResult(result(ref, threading.inReplyTo ? "reply" : "new", content, unknown, confirmedByUser, main), quote),
-    text.signNote,
+  const kind = forwarded ? "forward" : threading.inReplyTo ? "reply" : "new";
+  return withSignNote(withQuoteResult(result(ref, kind, content, unknown, confirmedByUser, main), quote), text.signNote);
+}
+
+/**
+ * A draft that forwards a mail of the thread: the caller names the recipients, the subject becomes
+ * "Fwd: …", and below the body (and the signature) comes the forwarded mail's header block and its
+ * text — never its HTML. Its attachments come along unless `forwardAttachments: false`; each is one
+ * that mail carried, so the dialog asks when a recipient never received that mail, which for a
+ * forward is the rule. The draft goes into the mail's thread, as Gmail files a forward (measured
+ * 4 Nov 2026), with In-Reply-To and References naming the mail, so update_draft can find it again.
+ */
+export async function saveForwardDraft(
+  gmail: DraftGmail,
+  input: ForwardInput,
+  configured: ConfirmMode,
+  confirm: Confirm,
+  selfWithoutDialog = false,
+  readFile: ReadFile = noFiles,
+): Promise<DraftResult> {
+  const sendAs = sendAsOnce(gmail);
+  const [{ emailAddress }, { messageId: forwardedId, source }] = await Promise.all([
+    gmail.getProfile(),
+    gmail.replySource(input.threadId, input.messageId),
+    sendAs(),
+  ]);
+  const main = emailAddress.toLowerCase();
+  const aliases = await aliasesOf(sendAs, main);
+  const from = input.from === undefined ? undefined : await checkFrom(input.from, main, sendAs);
+  const recipients: Recipients = {
+    to: normalizeRecipients(input.to),
+    cc: normalizeRecipients(input.cc),
+    bcc: normalizeRecipients(input.bcc),
+  };
+  // The forwarded mail's own addresses are known, as for a reply; everyone else is new.
+  const threadAddresses = [...normalizeLenient(source.from), ...normalizeLenient(source.to), ...normalizeLenient(source.cc)];
+  const unknown = unknownRecipients(recipients, threadAddresses);
+  const facts = await factsFor(gmail, unknown, [...threadAddresses, main, ...aliases]);
+  const carried = input.forwardAttachments === false ? [] : await forwardedAttachments(gmail, input.threadId, forwardedId);
+  const extra = await resolveAttachments(gmail, input.attachments ?? [], { threadId: input.threadId, readFile });
+  const attachments = [...carried, ...extra];
+  checkAttachments(attachments);
+  const sig = await signatureFor(input.signature, sendAs, from ?? main);
+  const text = await forwardFor(gmail, input.threadId, { messageId: forwardedId }, input.body, sig);
+  const content: DraftContent = {
+    ...recipients,
+    from,
+    subject: input.subject ?? forwardSubject(source.subject),
+    ...text.content,
+    ...replyThreading(source),
+    attachments,
+    facts,
+  };
+  const raw = buildMime(content);
+  await markNewReach(attachments, recipients, async () => [emailAddress]);
+  const widens = reachesNew(attachments) || from !== undefined;
+  const self = await selfOnly(selfWithoutDialog, unknown, async () => [emailAddress], recipients, widens);
+  const confirmedByUser = await confirm(modeFor(configured, unknown, self, widens), draftDialog("forward", content, unknown));
+  const ref = await gmail.createDraft(raw, input.threadId);
+  return withSignNote(result(ref, "forward", content, unknown, confirmedByUser, main), text.signNote);
+}
+
+/**
+ * Every attachment the forwarded mail carries (inline images aside, as everywhere), fetched. The
+ * count and the size are checked on what Gmail lists before a byte is fetched.
+ */
+async function forwardedAttachments(gmail: DraftGmail, threadId: string, messageId: string): Promise<DraftAttachment[]> {
+  const listed = (await gmail.threadAttachments(threadId)).filter((a) => a.messageId === messageId);
+  if (listed.length > MAX_ATTACHMENTS) {
+    throw new ToolError(
+      "invalid_input",
+      `The mail carries ${listed.length} attachments, more than a draft may (${MAX_ATTACHMENTS}). Pass forwardAttachments: false ` +
+        "and attach the ones meant by name ({fromMessage, filename}). Nothing was written.",
+    );
+  }
+  checkTotalBytes(listed.reduce((n, a) => n + a.size, 0));
+  const out: DraftAttachment[] = [];
+  for (const a of listed) {
+    out.push({
+      filename: a.filename,
+      mimeType: isMimeType(a.mimeType) ? a.mimeType : mimeTypeFor(a.filename),
+      data: await gmail.attachmentBytes(a.messageId, a.attachmentId),
+      source: "message",
+      receivedBy: [...normalizeLenient(a.from), ...normalizeLenient(a.to), ...normalizeLenient(a.cc)],
+    });
+  }
+  return out;
+}
+
+/** The body with the forwarded mail below it, read from the thread; refused when the mail is gone. */
+async function forwardFor(
+  gmail: DraftGmail,
+  threadId: string,
+  which: { messageId?: string; rfcMessageId?: string },
+  body: string,
+  sig: Signature | undefined,
+): Promise<{ content: Pick<DraftContent, "body" | "html" | "forwards" | "signature">; signNote?: string }> {
+  checkContent("", body);
+  const f = await gmail.quoteSource(threadId, which);
+  if (!f) {
+    throw new ToolError("not_found", "The mail to forward is no longer in the thread (deleted, or a draft). Nothing was written.");
+  }
+  const text = quoteLines(f.plaintextBody).length ? f.plaintextBody : htmlToText(f.htmlBody);
+  const { locale, timeZone } = Intl.DateTimeFormat().resolvedOptions();
+  const r = withForward(
+    body,
+    { name: f.name, address: f.address, date: f.date, text, subject: f.subject ?? "", to: f.to, cc: f.cc },
+    locale,
+    timeZone,
+    sig,
   );
+  return { content: { body: r.body, html: r.html, forwards: r.header, ...(sig ? { signature: sig.text } : {}) } };
 }
 
 /** At most this many new recipients are looked up in the sent mail: one `messages.list` each. */
@@ -750,7 +893,7 @@ function threadingOf(d: DraftInfo): { inReplyTo?: string; references?: string } 
 
 function result(
   ref: DraftRef,
-  kind: "reply" | "new",
+  kind: "reply" | "new" | "forward",
   content: DraftContent,
   unknown: string[],
   confirmedByUser: boolean,

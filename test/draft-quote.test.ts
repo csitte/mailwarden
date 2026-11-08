@@ -359,7 +359,7 @@ describe("Gmail.quoteSource", () => {
     ]);
     const q = await gmail.quoteSource("t1", {});
     expect(get).toHaveBeenCalledWith(expect.objectContaining({ id: "t1", format: "full" }));
-    expect(q).toEqual({ name: "Jürgen Müller", address: "jm@example.com", date: AT, plaintextBody: "Hello again,", htmlBody: "" });
+    expect(q).toMatchObject({ name: "Jürgen Müller", address: "jm@example.com", date: AT, plaintextBody: "Hello again,", htmlBody: "", subject: "" });
   });
 
   it("picks by Gmail id or by Message-ID, and is undefined when neither is there", async () => {

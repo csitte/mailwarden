@@ -23,6 +23,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   8 Nov 2026. Whether Gmail would add a signature itself when you open such a draft was not
   measured.
 
+- **A mail can be forwarded as a draft.** `create_draft` with `threadId`, `forward: true` and `to`
+  forwards a mail of the thread (`messageId`, default the newest real message) to the recipients you
+  name: subject `Fwd: …` (one that already says forward stays), below the body and signature the
+  mail's From/Date/Subject/To/Cc block and its plain text — never its HTML, the same rule as a quote
+  — in German for a German locale and English otherwise, and its attachments unless
+  `forwardAttachments: false`. More than ten attachments, or more than 25 MB, is refused before a
+  byte is fetched; a forward too long for the body limit is refused rather than cut. The draft goes
+  into the mail's thread with In-Reply-To and References naming the mail; `update_draft` takes
+  `forward: true` to forward it again below a new body. A recipient the mail never went to is new
+  and asked about, and so is each attachment going to them, as the reply rules already had it; the
+  result says `kind: "forward"`. From taylorwilsdon's server (forward as a draft with attachments)
+  and agentcomms' (without); found in the comparison round of 8 Nov 2026. Not tried against Gmail
+  yet: how Gmail's editor shows such a draft was not looked at.
 - **The draft dialog says what is known about each new recipient.** Next to "(new)" it now names:
   never written to / written to before (one `messages.list` of the sent mail per address, the first
   ten; `messages.list`, not `threads.list`; a failed lookup says nothing rather than "never" and does

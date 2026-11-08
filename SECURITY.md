@@ -372,6 +372,23 @@ closely, a draft an injected mail shaped — its recipient, or text from elsewhe
   recipient is the main address. A sender the draft already had is not asked about again on
   `update_draft`, but checked against the list again. The aliases also count as the owner's own when
   a reply's recipients are derived, so a reply-all to a mail sent to an alias does not copy the alias.
+- **A forward is a new message to new people.** `create_draft` with `forward: true` (since 0.31.0)
+  puts a mail of the thread, its text and by default its attachments, into a draft to recipients
+  the caller names. That is the exfiltration shape this threat is about, so it
+  gets no rule of its own: every recipient the forwarded mail never went to is a new address and is
+  asked about, and every attachment going to such a recipient is marked so in the dialog, as for a
+  reply. The forwarded text is that mail's plain text, never its HTML, so nothing hidden in its
+  markup is carried. With `MAILWARDEN_DRAFT_CONFIRM=off` none of this is asked, as for every other
+  draft.
+- **Facts about a new recipient, not verdicts.** The dialog, and the result as `recipientNotes`,
+  say whether the account wrote to a new address before (a search of the sent mail), whether only the
+  answered mail's `Reply-To` names it, whether its domain is one or two letters off a domain of the
+  thread or the account, and whether the domain is internationalised. They are there to make a
+  lookalike or a stranger visible to the person deciding; nothing is refused because of them, and
+  a clean list says nothing about whether an address is safe.
+- **The signature is the owner's.** A draft carries the sender's signature from Gmail's settings
+  as Gmail stores it, HTML included. That is the one piece of HTML a draft carries that is not
+  escaped text; it comes from the account's own settings, which no mailwarden tool can write.
 - **No hidden recipient.** Every header value is checked for line breaks and control characters
   before a byte is written, recipients are re-emitted as bare, validated addresses rather than copied
   from the thread, and the body is base64-encoded — so neither a subject nor a body nor a hostile
