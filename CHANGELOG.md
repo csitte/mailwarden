@@ -27,6 +27,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   open is not overwritten either. The field is required: a call without it is rejected. Found by
   the grok-mailwarden review of 0.25.0 (L13); the second check by its review of this release (L15).
 
+- **A reply keeps a subject that already says "reply" in another language.** "AW: Termin" was
+  answered as "Re: AW: Termin"; now a subject whose outermost prefix is a reply prefix — Re (also
+  `Re[2]:`), AW (German), SV (Nordic), Antw (Dutch), Odp (Polish), YNT (Turkish), after tags such as
+  "[EXT]" — stays as it is, and the other side sees their own subject. Gmail itself writes
+  "Re: AW: Termin"; both thread the same, the reply carries In-Reply-To. A forward prefix ("WG:",
+  "Fwd:") still gets its "Re:", and so does "VS:", which answers in Finnish but forwards elsewhere in
+  the Nordics. From agentcomms' subject handling, found in the comparison round of 8 Nov 2026.
+
 ### Fixed
 - **A reply never answers a Gmail emoji reaction.** A reaction is a mail of its own in the thread,
   and when it was the newest one, `create_draft` without `messageId` answered it: the reply went to

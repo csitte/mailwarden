@@ -138,7 +138,20 @@ describe("replySubject and replyThreading", () => {
     ["re:Lunch", "re:Lunch"],
     ["", "Re:"],
     [undefined, "Re:"],
-    ["AW: Termin", "Re: AW: Termin"],
+    ["AW: Termin", "AW: Termin"],
+    ["Aw:Termin", "Aw:Termin"],
+    ["SV: Möte", "SV: Möte"],
+    ["Antw: Vraag", "Antw: Vraag"],
+    ["Re[2]: Lunch", "Re[2]: Lunch"],
+    ["RE： 会议", "RE： 会议"],
+    ["[EXT] Re: Lunch", "[EXT] Re: Lunch"],
+    ["[EXT] AW: Termin", "[EXT] AW: Termin"],
+    ["WG: Rechnung", "Re: WG: Rechnung"],
+    ["Fwd: Rechnung", "Re: Fwd: Rechnung"],
+    ["VS: Kokous", "Re: VS: Kokous"],
+    ["Rechnung: März", "Re: Rechnung: März"],
+    ["Aware: x", "Re: Aware: x"],
+    ["Reminder: x", "Re: Reminder: x"],
   ])("%j → %j", (s, out) => expect(replySubject(s)).toBe(out));
 
   it("folds a line break in a thread subject instead of carrying it into the header", () => {

@@ -52,6 +52,18 @@ const FORWARD_PREFIX = /^(fwd?|wg|tr|rv|enc|i|vs|vl|vb|pd|tov|doorst|перес�
 const SUBJECT_TAGS = /^\s*((\[[^\]]{0,40}\]|\*{1,2}[^*]{0,20}\*{1,2}|ext(ernal)?\s*:)\s*)*/i;
 
 /**
+ * Prefixes that make a subject a reply, by language: Re (also `Re[2]:`), AW (German), SV (Nordic),
+ * Antw (Dutch), Odp (Polish), YNT (Turkish); also with a full-width colon. "VS:" is left out: it
+ * answers in Finnish and forwards elsewhere in the Nordics, and a reply to it gets its own "Re:".
+ */
+const REPLY_PREFIX = /^(re|aw|sv|antw|odp|ynt)(\[\d{1,3}\])?\s*[:：]/iu;
+
+/** Does this subject already say "reply", by its outermost prefix after tags such as "[EXT]"? */
+export function isReplySubject(subject: string): boolean {
+  return REPLY_PREFIX.test(subject.replace(SUBJECT_TAGS, ""));
+}
+
+/**
  * Is this message a forward, by the OUTERMOST prefix of its subject? Outlook writes the header of
  * a forward exactly like the header of a reply (an underscore rule and From/Sent/To/Subject, or
  * "Original Message", or `divRplyFwdMsg` in HTML), with no "Forwarded message" line, so the body

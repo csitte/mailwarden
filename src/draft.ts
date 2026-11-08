@@ -21,6 +21,7 @@ import { domainToASCII } from "node:url";
 import { addressesOf } from "./signals.js";
 import { ToolError } from "./cli.js";
 import { dialogText } from "./confirm.js";
+import { isReplySubject } from "./quoted.js";
 
 /**
  * The label that marks a message mailwarden composed. It goes on the draft, and it stays on the mail
@@ -144,10 +145,15 @@ function safeAddresses(value: string | undefined): string[] {
 
 const dedupe = (xs: string[]) => [...new Set(xs)];
 
-/** `Re: ` once, the way mail clients do it — not `Re: Re: Re:`. */
+/**
+ * `Re: ` once — not `Re: Re: Re:`. A subject that already says "reply", in any of the languages
+ * `isReplySubject` knows ("AW: Termin", "SV: Möte", "[EXT] Re: x"), stays exactly as it is: the
+ * other side's client wrote that prefix, and the subject they see stays theirs. Gmail itself writes
+ * "Re: AW: Termin" here; both thread the same, since the reply also carries In-Reply-To.
+ */
 export function replySubject(subject: string | undefined): string {
   const s = (subject ?? "").replace(HEADER_UNSAFE_GLOBAL, " ").trim();
-  return /^re\s*:/i.test(s) ? s : `Re: ${s}`.trimEnd();
+  return isReplySubject(s) ? s : `Re: ${s}`.trimEnd();
 }
 const HEADER_UNSAFE_GLOBAL = new RegExp(HEADER_UNSAFE.source, "g");
 
