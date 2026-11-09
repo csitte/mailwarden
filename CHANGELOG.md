@@ -9,10 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **`@modelcontextprotocol/sdk` 1.32.1 to 1.32.2**, inside the declared `^1.30.0` range, so only the
-  lockfile moves. The release has two fixes: explicit `| undefined` on the transport's optional
-  properties (typings only) and registering a tool after `connect()` when the capability was
-  declared — mailwarden registers every tool before it connects, so neither changes behaviour here.
-  No advisory is involved; `npm audit --omit=dev` was clean before and after.
+  lockfile moves. The lockfile is not part of the npm package, so an `npx mailwarden` install
+  could already resolve 1.32.2; this pins the tree that CI, the bundle and a clone build from. The
+  release has two fixes: explicit `| undefined` on the transport's optional properties (typings
+  only) and registering a tool after `connect()` when the capability was declared. The new
+  constructor code runs only when the server options name `capabilities`, and mailwarden passes
+  only `instructions`; it also registers every tool before it connects, on stdio and over HTTP.
+  `initialize` and `tools/list` answer byte for byte the same under both versions. No advisory is
+  involved; `npm audit --omit=dev` was clean before and after.
 
 ## [0.31.0] - 2026-11-08
 
