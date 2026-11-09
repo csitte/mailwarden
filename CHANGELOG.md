@@ -8,6 +8,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- **README: the Smithery badge is gone, and the Smithery paragraph no longer links the listing.**
+  After the 31 October shutdown Smithery keeps only a curated set of verified servers; mailwarden is
+  not among them, and `smithery.ai/servers/csitte/mailwarden` answers 404 (checked 9 November 2026,
+  against a listed server answering 200). The badge and the link pointed at that page.
 - **`@modelcontextprotocol/sdk` 1.32.1 to 1.32.2**, inside the declared `^1.30.0` range, so only the
   lockfile moves. The lockfile is not part of the npm package, so an `npx mailwarden` install
   could already resolve 1.32.2; this pins the tree that CI, the bundle and a clone build from. The

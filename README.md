@@ -4,7 +4,6 @@
 [![license](https://img.shields.io/npm/l/mailwarden)](LICENSE)
 [![Node](https://img.shields.io/node/v/mailwarden)](package.json)
 [![Website](https://img.shields.io/badge/Website-csitte.at%2Fmailwarden-2ea44f)](https://www.csitte.at/mailwarden/)
-[![Smithery](https://img.shields.io/badge/Smithery-csitte%2Fmailwarden-ea580c)](https://smithery.ai/servers/csitte/mailwarden)
 
 A reliable, **native** Gmail [MCP](https://modelcontextprotocol.io) server — full mailbox triage for AI assistants, with the feature no other Gmail MCP server ships: **mailbox-side snooze**.
 
@@ -770,10 +769,10 @@ plus the OS-keystore binding for each platform it declares, pinned and hash-chec
 The one-time `npx -y mailwarden --auth` still applies
 (Node needed once for that) — the bundle reads the same `~/.mailwarden/` token.
 
-**Smithery** — listed in the directory as
-[`csitte/mailwarden`](https://smithery.ai/servers/csitte/mailwarden). Smithery shut down its CLI,
-toolbox, gateway and accounts on 31 October 2026 and stays on only as a public directory
-([announcement](https://smithery.ai/future)), so there is no Smithery install path any more: install
+**Smithery** — no longer. Smithery shut down its CLI, toolbox, gateway and accounts on 31 October
+2026 and stays on only as a curated directory of verified servers
+([announcement](https://smithery.ai/future)); mailwarden is not among them, and its former entry
+`csitte/mailwarden` answers 404 (checked 9 November 2026). There is no Smithery install path: install
 with `npx` or the `.mcpb` above. 0.23.0 was the last version published there.
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
