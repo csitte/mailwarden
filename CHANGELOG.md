@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`@modelcontextprotocol/sdk` 1.32.1 to 1.32.2**, inside the declared `^1.30.0` range, so only the
+  lockfile moves. The release has two fixes: explicit `| undefined` on the transport's optional
+  properties (typings only) and registering a tool after `connect()` when the capability was
+  declared — mailwarden registers every tool before it connects, so neither changes behaviour here.
+  No advisory is involved; `npm audit --omit=dev` was clean before and after.
+
 ## [0.31.0] - 2026-11-08
 
 ### Added
