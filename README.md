@@ -769,11 +769,11 @@ plus the OS-keystore binding for each platform it declares, pinned and hash-chec
 The one-time `npx -y mailwarden --auth` still applies
 (Node needed once for that) — the bundle reads the same `~/.mailwarden/` token.
 
-**Smithery** — no longer. Smithery shut down its CLI, toolbox, gateway and accounts on 31 October
-2026 and stays on only as a curated directory of verified servers
-([announcement](https://smithery.ai/future)); mailwarden is not among them, and its former entry
-`csitte/mailwarden` answers 404 (checked 9 November 2026). There is no Smithery install path: install
-with `npx` or the `.mcpb` above. 0.23.0 was the last version published there.
+**Smithery** — mailwarden is no longer listed. Smithery shut down its CLI, toolbox, gateway and
+accounts on 31 October 2026 and stays on only as a curated directory of verified servers
+([announcement](https://smithery.ai/future)); mailwarden's former entry `csitte/mailwarden` answers
+404 (checked 9 November 2026). There is no Smithery install path: install with `npx` or the `.mcpb`
+above. 0.23.0 was the last version published on Smithery.
 
 **Remote (Streamable HTTP)** — for a VPS / claude.ai custom connector:
 ```bash
