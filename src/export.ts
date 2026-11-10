@@ -59,12 +59,10 @@ const NAMED_ENTITIES: ReadonlyMap<string, number> = new Map<string, number>([
 const BASIC_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
 /**
- * The names a browser decodes without the closing `;`, also as the longest prefix of a longer
- * run of letters (`&copy 2011`, `f&uumlr`, `&notit` -> not-sign + "it"): HTML's legacy set, all of
+ * The names HTML decodes without the closing `;` (`&copy 2011`, `&nbsp`): its legacy set, all of
  * Latin-1 plus amp, lt, gt, quot and their upper-case forms with COPY and REG.
  */
 const LEGACY_NAMES: ReadonlySet<string> = new Set([...LATIN1_NAMES, "amp", "lt", "gt", "quot", "AMP", "LT", "GT", "QUOT", "COPY", "REG"]);
-const LEGACY_MAX = Math.max(...[...LEGACY_NAMES].map((n) => n.length));
 
 /**
  * A numeric reference to 0x80..0x9F means the Windows-1252 character there, as HTML specifies:
@@ -96,11 +94,13 @@ function namedCharacter(name: string): string | undefined {
  * Windows-1252; a surrogate as U+FFFD; zero and anything past U+10FFFF stay as written. Named
  * ones with `;` only by their exact name in the table above; a name it lacks stays as written,
  * since HTML has some two thousand and a prefix match would garble the rest (`&notin;` is not
- * not-sign + "in;", review round 2 for 0.31.1). Without `;` a browser decodes only the legacy
- * names, also as a prefix, and so does this. Pure, linear.
+ * not-sign + "in;", review round 2 for 0.31.1). Without `;` only a legacy name decodes, and only
+ * as HTML does inside an attribute: not when a letter, digit or `=` follows. A browser decodes
+ * `&section=2` in text as section-sign + "ion=2"; here a visible link stays the link it is
+ * (review grok-mailwarden, 10 Nov), at the price that `f&uumlr` stays as written. Pure, linear.
  */
 export function decodeCharacterReferences(text: string): string {
-  return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*)(;?)/g, (whole, ref: string, semi: string) => {
+  return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*)(;?)/g, (whole, ref: string, semi: string, at: number) => {
     if (ref[0] === "#") {
       const hex = ref[1] === "x" || ref[1] === "X";
       const code = parseInt(ref.slice(hex ? 2 : 1), hex ? 16 : 10);
@@ -109,11 +109,10 @@ export function decodeCharacterReferences(text: string): string {
       return String.fromCodePoint(WINDOWS_1252.get(code) ?? code);
     }
     if (semi) return namedCharacter(ref) ?? whole;
-    for (let n = Math.min(ref.length, LEGACY_MAX); n >= 2; n--) {
-      const head = ref.slice(0, n);
-      if (LEGACY_NAMES.has(head)) return (namedCharacter(head) ?? "") + ref.slice(n);
-    }
-    return whole;
+    // `ref` is the whole run of letters and digits, so a shorter legacy prefix would be followed by
+    // one of them: only the full run can match, and not with "=" behind it.
+    if (!LEGACY_NAMES.has(ref) || text[at + whole.length] === "=") return whole;
+    return namedCharacter(ref) ?? whole;
   });
 }
 

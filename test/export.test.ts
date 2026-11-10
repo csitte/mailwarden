@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { codeSpan, fenceFor, htmlToText, renderThread, tidyRenderedText } from "../src/export.js";
+import { codeSpan, decodeCharacterReferences, fenceFor, htmlToText, renderThread, tidyRenderedText } from "../src/export.js";
 import { Gmail, type ParsedMessage } from "../src/gmail.js";
 
 const AT = new Date("2026-10-13T12:00:00Z");
@@ -86,19 +86,20 @@ describe("htmlToText", () => {
     for (const [name, cp] of pairs) expect(htmlToText(`x&${name};x`), name).toBe(`x${String.fromCodePoint(cp)}x`);
   });
 
-  // Release check round 1 (input space) for 0.31.1, 10 Nov 2026: what a browser renders for each
-  // reference in text content (HTML's character reference rules), against htmlToText. Before the
-  // fix of a59f080 13 of the first 28 came out wrong (17 against 0.31.0); the Windows-1252 ones
-  // vanished entirely. The two cases after `&notit` came from review round 2.
+  // Release check round 1 (input space) for 0.31.1, 10 Nov 2026: what HTML decodes for each
+  // reference, against htmlToText. Before a59f080 13 of the first 28 cases failed (revert
+  // src/export.ts to 4ae2298 to see it); the Windows-1252 ones vanished entirely. Later cases came
+  // from review: with ";" only an exact name (round 2), and without ";" the attribute rule, so a
+  // name followed by a letter, digit or "=" stays as written and a visible link stays intact (grok).
   it.each<[string, string, number[] | string]>([
     ["named with ;", "&copy;", [0xa9]],
     ["legacy name without ;", "&copy 2011", `${String.fromCodePoint(0xa9)} 2011`],
-    ["basic name without ;", "a&ampb", "a&b"],
-    ["nbsp without ; between letters", "a&nbspb", "a b"],
-    ["legacy name without ; inside a word", "f&uumlr", [0x66, 0xfc, 0x72]],
-    ["legacy prefix without ;", "&notit", [0xac, 0x69, 0x74]],
-    // With ";" only the exact name counts: HTML has &notin; (and some two thousand names more), so a
-    // prefix match would turn a name the table lacks into garbage. Such a name stays as written.
+    ["basic names without ;", "a&amp b &AMP c &lt d", "a& b & c < d"],
+    ["legacy name without ; at the end", "Gr&uuml", [0x47, 0x72, 0xfc]],
+    ["legacy name followed by a letter stays", "f&uumlr a&nbspb &notit", "f&uumlr a&nbspb &notit"],
+    ["legacy name followed by a digit stays", "&lt3", "&lt3"],
+    ["a visible link stays intact", "?a=1&section=2&copy=5&para=6&times=4", "?a=1&section=2&copy=5&para=6&times=4"],
+    ["legacy name followed by punctuation decodes", "&copy.", [0xa9, 0x2e]],
     ["name the table lacks, with ;", "&notin; &ltri; &centerdot;", "&notin; &ltri; &centerdot;"],
     ["Windows-1252 names Zcaron", "&Zcaron;&zcaron;", [0x17d, 0x17e]],
     ["non-legacy name without ; stays", "&euro 5", "&euro 5"],
@@ -126,6 +127,15 @@ describe("htmlToText", () => {
   ])("%s: %s", (_label, input, expected) => {
     const want = typeof expected === "string" ? expected : String.fromCodePoint(...expected);
     expect(htmlToText(input)).toBe(want);
+  });
+
+  it("maps every numeric reference 0x80..0x9F as the WHATWG windows-1252 decoder does", () => {
+    const win = new TextDecoder("windows-1252");
+    for (let b = 0x80; b <= 0x9f; b++) {
+      const want = win.decode(Uint8Array.of(b));
+      expect(decodeCharacterReferences(`&#${b};`), b.toString(16)).toBe(want);
+      expect(decodeCharacterReferences(`&#x${b.toString(16)}`), b.toString(16)).toBe(want);
+    }
   });
 
   it("decodes once, drops invisible marks, and never reads an object's prototype", () => {
