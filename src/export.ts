@@ -95,7 +95,7 @@ function namedCharacter(name: string): string | undefined {
  * ones with `;` only by their exact name in the table above; a name it lacks stays as written,
  * since HTML has some two thousand and a prefix match would garble the rest (`&notin;` is not
  * not-sign + "in;", review round 2 for 0.31.1). Without `;` only a legacy name decodes, and only
- * as HTML does inside an attribute: not when a letter, digit or `=` follows. A browser decodes
+ * as HTML does inside an attribute: not when an ASCII letter, digit or `=` follows. A browser decodes
  * `&section=2` in text as section-sign + "ion=2"; here a visible link stays the link it is
  * (review grok-mailwarden, 10 Nov), at the price that `f&uumlr` stays as written. Pure, linear.
  */

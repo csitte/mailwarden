@@ -87,13 +87,16 @@ describe("htmlToText", () => {
   });
 
   // Release check round 1 (input space) for 0.31.1, 10 Nov 2026: what HTML decodes for each
-  // reference, against htmlToText. Before a59f080 13 of the first 28 cases failed (revert
-  // src/export.ts to 4ae2298 to see it); the Windows-1252 ones vanished entirely. Later cases came
+  // reference, against htmlToText. With src/export.ts from 4ae2298 (before this round) many of
+  // them fail; the Windows-1252 ones vanished entirely. Later cases came
   // from review: with ";" only an exact name (round 2), and without ";" the attribute rule, so a
-  // name followed by a letter, digit or "=" stays as written and a visible link stays intact (grok).
+  // name followed by an ASCII letter, digit or "=" stays as written and a visible link stays intact (grok).
   it.each<[string, string, number[] | string]>([
     ["named with ;", "&copy;", [0xa9]],
     ["legacy name without ;", "&copy 2011", `${String.fromCodePoint(0xa9)} 2011`],
+    ["upper-case legacy names without ;", "&COPY 2011 &REG.", `${String.fromCodePoint(0xa9)} 2011 ${String.fromCodePoint(0xae)}.`],
+    // Only ASCII letters and digits block it, as in HTML: a non-ASCII letter behind still decodes.
+    ["legacy name before a non-ASCII letter", `&uuml${String.fromCodePoint(0xe9)}`, [0xfc, 0xe9]],
     ["basic names without ;", "a&amp b &AMP c &lt d", "a& b & c < d"],
     ["legacy name without ; at the end", "Gr&uuml", [0x47, 0x72, 0xfc]],
     ["legacy name followed by a letter stays", "f&uumlr a&nbspb &notit", "f&uumlr a&nbspb &notit"],

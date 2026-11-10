@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-10
+
 ### Fixed
 - **Text taken from an HTML-only mail kept most named entities as written.** The HTML-to-text
   step decoded only `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;` and `&nbsp;`, so `&copy;`, `&euro;`,
@@ -29,10 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   €, ™ ...), which older Windows mail programs write; mailwarden took the code point, a C1
   control, and the hidden-character filter then removed it, so the character was simply gone from
   the text. The same release check, an input corpus of references against the HTML rules (now
-  a table test; 13 of its first 28 cases failed before this change), found more: references
+  a table test in `test/export.test.ts`), found more: references
   without the closing `;` stayed as written. Numeric ones now decode without it (`&#169`), and
   so do HTML's legacy names (`&copy 2011`, `&nbsp`), but only as HTML does inside an attribute:
-  not when a letter, digit or `=` follows. A browser shows `?a=1&section=2&copy=5` in text as
+  not when an ASCII letter, digit or `=` follows. A browser shows `?a=1&section=2&copy=5` in text as
   section sign and copyright sign; here a visible link stays the link it is, and the rare
   `f&uumlr` stays as written. With `;` only an exact name decodes; one the table lacks (HTML has
   some two thousand, e.g. `&notin;`) stays as written. A surrogate reference becomes U+FFFD
@@ -2629,7 +2631,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.31.1...HEAD
+[0.31.1]: https://github.com/csitte/mailwarden/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/csitte/mailwarden/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/csitte/mailwarden/compare/v0.29.0...v0.30.0
 [0.29.0]: https://github.com/csitte/mailwarden/compare/v0.28.1...v0.29.0
