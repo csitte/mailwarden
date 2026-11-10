@@ -50,12 +50,74 @@ const NAMED_ENTITIES: ReadonlyMap<string, number> = new Map<string, number>([
   ["lsaquo", 0x2039], ["rsaquo", 0x203a], ["euro", 0x20ac], ["trade", 0x2122],
   ["larr", 0x2190], ["uarr", 0x2191], ["rarr", 0x2192], ["darr", 0x2193], ["harr", 0x2194],
   ["minus", 0x2212], ["infin", 0x221e], ["asymp", 0x2248], ["ne", 0x2260], ["le", 0x2264], ["ge", 0x2265],
+  // HTML also names these two in upper case; AMP, LT, GT and QUOT come from the basic six.
+  ["COPY", 0xa9], ["REG", 0xae],
 ]);
+
+/** The six basic names, decoded in any case as before (`&AMP;`, `&NBSP;`); `&nbsp;` as a plain space. */
+const BASIC_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+
+/**
+ * The names a browser decodes without the closing `;` and as the longest prefix of a longer
+ * name (`&copy 2011`, `f&uumlr`, `&notit;` -> not-sign + "it;"): HTML's legacy set, all of
+ * Latin-1 plus amp, lt, gt, quot and their upper-case forms with COPY and REG.
+ */
+const LEGACY_NAMES: ReadonlySet<string> = new Set([...LATIN1_NAMES, "amp", "lt", "gt", "quot", "AMP", "LT", "GT", "QUOT", "COPY", "REG"]);
+const LEGACY_MAX = Math.max(...[...LEGACY_NAMES].map((n) => n.length));
+
+/**
+ * A numeric reference to 0x80..0x9F means the Windows-1252 character there, as HTML specifies:
+ * `&#150;` is an en dash, `&#128;` the euro sign. Read as code points they are C1 controls, which
+ * the hidden-character filter removes, so dashes, typographic quotes and euro signs from older
+ * Windows mail simply vanished. The five positions Windows-1252 leaves empty stay as they are.
+ */
+const WINDOWS_1252: ReadonlyMap<number, number> = new Map<number, number>([
+  [0x80, 0x20ac], [0x82, 0x201a], [0x83, 0x192], [0x84, 0x201e], [0x85, 0x2026], [0x86, 0x2020],
+  [0x87, 0x2021], [0x88, 0x2c6], [0x89, 0x2030], [0x8a, 0x160], [0x8b, 0x2039], [0x8c, 0x152],
+  [0x8e, 0x17d], [0x91, 0x2018], [0x92, 0x2019], [0x93, 0x201c], [0x94, 0x201d], [0x95, 0x2022],
+  [0x96, 0x2013], [0x97, 0x2014], [0x98, 0x2dc], [0x99, 0x2122], [0x9a, 0x161], [0x9b, 0x203a],
+  [0x9c, 0x153], [0x9e, 0x17e], [0x9f, 0x178],
+]);
+
+/** One named reference, exactly as written; undefined for a name HTML does not have. */
+function namedCharacter(name: string): string | undefined {
+  // Own keys only: an object literal would answer `&constructor;` from its prototype, and did,
+  // as "function Object() { [native code] }" (review grok-mailwarden, 10 Nov).
+  const basic = name.toLowerCase();
+  if (Object.hasOwn(BASIC_ENTITIES, basic)) return BASIC_ENTITIES[basic];
+  const code = NAMED_ENTITIES.get(name);
+  return code === undefined ? undefined : String.fromCodePoint(code);
+}
+
+/**
+ * Decode character references in text the way a browser renders them, in one pass (an escaped
+ * `&amp;copy;` stays the text "&copy;"). Numeric ones with or without `;`; 0x80..0x9F through
+ * Windows-1252; a surrogate as U+FFFD; zero and anything past U+10FFFF stay as written. Named
+ * ones by the table above; a legacy name also without `;` and as a prefix. Pure, linear.
+ */
+export function decodeCharacterReferences(text: string): string {
+  return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*)(;?)/g, (whole, ref: string, semi: string) => {
+    if (ref[0] === "#") {
+      const hex = ref[1] === "x" || ref[1] === "X";
+      const code = parseInt(ref.slice(hex ? 2 : 1), hex ? 16 : 10);
+      if (!(code > 0 && code <= 0x10ffff)) return whole;
+      if (code >= 0xd800 && code <= 0xdfff) return String.fromCodePoint(0xfffd);
+      return String.fromCodePoint(WINDOWS_1252.get(code) ?? code);
+    }
+    if (semi) {
+      const exact = namedCharacter(ref);
+      if (exact !== undefined) return exact;
+    }
+    for (let n = Math.min(ref.length, LEGACY_MAX); n >= 2; n--) {
+      const head = ref.slice(0, n);
+      if (LEGACY_NAMES.has(head)) return (namedCharacter(head) ?? "") + ref.slice(n) + semi;
+    }
+    return whole;
+  });
+}
 
 /** Reduce an HTML body to readable text. Not a sanitizer: the output is never rendered. */
 export function htmlToText(html: string): string {
-  // The basic six also in any case (`&AMP;`, `&NBSP;`), as before; every other name exactly.
-  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   // Repeat until nothing changes, so a removal cannot assemble the next block from its
   // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
   // stays, as a browser shows it. The passes are capped: each is linear, and what a deeper
@@ -79,21 +141,8 @@ export function htmlToText(html: string): string {
     .replace(/<\/(td|th)\s*>/gi, " ")
     .replace(/<li\b[^<>]*>/gi, "- ")
     // A tag starts with a letter, `/` or `!`; `a < b and c > d` is text, not a tag.
-    .replace(/<[/!]?[a-zA-Z][^<>]*>/g, "")
-    // A name may carry digits after its first letter (`&sup2;`, `&frac12;`).
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (m, e: string) => {
-      if (e[0] === "#") {
-        const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
-        return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
-      }
-      // Own keys only: `named` is an object literal, and `&constructor;` used to read its prototype
-      // and come out as "function Object() { [native code] }" (review grok-mailwarden, 10 Nov).
-      const basic = e.toLowerCase();
-      if (Object.hasOwn(named, basic)) return named[basic];
-      const code = NAMED_ENTITIES.get(e);
-      return code === undefined ? m : String.fromCodePoint(code);
-    });
-  return tidyRenderedText(text);
+    .replace(/<[/!]?[a-zA-Z][^<>]*>/g, "");
+  return tidyRenderedText(decodeCharacterReferences(text));
 }
 
 /**

@@ -86,6 +86,43 @@ describe("htmlToText", () => {
     for (const [name, cp] of pairs) expect(htmlToText(`x&${name};x`), name).toBe(`x${String.fromCodePoint(cp)}x`);
   });
 
+  // Release check round 1 (input space) for 0.31.1, 10 Nov 2026: what a browser renders for each
+  // reference in text content (HTML's character reference rules), against htmlToText. Before the
+  // fix 13 of these 28 came out wrong; the Windows-1252 ones vanished entirely.
+  it.each<[string, string, number[] | string]>([
+    ["named with ;", "&copy;", [0xa9]],
+    ["legacy name without ;", "&copy 2011", `${String.fromCodePoint(0xa9)} 2011`],
+    ["basic name without ;", "a&ampb", "a&b"],
+    ["nbsp without ; between letters", "a&nbspb", "a b"],
+    ["legacy name without ; inside a word", "f&uumlr", [0x66, 0xfc, 0x72]],
+    ["legacy prefix of an unknown name with ;", "&notit;", [0xac, 0x69, 0x74, 0x3b]],
+    ["non-legacy name without ; stays", "&euro 5", "&euro 5"],
+    ["non-legacy name with ;", "&euro;", [0x20ac]],
+    ["decimal with ;", "&#169;", [0xa9]],
+    ["decimal without ;", "&#169", [0xa9]],
+    ["hex lower and upper x", "&#xA9;&#XA9;", [0xa9, 0xa9]],
+    ["leading zeros", "&#0169;", [0xa9]],
+    ["Windows-1252 en dash", "&#150;", [0x2013]],
+    ["Windows-1252 euro", "&#128;", [0x20ac]],
+    ["Windows-1252 in hex", "&#x96;", [0x2013]],
+    ["Windows-1252 quotes", "&#147;x&#148;", [0x201c, 0x78, 0x201d]],
+    ["Windows-1252 trade mark", "&#153;", [0x2122]],
+    ["surrogate", "&#xD800;", [0xfffd]],
+    ["zero stays as written", "&#0;", "&#0;"],
+    ["past U+10FFFF stays as written", "&#x110000;", "&#x110000;"],
+    ["escaped reference decodes once", "&#38;amp;", "&amp;"],
+    ["ampersand in a name", "AT&T", "AT&T"],
+    ["bare & and ;", "&; & copy;", "&; & copy;"],
+    ["upper-case COPY and QUOT", "&COPY;&QUOT;", [0xa9, 0x22]],
+    ["unknown case stays", "&Euro;", "&Euro;"],
+    ["names with digits", "&sup2;&frac34;", [0xb2, 0xbe]],
+    ["unknown name", "&bogus;", "&bogus;"],
+    ["prototype name", "&constructor;", "&constructor;"],
+  ])("%s: %s", (_label, input, expected) => {
+    const want = typeof expected === "string" ? expected : String.fromCodePoint(...expected);
+    expect(htmlToText(input)).toBe(want);
+  });
+
   it("decodes once, drops invisible marks, and never reads an object's prototype", () => {
     // One level only: an escaped ampersand stays the text it spells.
     expect(htmlToText("&amp;copy; &#38;copy;")).toBe("&copy; &copy;");

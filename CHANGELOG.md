@@ -16,12 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read `&copy; 2011 - 2026`. It now decodes every Latin-1 name (`&nbsp;` to `&yuml;`), the
   Windows-1252 extras (dashes, typographic quotes, `&euro;`, `&trade;`, ...) and a few arrows and
   math signs, case-sensitively as HTML does (`&Auml;` is not `&auml;`); names with digits
-  (`&sup2;`, `&frac12;`) now match at all. Unknown names stay as written, and `&constructor;` does
+  (`&sup2;`, `&frac12;`) now match at all. Unknown names stay as written (apart from a legacy prefix, see the next entry), and `&constructor;` does
   too: the lookup read the basic table's object prototype and turned it into
   `function Object() { [native code] }` (older than this change). One side effect is deliberate:
   a spacing entity (`&ensp;`, `&emsp;`) now counts as whitespace where quoted history is cut, as
   `&nbsp;` always did, so a reply with only such a space above the quote keeps its quote and a
   quote followed only by one is cut. The same holds for a signature made of nothing else.
+- **Dashes, typographic quotes and euro signs written as `&#150;`, `&#147;`, `&#128;` vanished.**
+  HTML reads a numeric reference to 0x80..0x9F as the Windows-1252 character there (en dash, “ ”,
+  €, ™ ...), which older Windows mail programs write; mailwarden took the code point, a C1
+  control, and the hidden-character filter then removed it, so the character was simply gone from
+  the text. The same release check (an input corpus of 28 references against the HTML rules, 13
+  wrong before) found that references without the closing `;` stayed as written where a browser
+  decodes them: `&copy 2011`, `&nbsp`, `f&uumlr` and `&#169` now decode as in a browser, legacy
+  names also as the longest prefix of a longer name (`&notit;`). A surrogate reference becomes
+  U+FFFD instead of a broken character, and `&COPY;`/`&REG;` decode. Zero and references past
+  U+10FFFF stay as written, as before.
 
 ### Changed
 - **README: the Smithery badge is gone, and the Smithery paragraph no longer links the listing.**
