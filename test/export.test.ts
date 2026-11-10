@@ -129,10 +129,20 @@ describe("htmlToText", () => {
     expect(htmlToText(input)).toBe(want);
   });
 
-  it("maps every numeric reference 0x80..0x9F as the WHATWG windows-1252 decoder does", () => {
+  it("maps every numeric reference 0x80..0x9F as the WHATWG windows-1252 index does", () => {
+    // The index for 0x80..0x9F as WHATWG's Encoding standard lists it; 0x81, 0x8D, 0x8F, 0x90 and
+    // 0x9D are unassigned and stay their own code point. Written out because TextDecoder is no
+    // reference everywhere: Node 20 decodes "windows-1252" as Latin-1 (CI, 10 Nov 2026).
+    const index = [
+      0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160, 0x2039, 0x152, 0x8d, 0x17d, 0x8f,
+      0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc, 0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178,
+    ];
     const win = new TextDecoder("windows-1252");
+    const whatwg = win.decode(Uint8Array.of(0x80)) === String.fromCodePoint(0x20ac);
     for (let b = 0x80; b <= 0x9f; b++) {
-      const want = win.decode(Uint8Array.of(b));
+      const want = String.fromCodePoint(index[b - 0x80]);
+      // Where the platform decoder is the WHATWG one, the written-out index must agree with it.
+      if (whatwg) expect(win.decode(Uint8Array.of(b)), `index ${b.toString(16)}`).toBe(want);
       expect(decodeCharacterReferences(`&#${b};`), b.toString(16)).toBe(want);
       expect(decodeCharacterReferences(`&#x${b.toString(16)}`), b.toString(16)).toBe(want);
     }
