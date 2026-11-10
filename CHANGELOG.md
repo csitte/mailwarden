@@ -16,7 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   read `&copy; 2011 - 2026`. It now decodes every Latin-1 name (`&nbsp;` to `&yuml;`), the
   Windows-1252 extras (dashes, typographic quotes, `&euro;`, `&trade;`, ...) and a few arrows and
   math signs, case-sensitively as HTML does (`&Auml;` is not `&auml;`); names with digits
-  (`&sup2;`, `&frac12;`) now match at all. Unknown names stay as written.
+  (`&sup2;`, `&frac12;`) now match at all. Unknown names stay as written, and `&constructor;` does
+  too: the lookup read the basic table's object prototype and turned it into
+  `function Object() { [native code] }` (older than this change). One side effect is deliberate:
+  a spacing entity (`&ensp;`, `&emsp;`) now counts as whitespace where quoted history is cut, as
+  `&nbsp;` always did, so a reply with only such a space above the quote keeps its quote and a
+  quote followed only by one is cut. The same holds for a signature made of nothing else.
 
 ### Changed
 - **README: the Smithery badge is gone, and the Smithery paragraph no longer links the listing.**

@@ -185,8 +185,20 @@ describe("stripQuotedHtml", () => {
     ["a German forward", '<div class="gmail_quote"><div>---------- Weitergeleitete Nachricht ---------</div>text</div>'],
     ["nothing written above the quote", '<div class="gmail_quote"><blockquote>only old text</blockquote></div>'],
     ["an empty quote container", '<p>Hi</p><div class="gmail_quote"></div>'],
+    // Since named entities beyond the basic six decode (10 Nov 2026): a spacing entity is
+    // whitespace, so only an &ensp; above the quote is "nothing written above" ...
+    ["only an &ensp; above the quote", '&ensp;<div class="gmail_quote"><blockquote>old</blockquote></div>'],
+    // ... while a visible character after the closed quote is still an answer below it.
+    ["a &bull; after the closed quote", '<div>Ok</div><div class="gmail_quote"><blockquote>old</blockquote></div>&bull;'],
   ])("keeps: %s", (_n, html) => {
     expect(stripQuotedHtml(html)).toEqual({ html, stripped: false });
+  });
+
+  it("cuts a quote followed by nothing but a spacing entity (it is whitespace, not an answer)", () => {
+    expect(stripQuotedHtml('<div>Ok</div><div class="gmail_quote"><blockquote>old</blockquote></div>&ensp;')).toEqual({
+      html: "<div>Ok</div>",
+      stripped: true,
+    });
   });
 });
 

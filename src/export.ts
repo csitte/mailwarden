@@ -86,8 +86,12 @@ export function htmlToText(html: string): string {
         const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
         return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
       }
+      // Own keys only: `named` is an object literal, and `&constructor;` used to read its prototype
+      // and come out as "function Object() { [native code] }" (review grok-mailwarden, 10 Nov).
+      const basic = e.toLowerCase();
+      if (Object.hasOwn(named, basic)) return named[basic];
       const code = NAMED_ENTITIES.get(e);
-      return named[e.toLowerCase()] ?? (code === undefined ? m : String.fromCodePoint(code));
+      return code === undefined ? m : String.fromCodePoint(code);
     });
   return tidyRenderedText(text);
 }

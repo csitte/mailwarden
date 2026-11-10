@@ -67,6 +67,30 @@ describe("htmlToText", () => {
     expect(htmlToText("&AMP; &Lt;")).toBe("& <");
   });
 
+  it("maps names to the code points HTML gives them, across the whole table", () => {
+    const pairs: [string, number][] = [
+      ["nbsp", 0x20], ["iexcl", 0xa1], ["sect", 0xa7], ["copy", 0xa9], ["laquo", 0xab], ["reg", 0xae],
+      ["deg", 0xb0], ["micro", 0xb5], ["raquo", 0xbb], ["iquest", 0xbf], ["Agrave", 0xc0], ["Auml", 0xc4],
+      ["ETH", 0xd0], ["times", 0xd7], ["Oslash", 0xd8], ["THORN", 0xde], ["szlig", 0xdf], ["agrave", 0xe0],
+      ["eth", 0xf0], ["divide", 0xf7], ["oslash", 0xf8], ["thorn", 0xfe], ["yuml", 0xff],
+      ["OElig", 0x152], ["Scaron", 0x160], ["Yuml", 0x178], ["fnof", 0x192], ["circ", 0x2c6], ["tilde", 0x2dc],
+      ["ndash", 0x2013], ["mdash", 0x2014], ["sbquo", 0x201a], ["bdquo", 0x201e], ["Dagger", 0x2021],
+      ["bull", 0x2022], ["hellip", 0x2026], ["permil", 0x2030], ["rsaquo", 0x203a], ["euro", 0x20ac],
+      ["trade", 0x2122], ["harr", 0x2194], ["minus", 0x2212], ["ge", 0x2265],
+    ];
+    // &nbsp; is the one basic name in this list: it becomes a plain space, as before.
+    for (const [name, cp] of pairs) expect(htmlToText(`x&${name};x`), name).toBe(`x${String.fromCodePoint(cp)}x`);
+  });
+
+  it("decodes once, drops invisible marks, and never reads an object's prototype", () => {
+    // One level only: an escaped ampersand stays the text it spells.
+    expect(htmlToText("&amp;copy; &#38;copy;")).toBe("&copy; &copy;");
+    // Soft hyphen and zero-width or direction marks decode to characters the hidden-char filter removes.
+    expect(htmlToText("a&shy;b&zwj;c&zwnj;d&lrm;e&rlm;f")).toBe("abcdef");
+    // `named` is an object literal; its prototype is not a table of entities.
+    expect(htmlToText("&constructor; &hasOwnProperty; &valueOf;")).toBe("&constructor; &hasOwnProperty; &valueOf;");
+  });
+
   it("collapses the layout whitespace of a table-built report mail (CRLF, tabs, nbsp)", () => {
     // Shaped like the TripLog weekly report that came back as mostly tab runs (2026-10-26):
     // nested tables, tab indentation, CRLF line endings, &nbsp; spacer cells.
