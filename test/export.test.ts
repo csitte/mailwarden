@@ -67,7 +67,11 @@ describe("htmlToText", () => {
     expect(htmlToText("&AMP; &Lt;")).toBe("& <");
   });
 
-  it("maps names to the code points HTML gives them, across the whole table", () => {
+  // A SAMPLE across the table, not a mirror of it: two neighbours swapped between these support
+  // points would pass (review grok-mailwarden, 10 Nov). The whole table of 141 names was checked
+  // once against Python's html.entities on 10 Nov 2026, 0 differences; `yuml` at 0xff catches a
+  // missing or doubled Latin-1 name, since that run is built from its position.
+  it("maps names to the code points HTML gives them, at points across the table", () => {
     const pairs: [string, number][] = [
       ["nbsp", 0x20], ["iexcl", 0xa1], ["sect", 0xa7], ["copy", 0xa9], ["laquo", 0xab], ["reg", 0xae],
       ["deg", 0xb0], ["micro", 0xb5], ["raquo", 0xbb], ["iquest", 0xbf], ["Agrave", 0xc0], ["Auml", 0xc4],
@@ -87,8 +91,12 @@ describe("htmlToText", () => {
     expect(htmlToText("&amp;copy; &#38;copy;")).toBe("&copy; &copy;");
     // Soft hyphen and zero-width or direction marks decode to characters the hidden-char filter removes.
     expect(htmlToText("a&shy;b&zwj;c&zwnj;d&lrm;e&rlm;f")).toBe("abcdef");
-    // `named` is an object literal; its prototype is not a table of entities.
-    expect(htmlToText("&constructor; &hasOwnProperty; &valueOf;")).toBe("&constructor; &hasOwnProperty; &valueOf;");
+    // `named` is an object literal; its prototype is not a table of entities. Only `&constructor;`
+    // ever hit (the lookup lower-cases, so `hasownproperty` or `tostring` miss); the others guard a
+    // later change to a lookup without lower-casing.
+    for (const name of ["constructor", "hasOwnProperty", "valueOf", "toString", "isPrototypeOf"]) {
+      expect(htmlToText(`&${name};`), name).toBe(`&${name};`);
+    }
   });
 
   it("collapses the layout whitespace of a table-built report mail (CRLF, tabs, nbsp)", () => {

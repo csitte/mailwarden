@@ -20,6 +20,12 @@ describe("signatureOf — the signature Gmail's settings hold, as HTML and as te
     expect(signatureOf('<div><img src="https://example.com/logo.png"></div>')).toBeUndefined();
     expect(signatureOf("x".repeat(MAX_SIGNATURE_CHARS + 1))).toBeUndefined();
   });
+
+  it("none for a signature of spacing entities only, which decode to whitespace (since 10 Nov 2026)", () => {
+    expect(signatureOf("<div>&ensp;&emsp;&thinsp;&nbsp;</div>")).toBeUndefined();
+    // A named character that is visible still makes a signature.
+    expect(signatureOf("<div>&copy; Ann</div>")?.text).toBe(`${String.fromCodePoint(0xa9)} Ann`);
+  });
 });
 
 describe("withSignature and unsigned", () => {
