@@ -14,22 +14,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a quote or a forward in a draft, a signature's text half, `get_thread`'s text and the export.
   Found in a live signature test on 10 November 2026, in the quote of a report mail whose footer
   read `&copy; 2011 - 2026`. It now decodes every Latin-1 name (`&nbsp;` to `&yuml;`), the
-  Windows-1252 extras (dashes, typographic quotes, `&euro;`, `&trade;`, ...) and a few arrows and
-  math signs, case-sensitively as HTML does (`&Auml;` is not `&auml;`); names with digits
-  (`&sup2;`, `&frac12;`) now match at all. Unknown names stay as written (apart from a legacy prefix, see the next entry), and `&constructor;` does
-  too: the lookup read the basic table's object prototype and turned it into
+  Windows-1252 extras (dashes, typographic quotes, `&euro;`, `&trade;`, `&Zcaron;` ...) and a few
+  arrows and math signs, case-sensitively as HTML does (`&Auml;` is not `&auml;`); names with
+  digits (`&sup2;`, `&frac12;`) now match at all. Names the table lacks stay as written, and
+  `&constructor;` does too: the lookup read the basic table's object prototype and turned it into
   `function Object() { [native code] }` (older than this change). One side effect is deliberate:
   a spacing entity (`&ensp;`, `&emsp;`) now counts as whitespace where quoted history is cut, as
-  `&nbsp;` always did, so a reply with only such a space above the quote keeps its quote and a
-  quote followed only by one is cut. The same holds for a signature made of nothing else.
+  `&nbsp;` always did, and an invisible mark (`&shy;`, `&zwj;`, `&lrm;` ...) now counts as
+  nothing, so a reply with only such characters above the quote keeps its quote and a quote
+  followed only by them is cut. The same holds for a signature made of nothing else.
 - **Dashes, typographic quotes and euro signs written as `&#150;`, `&#147;`, `&#128;` vanished.**
   HTML reads a numeric reference to 0x80..0x9F as the Windows-1252 character there (en dash, “ ”,
   €, ™ ...), which older Windows mail programs write; mailwarden took the code point, a C1
   control, and the hidden-character filter then removed it, so the character was simply gone from
-  the text. The same release check (an input corpus of 28 references against the HTML rules, 13
-  wrong before) found that references without the closing `;` stayed as written where a browser
-  decodes them: `&copy 2011`, `&nbsp`, `f&uumlr` and `&#169` now decode as in a browser, legacy
-  names also as the longest prefix of a longer name (`&notit;`). A surrogate reference becomes
+  the text. The same release check (an input corpus of 28 references against the HTML rules, 17
+  wrong in 0.31.0, 13 still wrong after the entry above) found that references without the
+  closing `;` stayed as written where a browser decodes them: `&copy 2011`, `&nbsp`, `f&uumlr` and `&#169` now decode as in a browser, legacy
+  names also as the prefix of a longer run of letters (`&notit`). With `;` only an exact name
+  decodes; one the table lacks (HTML has some two thousand, e.g. `&notin;`) stays as written. A surrogate reference becomes
   U+FFFD instead of a broken character, and `&COPY;`/`&REG;` decode. Zero and references past
   U+10FFFF stay as written, as before.
 

@@ -68,7 +68,7 @@ describe("htmlToText", () => {
   });
 
   // A SAMPLE across the table, not a mirror of it: two neighbours swapped between these support
-  // points would pass (review grok-mailwarden, 10 Nov). The whole table of 141 names was checked
+  // points would pass (review grok-mailwarden, 10 Nov). The whole table (141 names then, 145 now) was checked
   // once against Python's html.entities on 10 Nov 2026, 0 differences; `yuml` at 0xff catches a
   // missing or doubled Latin-1 name, since that run is built from its position.
   it("maps names to the code points HTML gives them, at points across the table", () => {
@@ -88,14 +88,19 @@ describe("htmlToText", () => {
 
   // Release check round 1 (input space) for 0.31.1, 10 Nov 2026: what a browser renders for each
   // reference in text content (HTML's character reference rules), against htmlToText. Before the
-  // fix 13 of these 28 came out wrong; the Windows-1252 ones vanished entirely.
+  // fix of a59f080 13 of the first 28 came out wrong (17 against 0.31.0); the Windows-1252 ones
+  // vanished entirely. The two cases after `&notit` came from review round 2.
   it.each<[string, string, number[] | string]>([
     ["named with ;", "&copy;", [0xa9]],
     ["legacy name without ;", "&copy 2011", `${String.fromCodePoint(0xa9)} 2011`],
     ["basic name without ;", "a&ampb", "a&b"],
     ["nbsp without ; between letters", "a&nbspb", "a b"],
     ["legacy name without ; inside a word", "f&uumlr", [0x66, 0xfc, 0x72]],
-    ["legacy prefix of an unknown name with ;", "&notit;", [0xac, 0x69, 0x74, 0x3b]],
+    ["legacy prefix without ;", "&notit", [0xac, 0x69, 0x74]],
+    // With ";" only the exact name counts: HTML has &notin; (and some two thousand names more), so a
+    // prefix match would turn a name the table lacks into garbage. Such a name stays as written.
+    ["name the table lacks, with ;", "&notin; &ltri; &centerdot;", "&notin; &ltri; &centerdot;"],
+    ["Windows-1252 names Zcaron", "&Zcaron;&zcaron;", [0x17d, 0x17e]],
     ["non-legacy name without ; stays", "&euro 5", "&euro 5"],
     ["non-legacy name with ;", "&euro;", [0x20ac]],
     ["decimal with ;", "&#169;", [0xa9]],
@@ -128,7 +133,7 @@ describe("htmlToText", () => {
     expect(htmlToText("&amp;copy; &#38;copy;")).toBe("&copy; &copy;");
     // Soft hyphen and zero-width or direction marks decode to characters the hidden-char filter removes.
     expect(htmlToText("a&shy;b&zwj;c&zwnj;d&lrm;e&rlm;f")).toBe("abcdef");
-    // `named` is an object literal; its prototype is not a table of entities. Only `&constructor;`
+    // BASIC_ENTITIES is an object literal; its prototype is not a table of entities. Only `&constructor;`
     // ever hit (the lookup lower-cases, so `hasownproperty` or `tostring` miss); the others guard a
     // later change to a lookup without lower-casing.
     for (const name of ["constructor", "hasOwnProperty", "valueOf", "toString", "isPrototypeOf"]) {

@@ -41,6 +41,7 @@ const LATIN1_NAMES = (
 const NAMED_ENTITIES: ReadonlyMap<string, number> = new Map<string, number>([
   ...LATIN1_NAMES.map((name, i): [string, number] => [name, 0xa0 + i]),
   ["OElig", 0x152], ["oelig", 0x153], ["Scaron", 0x160], ["scaron", 0x161], ["Yuml", 0x178],
+  ["Zcaron", 0x17d], ["zcaron", 0x17e],
   ["fnof", 0x192], ["circ", 0x2c6], ["tilde", 0x2dc],
   ["ensp", 0x2002], ["emsp", 0x2003], ["thinsp", 0x2009],
   ["zwnj", 0x200c], ["zwj", 0x200d], ["lrm", 0x200e], ["rlm", 0x200f],
@@ -58,8 +59,8 @@ const NAMED_ENTITIES: ReadonlyMap<string, number> = new Map<string, number>([
 const BASIC_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
 
 /**
- * The names a browser decodes without the closing `;` and as the longest prefix of a longer
- * name (`&copy 2011`, `f&uumlr`, `&notit;` -> not-sign + "it;"): HTML's legacy set, all of
+ * The names a browser decodes without the closing `;`, also as the longest prefix of a longer
+ * run of letters (`&copy 2011`, `f&uumlr`, `&notit` -> not-sign + "it"): HTML's legacy set, all of
  * Latin-1 plus amp, lt, gt, quot and their upper-case forms with COPY and REG.
  */
 const LEGACY_NAMES: ReadonlySet<string> = new Set([...LATIN1_NAMES, "amp", "lt", "gt", "quot", "AMP", "LT", "GT", "QUOT", "COPY", "REG"]);
@@ -93,7 +94,10 @@ function namedCharacter(name: string): string | undefined {
  * Decode character references in text the way a browser renders them, in one pass (an escaped
  * `&amp;copy;` stays the text "&copy;"). Numeric ones with or without `;`; 0x80..0x9F through
  * Windows-1252; a surrogate as U+FFFD; zero and anything past U+10FFFF stay as written. Named
- * ones by the table above; a legacy name also without `;` and as a prefix. Pure, linear.
+ * ones with `;` only by their exact name in the table above; a name it lacks stays as written,
+ * since HTML has some two thousand and a prefix match would garble the rest (`&notin;` is not
+ * not-sign + "in;", review round 2 for 0.31.1). Without `;` a browser decodes only the legacy
+ * names, also as a prefix, and so does this. Pure, linear.
  */
 export function decodeCharacterReferences(text: string): string {
   return text.replace(/&(#[xX][0-9a-fA-F]+|#[0-9]+|[A-Za-z][A-Za-z0-9]*)(;?)/g, (whole, ref: string, semi: string) => {
@@ -104,13 +108,10 @@ export function decodeCharacterReferences(text: string): string {
       if (code >= 0xd800 && code <= 0xdfff) return String.fromCodePoint(0xfffd);
       return String.fromCodePoint(WINDOWS_1252.get(code) ?? code);
     }
-    if (semi) {
-      const exact = namedCharacter(ref);
-      if (exact !== undefined) return exact;
-    }
+    if (semi) return namedCharacter(ref) ?? whole;
     for (let n = Math.min(ref.length, LEGACY_MAX); n >= 2; n--) {
       const head = ref.slice(0, n);
-      if (LEGACY_NAMES.has(head)) return (namedCharacter(head) ?? "") + ref.slice(n) + semi;
+      if (LEGACY_NAMES.has(head)) return (namedCharacter(head) ?? "") + ref.slice(n);
     }
     return whole;
   });
