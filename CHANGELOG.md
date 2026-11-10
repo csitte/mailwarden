@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Text taken from an HTML-only mail kept most named entities as written.** The HTML-to-text
+  step decoded only `&amp;`, `&lt;`, `&gt;`, `&quot;`, `&apos;` and `&nbsp;`, so `&copy;`, `&euro;`,
+  `&ndash;` or a German `f&uuml;r` came through literally wherever a mail had no plain-text part:
+  a quote or a forward in a draft, a signature's text half, `get_thread`'s text and the export.
+  Found in a live signature test on 10 November 2026, in the quote of a report mail whose footer
+  read `&copy; 2011 - 2026`. It now decodes every Latin-1 name (`&nbsp;` to `&yuml;`), the
+  Windows-1252 extras (dashes, typographic quotes, `&euro;`, `&trade;`, ...) and a few arrows and
+  math signs, case-sensitively as HTML does (`&Auml;` is not `&auml;`); names with digits
+  (`&sup2;`, `&frac12;`) now match at all. Unknown names stay as written.
+
 ### Changed
 - **README: the Smithery badge is gone, and the Smithery paragraph no longer links the listing.**
   After the 31 October shutdown Smithery keeps only a curated set of verified servers, and

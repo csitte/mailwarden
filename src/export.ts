@@ -21,8 +21,40 @@ import { stripHiddenChars } from "./sanitize.js";
 
 export type ExportFormat = "markdown" | "json";
 
+/**
+ * The named character references a mail body is likely to carry, as code points. Before 10 Nov
+ * 2026 only the six basic ones were decoded, and an HTML-only mail kept `&copy;`, `&euro;` or
+ * `f&uuml;r` as written in quotes, forwards and get_thread (seen in a TripLog report). Covered:
+ * all of Latin-1 (`&nbsp;` to `&yuml;`, U+00A0 to U+00FF, listed in code point order), the
+ * Windows-1252 extras HTML names (dashes, typographic quotes, `&euro;`, `&trade;`, ...) and a few
+ * arrows and math signs. Names are case-sensitive, as in HTML (`&Auml;` is not `&auml;`). Code
+ * points instead of characters, so the source stays ASCII and no tool can rewrite an escape.
+ */
+const LATIN1_NAMES = (
+  "nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr " +
+  "deg plusmn sup2 sup3 acute micro para middot cedil sup1 ordm raquo frac14 frac12 frac34 iquest " +
+  "Agrave Aacute Acirc Atilde Auml Aring AElig Ccedil Egrave Eacute Ecirc Euml Igrave Iacute Icirc Iuml " +
+  "ETH Ntilde Ograve Oacute Ocirc Otilde Ouml times Oslash Ugrave Uacute Ucirc Uuml Yacute THORN szlig " +
+  "agrave aacute acirc atilde auml aring aelig ccedil egrave eacute ecirc euml igrave iacute icirc iuml " +
+  "eth ntilde ograve oacute ocirc otilde ouml divide oslash ugrave uacute ucirc uuml yacute thorn yuml"
+).split(" ");
+const NAMED_ENTITIES: ReadonlyMap<string, number> = new Map<string, number>([
+  ...LATIN1_NAMES.map((name, i): [string, number] => [name, 0xa0 + i]),
+  ["OElig", 0x152], ["oelig", 0x153], ["Scaron", 0x160], ["scaron", 0x161], ["Yuml", 0x178],
+  ["fnof", 0x192], ["circ", 0x2c6], ["tilde", 0x2dc],
+  ["ensp", 0x2002], ["emsp", 0x2003], ["thinsp", 0x2009],
+  ["zwnj", 0x200c], ["zwj", 0x200d], ["lrm", 0x200e], ["rlm", 0x200f],
+  ["ndash", 0x2013], ["mdash", 0x2014], ["lsquo", 0x2018], ["rsquo", 0x2019], ["sbquo", 0x201a],
+  ["ldquo", 0x201c], ["rdquo", 0x201d], ["bdquo", 0x201e], ["dagger", 0x2020], ["Dagger", 0x2021],
+  ["bull", 0x2022], ["hellip", 0x2026], ["permil", 0x2030], ["prime", 0x2032], ["Prime", 0x2033],
+  ["lsaquo", 0x2039], ["rsaquo", 0x203a], ["euro", 0x20ac], ["trade", 0x2122],
+  ["larr", 0x2190], ["uarr", 0x2191], ["rarr", 0x2192], ["darr", 0x2193], ["harr", 0x2194],
+  ["minus", 0x2212], ["infin", 0x221e], ["asymp", 0x2248], ["ne", 0x2260], ["le", 0x2264], ["ge", 0x2265],
+]);
+
 /** Reduce an HTML body to readable text. Not a sanitizer: the output is never rendered. */
 export function htmlToText(html: string): string {
+  // The basic six also in any case (`&AMP;`, `&NBSP;`), as before; every other name exactly.
   const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   // Repeat until nothing changes, so a removal cannot assemble the next block from its
   // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
@@ -48,12 +80,14 @@ export function htmlToText(html: string): string {
     .replace(/<li\b[^<>]*>/gi, "- ")
     // A tag starts with a letter, `/` or `!`; `a < b and c > d` is text, not a tag.
     .replace(/<[/!]?[a-zA-Z][^<>]*>/g, "")
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (m, e: string) => {
+    // A name may carry digits after its first letter (`&sup2;`, `&frac12;`).
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z][a-z0-9]*);/gi, (m, e: string) => {
       if (e[0] === "#") {
         const code = e[1] === "x" || e[1] === "X" ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
         return Number.isFinite(code) && code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : m;
       }
-      return named[e.toLowerCase()] ?? m;
+      const code = NAMED_ENTITIES.get(e);
+      return named[e.toLowerCase()] ?? (code === undefined ? m : String.fromCodePoint(code));
     });
   return tidyRenderedText(text);
 }

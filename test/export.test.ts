@@ -51,6 +51,22 @@ describe("htmlToText", () => {
     expect(htmlToText("&bogus; &#99999999;")).toBe("&bogus; &#99999999;");
   });
 
+  it("decodes the named entities of Latin-1 and Windows-1252, case-sensitively", () => {
+    const c = (...cps: number[]) => String.fromCodePoint(...cps);
+    // The TripLog footer that came through a quote as "&copy; 2011 - 2026" (10 Nov 2026).
+    expect(htmlToText("&copy; 2011 - 2026 Copyright TripLog")).toBe(`${c(0xa9)} 2011 - 2026 Copyright TripLog`);
+    expect(htmlToText("Gr&uuml;&szlig;e f&uuml;r &Auml;rzte")).toBe(`Gr${c(0xfc, 0xdf)}e f${c(0xfc)}r ${c(0xc4)}rzte`);
+    expect(htmlToText("&bdquo;Preis&ldquo; 5&nbsp;&euro; &ndash; &hellip;")).toBe(
+      `${c(0x201e)}Preis${c(0x201c)} 5 ${c(0x20ac)} ${c(0x2013)} ${c(0x2026)}`,
+    );
+    // Both ends of the Latin-1 run, and names with digits.
+    expect(htmlToText("&iexcl;&yuml;&sup2;&frac12;")).toBe(c(0xa1, 0xff, 0xb2, 0xbd));
+    // Case matters for everything beyond the basic six: &Auml; and &auml; differ, &EURO; is not a name.
+    expect(htmlToText("&Auml;&auml;&EURO;")).toBe(`${c(0xc4, 0xe4)}&EURO;`);
+    // The basic six keep their old case-insensitive decoding.
+    expect(htmlToText("&AMP; &Lt;")).toBe("& <");
+  });
+
   it("collapses the layout whitespace of a table-built report mail (CRLF, tabs, nbsp)", () => {
     // Shaped like the TripLog weekly report that came back as mostly tab runs (2026-10-26):
     // nested tables, tab indentation, CRLF line endings, &nbsp; spacer cells.
