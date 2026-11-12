@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "csitte",
+  "description": "Plugins by C.Sitte Softwaretechnik. mailwarden: Gmail triage for Claude Code with no send tools by design.",
+  "owner": {
+    "name": "C.Sitte Softwaretechnik",
+    "url": "https://www.csitte.at/"
+  },
+  "plugins": [
+    {
+      "name": "mailwarden",
+      "source": "./",
+      "description": "Gmail MCP server for inbox triage: search with re-verified results, labels, archive/trash, mailbox-side snooze, triage digest, RFC 8058 unsubscribe, opt-in drafts. No send tools by design. Plus the /mailwarden:setup and /mailwarden:triage skills.",
+      "category": "productivity",
+      "tags": ["gmail", "email", "mcp", "triage", "snooze", "unsubscribe", "no-send"]
+    }
+  ]
+}

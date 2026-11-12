@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **The repository is its own Claude Code plugin marketplace** (`.claude-plugin/marketplace.json`):
+  `claude plugin marketplace add csitte/mailwarden`, then `claude plugin install mailwarden@csitte`,
+  installs the plugin with both skills without a clone. Added because Anthropic's plugin directory
+  refuses, since 6 November 2026, a plugin that runs an MCP server on the user's computer unless it
+  comes from a Verified organization, and there is no way to apply for that status yet; the directory
+  submission stays open. A test keeps the marketplace, the plugin manifest and the README in step.
+
 ## [0.31.1] - 2026-11-10
 
 ### Fixed
