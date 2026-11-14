@@ -15,6 +15,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   comes from a Verified organization, and there is no way to apply for that status yet; the directory
   submission stays open. A test keeps the marketplace, the plugin manifest and the README in step.
 
+### Fixed
+- **The test suite no longer reaches the network.** The `--auth` tests probe the mailbox the way the
+  real flow does, and with their fake OAuth client that probe went out to Google's token endpoint for
+  real: 32 requests from 22 tests, each waiting on a 401. One of them outlasted the 5 s test timeout
+  on a CI runner. `test/setup.ts` now refuses every connection that is not loopback, so those tests
+  get a dropped connection instead, at once and every time. The outcome is the one Google's 401
+  gave: the account stays unidentified and the token is not proven dead. No shipped code changes.
+
 ## [0.31.1] - 2026-11-10
 
 ### Fixed

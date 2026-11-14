@@ -57,3 +57,59 @@ vi.mock("../src/keystore-io.js", () => ({
 }));
 
 process.env.MAILWARDEN_KEYSTORE = "off";
+
+// No test may reach the network either. Every `--auth` path probes the mailbox (`probeEmail`), and
+// with the fake client the tests use, that probe used to go out to oauth2.googleapis.com for real:
+// 32 requests from 22 tests in auth.test.ts and keystore.test.ts (measured 14.11.2026), each
+// waiting on Google's 401. On a CI runner one such round trip outlasted vitest's 5 s timeout and
+// turned a test red that has nothing to do with timing. The outcome never depended on Google
+// anyway — a 401 `invalid_client` and a dropped connection both leave the account unidentified and
+// the token not proven dead — so the tests now get the dropped connection, at once and every time.
+// Loopback stays open: the consent-flow tests talk to the redirect server they start themselves.
+// `test/no-network.test.ts` checks that the block holds, so removing it turns that file red.
+import http from "node:http";
+import https from "node:https";
+
+const LOOPBACK = /^(localhost|127(?:\.\d{1,3}){3}|\[?::1\]?)$/i;
+
+function blockedHost(args: unknown[]): string | null {
+  let host = "";
+  for (const a of args) {
+    if (typeof a === "string") host = new URL(a).hostname;
+    else if (a instanceof URL) host = a.hostname;
+    else if (a && typeof a === "object") {
+      const o = a as { hostname?: string | null; host?: string | null };
+      host = o.hostname ?? o.host?.replace(/:\d+$/, "") ?? host;
+    } else continue;
+    if (host) break;
+  }
+  host ||= "localhost"; // Node's own default when neither is given
+  return LOOPBACK.test(host) ? null : host;
+}
+
+function networkBlocked(host: string): Error {
+  return Object.assign(new Error(`test/setup.ts: no network in tests — blocked a request to ${host}`), {
+    code: "ENETUNREACH",
+  });
+}
+
+const gNet = globalThis as { __mwNetworkBlocked?: boolean };
+if (!gNet.__mwNetworkBlocked) {
+  gNet.__mwNetworkBlocked = true;
+  for (const mod of [http, https] as const) {
+    for (const fn of ["request", "get"] as const) {
+      const original = mod[fn] as (...args: unknown[]) => http.ClientRequest;
+      (mod as Record<string, unknown>)[fn] = function (this: unknown, ...args: unknown[]) {
+        const host = blockedHost(args);
+        if (host) throw networkBlocked(host);
+        return original.apply(this, args);
+      };
+    }
+  }
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input: string | URL | Request, init?: RequestInit) => {
+    const url = new URL(input instanceof Request ? input.url : String(input));
+    if (!LOOPBACK.test(url.hostname)) throw new TypeError("fetch failed", { cause: networkBlocked(url.hostname) });
+    return originalFetch(input, init);
+  };
+}
