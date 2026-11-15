@@ -34,6 +34,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   get a dropped connection instead, at once and every time. The outcome is the one Google's 401
   gave: the account stays unidentified and the token is not proven dead. No shipped code changes.
 
+### Security
+- **`hono` 4.13.13 to 4.13.18 and `@hono/node-server` 2.1.5 to 2.1.8** (four moderate and one low
+  advisory in `hono`, two moderate in `@hono/node-server`, all reported 13 November 2026). Both arrive
+  through the MCP SDK's HTTP transport, which uses only `getRequestListener` from `@hono/node-server`
+  to hand a Node request to the SDK. None of the affected parts is on that path: mailwarden uses no
+  `csrf()`, `mount()`, `css`, form validator, router or WebSocket upgrade from Hono, and under
+  `--http` Express checks the Host header and the bearer token before the SDK sees the request, so a
+  path parsed differently decides nothing. The `overrides` floors move to `^4.13.16` and `^2.1.6`,
+  the first fixed versions, so a later lockfile cannot fall back below them; this matters for the
+  MCPB bundle, which is built from the lockfile. `npm audit --omit=dev` reports no vulnerabilities.
+
 ## [0.31.1] - 2026-11-10
 
 ### Fixed
