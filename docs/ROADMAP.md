@@ -28,8 +28,9 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 - **Server `instructions`** in the initialize response, tier-aware, for tool-search clients (0.10.0).
 - **`dryRun`** on `bulk_modify`, `bulk_unsubscribe` and `sweep_snoozed` — same path as the real call,
   stopped before the first write or outbound request (0.10.0).
-- **Claude Code plugin** — repo root as plugin (`.claude-plugin/plugin.json` → `npx -y mailwarden`) with a
-  `/mailwarden:setup` skill; submitted to the community marketplace (0.10.0).
+- **Claude Code plugin** — repo root as plugin (`.claude-plugin/plugin.json`) with a `/mailwarden:setup`
+  skill (0.10.0); the launcher is pinned to the published version (`npx -y mailwarden@<version>`), and
+  since 0.31.2 the repo is its own plugin marketplace, the directory submission being on hold.
 - **Triage `signals`** on search hits (newsletter / automated / calendar / replyToMismatch, later displayNameSpoof / lookalikeDomain), header-derived,
   aggregated in `triage_digest` (0.10.0).
 - **MCPB bundle** (`npm run mcpb` → `dist-mcpb/mailwarden-<version>.mcpb`) as a release artifact — the
@@ -38,39 +39,37 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
   lockfile, validated, unpacked and booted in CI (0.10.0). Published on Smithery as `csitte/mailwarden`
   from 15.08.2026 to 0.23.0; the Smithery variant of the bundle was removed in 0.28.0.
 
+## Shipped from the Next list
+
+- **Token encryption by default, with the key in the OS keystore** (0.25.0, 28 October 2026). A
+  native keyring binding (`@napi-rs/keyring`, as `agentcomms` uses), not a shell-out to
+  `security`/`secret-tool`/PowerShell: the one server we read that does the latter had exactly that
+  file locked and then removed from our disk right after cloning — presumably by a virus scanner,
+  which we could not confirm, and a risk we will not ship. Same AES-256-GCM as before, the key from
+  the keystore instead of a passphrase; where no keystore is reachable it behaves as before and
+  `--check` says so, and the passphrase stays the explicit choice for headless hosts. Tried end to
+  end against the Windows Credential Manager; the macOS Keychain has not been tried yet. What it does
+  not defend against is in `SECURITY.md`: malware running as the same user can query the keystore too.
+- **Drafts, never sending** (0.26.0, 31 October 2026; attachments 0.28.0, a chosen sender address
+  0.29.0, signatures 0.31.0). A separate `drafts` tier, off by default, so a deployment that does not
+  enable it still has no compose tool at all, and the `read` tier keeps Google's own enforcement.
+  `create_draft` writes replies and new messages, `update_draft` changes only drafts it wrote. An
+  address the thread did not already contain needs a yes in an elicitation dialog, and a client that
+  cannot show one gets a refusal; `MAILWARDEN_CONFIRM` decides the rest. Two opt-in settings skip
+  that dialog, `MAILWARDEN_DRAFT_SELF_WITHOUT_DIALOG=1` for the account's own address and
+  `MAILWARDEN_DRAFT_CONFIRM=off` for every draft; an explicit `MAILWARDEN_CONFIRM=require` still asks
+  under either. Sending stays a non-goal: `messages.send` and
+  `drafts.send` stay on the egress denylist, and only a person pressing Send in Gmail sends anything.
+  What remains is stated plainly (`SECURITY.md`, threat 10): a draft can carry what an injected mail
+  asked for, and the protection is the human reading it before Send.
+
 ## Next
 
-1. **Token encryption by default, with the key in the OS keystore** — decided 25 October 2026, for
-   the release after 0.24.0. A native keyring binding (`@napi-rs/keyring`, as `agentcomms` uses), not a
-   shell-out to `security`/`secret-tool`/PowerShell: the one server we read that does the latter had
-   exactly that file locked and then removed from our disk right after cloning — presumably by a
-   virus scanner, which we could not confirm, and a risk we will not ship. Same AES-256-GCM as today, the key from
-   the keystore instead of a passphrase; where no keystore is reachable (a headless Linux host, a
-   platform whose binary is missing) it behaves as today and `--check` says so. The passphrase stays
-   as the explicit choice for headless hosts. Plaintext tokens keep loading and are encrypted at the
-   next `--auth`, never rewritten silently. What it does not defend against goes into `SECURITY.md`
-   as plainly: malware running as the same user can query the keystore too. Built on `main` on
-   27 October 2026 and tried against the Windows Credential Manager; the MCPB bundle carries every
-   declared platform's binding since 28 October. Still to be tried on a second machine before it
-   ships; macOS is untried.
-2. **Drafts, never sending** — decided 25 October 2026, for the release after the keystore one;
-   built on `main` since 29 October 2026 (`create_draft`, `update_draft`; see `SECURITY.md`,
-   threat 10). A
-   separate `drafts` tier, off by default, so a deployment that does not enable it still has no
-   compose tool at all, and the `read` tier keeps Google's own enforcement. It writes drafts — replies
-   to an existing thread with the recipients derived from that thread, and new messages with
-   recipients the caller names — and can change only drafts it created. A new message to a freely
-   chosen address is where an injected instruction could aim mail at a stranger, so that path always
-   asks the person at the client first, through the same elicitation as `MAILWARDEN_CONFIRM`, and is
-   refused on a client that cannot ask. Attachments followed in 0.28.0, from one configured folder or
-   from the reply's own thread, a file confirmed like a new address. Sending stays a non-goal:
-   `messages.send` and `drafts.send` stay on the egress denylist, and only a person pressing Send in
-   Gmail sends anything. What remains is stated plainly: a draft can carry what an injected mail asked
-   for, and the protection is the human reading it before Send.
-3. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
-   `server/discover`, Zod 4). Not urgent: current clients negotiate down to the 1.x protocol and
-   the 1.x SDK is maintained through at least early 2027; `src/http.ts` is already stateless.
-   Planned for late 2026.
+1. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
+   `server/discover`, Zod 4), tracked in [issue #8](https://github.com/csitte/mailwarden/issues/8).
+   Not urgent: current clients negotiate down to the 1.x protocol and the 1.x SDK is maintained
+   through at least early 2027; `src/http.ts` is already stateless and the schemas already use Zod 4.
+   Not started as of 15 November 2026.
 
 That is the whole list, and the short list is the finding rather than an omission. The September
 2026 survey turned up no capability gap worth closing: of the five servers in the README's
@@ -89,14 +88,13 @@ rather than a new kind of thing: a `bulk_modify` dry run that binds the write th
 for the text inside reports and archives (from `gmail-tidy-mcp`), `MAILWARDEN_CONFIRM` asking the user
 through elicitation before a filter or an unsubscribe (from `klodr`), and two more header signals,
 `displayNameSpoof` and `lookalikeDomain`. One gap remained, token encryption by default with the key
-in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it; it was item 1 under Next and is built
-on `main` since 27 October 2026.
+in the OS keystore, as `agentcomms` and `gmail-tidy-mcp` do it; it shipped in 0.25.0.
 
 ## Non-goals
 
 - **Sending mail** (send, and forward or reply as an action that sends). Deliberate: a triage server
   that cannot send gives prompt-injected mail no exfiltration path. This will not change. Writing a
-  *draft* that a person then sends is planned as an opt-in tier (see Next, item 2); it is not sending. Note the exact claim: Google
+  *draft* that a person then sends is an opt-in tier (see Shipped from the Next list); it is not sending. Note the exact claim: Google
   enforces it only in the `read` tier (`gmail.readonly`); in `manage`/`filters` the guarantee is
   the tool surface, since `gmail.modify` would permit `messages.send` — see
   [`SECURITY.md`](../SECURITY.md).
