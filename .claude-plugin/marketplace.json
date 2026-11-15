@@ -10,7 +10,7 @@
     {
       "name": "mailwarden",
       "source": "./",
-      "description": "Gmail MCP server for inbox triage: search with re-verified results, labels, archive/trash, mailbox-side snooze, triage digest, RFC 8058 unsubscribe, opt-in drafts. No send tools by design. Plus the /mailwarden:setup and /mailwarden:triage skills.",
+      "description": "Gmail MCP server for inbox triage: search with re-verified results, labels, archive/trash, mailbox-side snooze, triage digest, RFC 8058 unsubscribe. No send tools by design. Plus the /mailwarden:setup and /mailwarden:triage skills.",
       "category": "productivity",
       "tags": ["gmail", "email", "mcp", "triage", "snooze", "unsubscribe", "no-send"]
     }

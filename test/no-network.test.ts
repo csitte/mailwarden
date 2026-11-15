@@ -3,8 +3,9 @@ import http from "node:http";
 import https from "node:https";
 
 // test/setup.ts cuts the network for the whole run. Without that, the `--auth` tests sent real
-// token requests to Google and one of them timed out on CI (see the comment there). These cases
-// only hold while the block is in place: delete it and every one of them goes out for real.
+// token requests to Google and one of them timed out on CI (see the comment there). The first three
+// cases only hold while the block is in place: delete it and they go out for real. The last one
+// checks that the block leaves loopback alone.
 describe("the test run has no network", () => {
   it("blocks https.request to Google's token endpoint", () => {
     expect(() => https.request("https://oauth2.googleapis.com/token")).toThrow(/no network in tests.*oauth2\.googleapis\.com/);

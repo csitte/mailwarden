@@ -34,7 +34,7 @@ expiring after seven days.
 
 - **Least privilege:** `MAILWARDEN_TOOLS=read` (or `MAILWARDEN_READONLY=1`) registers only the read
   tools and requests only `gmail.readonly` at `--auth`. The plugin's default server entry runs
-  the full surface; a user who wants a narrower tier should add the server themselves with
+  the default tiers (read, manage, filters; the opt-in drafts tier stays off); a user who wants a narrower tier should add the server themselves with
   `claude mcp add mailwarden -e MAILWARDEN_TOOLS=read -- npx -y mailwarden@0.31.1` and disable this
   plugin's server. Widening the tiers needs a fresh `--auth`; narrowing does not.
 - **Second account:** `npx -y mailwarden@0.31.1 --auth --account work`, then a second server entry with

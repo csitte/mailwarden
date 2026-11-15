@@ -7,13 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.2] - 2026-11-15
+
 ### Added
 - **The repository is its own Claude Code plugin marketplace** (`.claude-plugin/marketplace.json`):
   `claude plugin marketplace add csitte/mailwarden`, then `claude plugin install mailwarden@csitte`,
   installs the plugin with both skills without a clone. Added because Anthropic's plugin directory
   refuses, since 6 November 2026, a plugin that runs an MCP server on the user's computer unless it
   comes from a Verified organization, and there is no way to apply for that status yet; the directory
-  submission stays open. A test keeps the marketplace, the plugin manifest and the README in step.
+  submission is on hold. A test keeps the marketplace, the plugin manifest and the README in step.
+  Tried end to end with Claude Code 2.1.318 in a separate config dir: the marketplace adds, the plugin
+  installs, `claude plugin update` finds it current and `claude mcp list` shows its server connected.
+  The marketplace serves the default branch, so the skills come from the latest commit and the server
+  from the version `plugin.json` pins.
+
+### Changed
+- The README and the setup skill no longer say the plugin runs the "full" tool surface: it runs the
+  default tiers, and the opt-in `drafts` tier needs a `claude mcp add` entry with `MAILWARDEN_TOOLS`.
+  The marketplace listing no longer names drafts for the same reason.
 
 ### Fixed
 - **The test suite no longer reaches the network.** The `--auth` tests probe the mailbox the way the
@@ -2647,7 +2658,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.31.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.31.2...HEAD
+[0.31.2]: https://github.com/csitte/mailwarden/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/csitte/mailwarden/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/csitte/mailwarden/compare/v0.30.0...v0.31.0
 [0.30.0]: https://github.com/csitte/mailwarden/compare/v0.29.0...v0.30.0

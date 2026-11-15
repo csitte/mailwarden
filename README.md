@@ -748,13 +748,17 @@ claude plugin install mailwarden@csitte
 ```
 (inside a session: `/plugin marketplace add csitte/mailwarden`, then `/plugin install mailwarden@csitte`;
 later releases arrive with `claude plugin update mailwarden@csitte`, auto-update being off by default
-for a marketplace you added yourself). It is submitted to Anthropic's plugin directory as well, but since
+for a marketplace you added yourself). The marketplace serves this repo's default branch, so the skills
+come from its latest commit while the server stays pinned to the last published version (see below).
+`claude plugin list` may add a note that the packages in `package.json` were not installed; the plugin
+needs none of them, because it fetches the server from npm. It is submitted to Anthropic's plugin directory as well, but since
 6 November 2026 the directory accepts a plugin that runs an MCP server on your computer only from a
 Verified organization, which this one is not, so that listing waits. The plugin starts the
 exact published version (`npx -y mailwarden@<version>`, bumped by the release script together with
 `server.json`), because the directory reviews one revision and refuses a launcher that would run whatever
-npm serves later. The plugin runs the full
-tool surface — for a narrower tier (`MAILWARDEN_TOOLS=read`) or a second account, use `claude mcp add` with
+npm serves later. The plugin runs the default
+tiers (`read`, `manage`, `filters`; the opt-in `drafts` tier stays off) — for a narrower tier
+(`MAILWARDEN_TOOLS=read`), the `drafts` tier or a second account, use `claude mcp add` with
 the env you want instead (see [Config](#config-env) and [Multiple accounts](#multiple-accounts)).
 That route gets the server without the skills: the npm package ships the server alone, and the skills
 live in this repo's `skills/` folder — to keep `triage` with a `claude mcp add` setup, copy
@@ -913,7 +917,7 @@ those rules come from).
 
 ## Status
 
-Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (2336 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
+Working and used in daily mailbox automation. Core Gmail tools + snooze implemented against `@googleapis/gmail`, covered by a vitest suite (2344 tests — `npm run coverage`). Current version: see the npm badge above, the [changelog](https://github.com/csitte/mailwarden/blob/main/CHANGELOG.md), or [releases](https://github.com/csitte/mailwarden/releases). PRs welcome — [CONTRIBUTING.md](https://github.com/csitte/mailwarden/blob/main/CONTRIBUTING.md) covers the build/test loop and the design rules that are not up for grabs.
 
 ## License
 
