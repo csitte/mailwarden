@@ -22,12 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   adapter's two (`hono`, `@hono/node-server`, both already in the tree before).
 
 ### Security
-- **A confirmation is never skipped because of the protocol revision.** On MCP 2026-07-28 a
-  client's capabilities read as absent, and `MAILWARDEN_CONFIRM=ask` would have taken that for "this
-  client cannot show a dialog" and gone ahead unasked. Should a connection ever run on that revision,
-  `ask` and `require` now refuse `create_filter`, `unsubscribe`, `bulk_unsubscribe` and the draft
-  dialogs with `declined_by_user` instead. `off` behaves as before. mailwarden does not serve that
-  revision today (see above), so this guards the next change, not a current path.
+- **A confirmation is not skipped because of the protocol revision.** On MCP 2026-07-28 served
+  through the SDK's stdio entry point, a client's capabilities read as absent, and
+  `MAILWARDEN_CONFIRM=ask` would have taken that for "this client cannot show a dialog" and gone ahead
+  unasked. Should a connection ever negotiate that revision, `ask` and `require` now refuse
+  `create_filter`, `unsubscribe`, `bulk_unsubscribe` and the draft dialogs with `declined_by_user`
+  instead. `off` behaves as before, and so does an instance that negotiated nothing (stateless HTTP).
+  mailwarden does not serve that revision today (see above), so this guards the next change, not a
+  current path.
 
 ## [0.31.2] - 2026-11-16
 

@@ -112,7 +112,17 @@ out of the tree, at the cost of our own code on the request path. That option st
    and `test/protocol-era.test.ts` fails if `serveStdio`/`createMcpHandler` appear or if the probe
    is accepted. The second guard is `confirmPlan(..., noDialogInThisEra)`: `ask` and `require` both
    refuse when the negotiated revision is 2026-07-28 or later. The tests are red without the guard
-   (5 of them, checked).
+   (5 of them, checked). Two limits, from the review on 17 Nov 2026:
+   - The guard reads the *negotiated* revision. An instance that negotiated nothing (stateless
+     HTTP, or stdio with no `initialize`) reads `undefined` even when a request carries a
+     2026-07-28 `_meta` envelope. That is the 1.32.2 behaviour, not a regression, but step 2 must
+     read the era per request (`ctx.mcpReq.envelope`), not per connection.
+   - "Capabilities read as absent" holds for `serveStdio`. `createMcpHandler` backfills
+     `getClientCapabilities()` per request from the envelope, so there the dialog would be attempted
+     and fail at `elicitInput` (as a refusal), not skipped.
+   - Over HTTP, a `server/discover` that already carries `MCP-Protocol-Version: 2026-07-28` gets
+     HTTP 400 "Unsupported protocol version", not -32601. No 2026 session comes of it either way;
+     whether a client then falls back to 2025 over HTTP is not measured.
 2. **An answer bound to the wrong question (step 2).** With `inputRequired`, the handler runs
    twice, once to ask and once with the answer. On the 2026 era the client sends the second call,
    **with the arguments again**. A yes given for one set of recipients could therefore come back
@@ -130,6 +140,13 @@ out of the tree, at the cost of our own code on the request path. That option st
 4. **Stateless HTTP and dialogs.** Settled by measurement 2: no dialog over HTTP today, none lost.
    With `inputRequired` (step 2) HTTP could get dialogs for the first time, because the answer
    comes back in a new request.
+5. **`bulk_unsubscribe` confirms a rehearsal, not the run (found in the same review, older than
+   this change).** The dialog lists the hosts from a dry run; the real run reads the threads again
+   and asks no question of its own. A thread whose read fails in the rehearsal is missing from the
+   dialog and still contacted in the run; if every read fails, no dialog is shown at all, even under
+   `require`. A sender whose first request throws is not remembered, so its second thread is
+   contacted, possibly at another host, though the dialog listed it as a duplicate. To be fixed on
+   its own, before or independent of step 2.
 
 ## Estimate for step 2
 

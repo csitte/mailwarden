@@ -134,10 +134,13 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   reversible, exactly so with `undo: true`.
   The dialog is a server-to-client request, which MCP protocol 2026-07-28 no longer has. mailwarden
   therefore speaks the 2025 revisions only: it answers a client's `server/discover` probe with "method
-  not found", and the client falls back to the 2025 handshake (Claude Code 2.1.318 does, measured
-  17 November 2026). Should a connection ever run on 2026-07-28 regardless, `ask` and `require` both
-  refuse there instead of proceeding, because the client's capabilities read as absent on that
-  revision and `ask` would otherwise go ahead unasked. Tests hold both in place.
+  not found" (over HTTP, a probe that already carries the 2026-07-28 version header gets HTTP 400
+  instead), and the client falls back to the 2025 handshake (Claude Code 2.1.318 does, measured
+  17 November 2026). Should a connection ever negotiate 2026-07-28 regardless, `ask` and `require`
+  both refuse instead of proceeding: with the SDK's stdio entry point the client's capabilities read
+  as absent on that revision, and `ask` would otherwise go ahead unasked. The guard reads the
+  negotiated revision; an instance that negotiated nothing (stateless HTTP) keeps the behaviour it
+  always had, where `ask` proceeds and `require` refuses. Tests hold both in place.
 - **A preview that binds the write.** A `bulk_modify` dry run returns a `previewToken`; the write that
   carries it acts on exactly the previewed messages and refuses a reworded query or a different
   label change, so the set a user agreed to is the set that changes.

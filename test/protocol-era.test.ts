@@ -51,8 +51,9 @@ describe("protocol era", () => {
     await server.close();
   });
 
-  it("the HTTP transport src/http.ts uses refuses server/discover too", async () => {
-    const httpServer = http.createServer(async (req, res) => {
+  /** A server wired the way src/http.ts wires it: a fresh McpServer and transport per request. */
+  async function httpServer(): Promise<number> {
+    const srv = http.createServer(async (req, res) => {
       let body = "";
       for await (const chunk of req) body += chunk;
       const server = new McpServer({ name: "mailwarden", version: "0.0.0" });
@@ -64,31 +65,43 @@ describe("protocol era", () => {
       await server.connect(transport);
       await transport.handleRequest(req, res, JSON.parse(body));
     });
-    await new Promise<void>((r) => httpServer.listen(0, "127.0.0.1", r));
-    closeHttp = () => new Promise((r) => httpServer.close(() => r()));
-    const { port } = httpServer.address() as AddressInfo;
+    await new Promise<void>((r) => srv.listen(0, "127.0.0.1", r));
+    closeHttp = () => new Promise((r) => srv.close(() => r()));
+    return (srv.address() as AddressInfo).port;
+  }
 
-    const reply = await new Promise<string>((resolve, reject) => {
+  function post(port: number, extraHeaders: Record<string, string> = {}): Promise<{ status: number; text: string }> {
+    return new Promise((resolve, reject) => {
       const req = http.request(
         {
           host: "127.0.0.1",
           port,
           path: "/mcp",
           method: "POST",
-          headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+          headers: { "content-type": "application/json", accept: "application/json, text/event-stream", ...extraHeaders },
         },
         (res) => {
           let text = "";
           res.on("data", (c) => (text += c));
-          res.on("end", () => resolve(text));
+          res.on("end", () => resolve({ status: res.statusCode ?? 0, text }));
         },
       );
       req.on("error", reject);
       req.end(JSON.stringify(DISCOVER));
     });
+  }
+
+  it("the HTTP transport src/http.ts uses refuses server/discover too", async () => {
+    const reply = await post(await httpServer());
     // The answer may come as JSON or as one SSE event; the error code is in it either way.
-    expect(reply).toMatch(new RegExp(`"code":${METHOD_NOT_FOUND}`));
-    expect(reply).not.toMatch(/supportedVersions/);
+    expect(reply.text).toMatch(new RegExp(`"code":${METHOD_NOT_FOUND}`));
+    expect(reply.text).not.toMatch(/supportedVersions/);
+  });
+
+  it("over HTTP, a probe that already sends the 2026-07-28 version header gets no 2026 session either", async () => {
+    const reply = await post(await httpServer(), { "mcp-protocol-version": "2026-07-28" });
+    expect(reply.status).toBe(400);
+    expect(reply.text).not.toMatch(/supportedVersions/);
   });
 
   it("src/index.ts and src/http.ts keep the hand-wired 2025 transports", () => {
