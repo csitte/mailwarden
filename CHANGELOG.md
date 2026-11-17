@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **MCP SDK 2.x.** `@modelcontextprotocol/sdk` 1.32.2 is replaced by `@modelcontextprotocol/server`
+  2.4.0, with `@modelcontextprotocol/node` 2.1.2 for the HTTP transport (and
+  `@modelcontextprotocol/client` 2.4.0 for the tests only). mailwarden still speaks the 2025 protocol
+  revisions, and the server `instructions` and the confirmation dialogs behave as before. The
+  `tools/list` answer differs from 0.31.2's in two points only, compared over all 33 tools: every
+  schema names the JSON Schema 2020-12 dialect instead of draft-07, and the `execution.taskSupport:
+  "forbidden"` field is gone (SDK 2 dropped task support). The protocol stays on 2025 by design. Its confirmation dialogs are server-to-client requests, which revision 2026-07-28 removed,
+  and a client that can speak 2026-07-28 (Claude Code 2.1.318 probes with `server/discover`) gets
+  "method not found" and falls back to the 2025 handshake. Checked live with Claude Code 2.1.318.
+  Rebuilding the dialogs for 2026-07-28 is the second step in `docs/SDK-2-PLAN.md`. The direct
+  runtime dependencies of the MCP layer drop from 17 to the server package's two plus the HTTP
+  adapter's two (`hono`, `@hono/node-server`, both already in the tree before).
+
+### Security
+- **A confirmation is never skipped because of the protocol revision.** On MCP 2026-07-28 a
+  client's capabilities read as absent, and `MAILWARDEN_CONFIRM=ask` would have taken that for "this
+  client cannot show a dialog" and gone ahead unasked. Should a connection ever run on that revision,
+  `ask` and `require` now refuse `create_filter`, `unsubscribe`, `bulk_unsubscribe` and the draft
+  dialogs with `declined_by_user` instead. `off` behaves as before. mailwarden does not serve that
+  revision today (see above), so this guards the next change, not a current path.
+
 ## [0.31.2] - 2026-11-16
 
 ### Added

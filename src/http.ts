@@ -1,7 +1,7 @@
 import { CliError } from "./cli.js";
 import { resolveEnabledTiers } from "./tiers.js";
 import { timingSafeEqual } from "node:crypto";
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 
 /**
  * Streamable HTTP transport for remote hosting (VPS / claude.ai custom connector).
@@ -144,8 +144,8 @@ export function bearerAuthorized(bearer: string | undefined, header: string | un
  */
 /* v8 ignore start */
 export async function startHttp(makeServer: () => McpServer): Promise<void> {
-  const { StreamableHTTPServerTransport } = await import(
-    "@modelcontextprotocol/sdk/server/streamableHttp.js"
+  const { NodeStreamableHTTPServerTransport } = await import(
+    "@modelcontextprotocol/node"
   );
   const express = (await import("express")).default;
 
@@ -172,7 +172,7 @@ export async function startHttp(makeServer: () => McpServer): Promise<void> {
       return;
     }
     const server = makeServer();
-    const transport = new StreamableHTTPServerTransport({
+    const transport = new NodeStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableDnsRebindingProtection: isLoopbackHost(cfg.host),
       allowedHosts: [...allowedHosts],

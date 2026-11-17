@@ -70,9 +70,33 @@ export function draftConfirmMode(mode: ConfirmMode, configured: ConfirmMode, dia
 
 export type ConfirmPlan = "proceed" | "ask" | "refuse";
 
-/** What to do before a confirmable action, given the mode and whether this client can show a form. */
-export function confirmPlan(mode: ConfirmMode, clientCanAsk: boolean): ConfirmPlan {
+/**
+ * The first protocol revision without server-to-client requests. On it a tool cannot put a question
+ * mid-call: the dialog would have to be returned as an `input_required` result and answered in a
+ * second call, which mailwarden does not do yet (docs/SDK-2-PLAN.md, step 2).
+ */
+export const FIRST_ERA_WITHOUT_DIALOG = "2026-07-28";
+
+/**
+ * Whether the negotiated protocol revision rules the dialog out. Revisions are dates, so they compare
+ * as strings. `undefined` (nothing negotiated on this instance, as in stateless HTTP) is not such a
+ * revision: what the client can do is then decided by its capabilities, as before.
+ */
+export function eraWithoutDialog(protocolVersion: string | undefined): boolean {
+  return protocolVersion !== undefined && protocolVersion >= FIRST_ERA_WITHOUT_DIALOG;
+}
+
+/**
+ * What to do before a confirmable action, given the mode, whether this client can show a form, and
+ * whether the protocol revision rules the dialog out.
+ *
+ * The last one refuses even under `ask`. On such a connection the client's capabilities read as
+ * absent, and `ask` would take that for "cannot show a dialog" and go ahead unasked — a dialog the
+ * operator configured would disappear without a word.
+ */
+export function confirmPlan(mode: ConfirmMode, clientCanAsk: boolean, noDialogInThisEra = false): ConfirmPlan {
   if (mode === "off") return "proceed";
+  if (noDialogInThisEra) return "refuse";
   if (clientCanAsk) return "ask";
   return mode === "require" ? "refuse" : "proceed";
 }

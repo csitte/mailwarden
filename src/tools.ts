@@ -1,4 +1,4 @@
-import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { Gmail, classifyBatchModify, filterCriteriaToQuery, looksLikeLabelId, unverifiedPredicates } from "./gmail.js";
 import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "./auth.js";
@@ -23,6 +23,7 @@ import { attachmentText, AttachmentTextError, DEFAULT_LIMITS, MAX_CHARS_CEILING,
 import {
   CONFIRM_SCHEMA,
   confirmPlan,
+  eraWithoutDialog,
   confirmed,
   dialogText,
   draftConfirmMode,
@@ -30,8 +31,9 @@ import {
   resolveDraftDialogOff,
   resolveDraftSelfWithoutDialog,
   type ConfirmMode,
+  type ConfirmPlan,
 } from "./confirm.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { SdkError, SdkErrorCode } from "@modelcontextprotocol/server";
 import { waitingOnMe, waitingOnThem } from "./followups.js";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -166,14 +168,31 @@ async function explainScopeFailure(err: unknown): Promise<unknown> {
  */
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
 
+/** `confirmPlan` for this connection: the mode, the client's capabilities and the protocol revision. */
+function dialogPlan(server: McpServer, mode: ConfirmMode): ConfirmPlan {
+  return confirmPlan(
+    mode,
+    server.server.getClientCapabilities()?.elicitation !== undefined,
+    eraWithoutDialog(server.server.getNegotiatedProtocolVersion()),
+  );
+}
+
 async function confirmWithUser(
   server: McpServer,
   mode: ConfirmMode,
   message: string,
   refusal?: string,
 ): Promise<boolean> {
-  const plan = confirmPlan(mode, server.server.getClientCapabilities()?.elicitation !== undefined);
+  const plan = dialogPlan(server, mode);
   if (plan === "proceed") return false;
+  const version = server.server.getNegotiatedProtocolVersion();
+  if (plan === "refuse" && eraWithoutDialog(version)) {
+    throw new ToolError(
+      "declined_by_user",
+      `This connection speaks MCP protocol ${version}, on which mailwarden cannot show its confirmation dialog yet, ` +
+        "and this action needs one here. Nothing was done.",
+    );
+  }
   if (plan === "refuse") {
     throw new ToolError(
       "declined_by_user",
@@ -185,7 +204,7 @@ async function confirmWithUser(
   try {
     answer = await server.server.elicitInput({ message, requestedSchema: CONFIRM_SCHEMA as never }, { timeout: CONFIRM_TIMEOUT_MS });
   } catch (err) {
-    if (err instanceof McpError && err.code === ErrorCode.RequestTimeout) {
+    if (err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout) {
       throw new ToolError(
         "declined_by_user",
         `Nobody answered the confirmation dialog within ${CONFIRM_TIMEOUT_MS / 60_000} minutes, so there was no yes. ` +
@@ -1458,7 +1477,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
     async ({ threadIds, dryRun }) => {
       const gmail = await client();
       // One question for the whole batch, asked with the dry run's own list of who would be contacted.
-      if (!dryRun && confirmPlan(confirmMode, server.server.getClientCapabilities()?.elicitation !== undefined) !== "proceed") {
+      if (!dryRun && dialogPlan(server, confirmMode) !== "proceed") {
         const rehearsal = await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun: true });
         const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${dialogText(r.from ?? "") || r.threadId} → ${new URL(r.wouldCall!).host}`);
         if (contacted.length > 0) {

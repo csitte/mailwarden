@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 import { readFileSync } from "node:fs";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import { registerTools, resolveEnabledTiers } from "../src/tools.js";
 import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "../src/auth.js";
 

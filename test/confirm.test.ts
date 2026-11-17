@@ -1,11 +1,11 @@
 import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import {
   confirmPlan,
   confirmed,
+  eraWithoutDialog,
   dialogText,
   draftConfirmMode,
   resolveConfirmMode,
@@ -50,6 +50,27 @@ describe("confirmPlan", () => {
     ["require", true, "ask"],
     ["require", false, "refuse"],
   ])("%s, client can ask: %s → %s", (mode, can, plan) => expect(confirmPlan(mode, can)).toBe(plan));
+
+  // On a protocol revision without server-to-client requests the client's capabilities read as
+  // absent; `ask` must not take that for "cannot show a dialog" and go ahead unasked.
+  it.each<[Parameters<typeof confirmPlan>[0], boolean, ReturnType<typeof confirmPlan>]>([
+    ["off", true, "proceed"],
+    ["off", false, "proceed"],
+    ["ask", true, "refuse"],
+    ["ask", false, "refuse"],
+    ["require", true, "refuse"],
+    ["require", false, "refuse"],
+  ])("%s, client can ask: %s, era without dialog → %s", (mode, can, plan) => expect(confirmPlan(mode, can, true)).toBe(plan));
+});
+
+describe("eraWithoutDialog", () => {
+  it("is true from 2026-07-28 on, false for the 2025 revisions and when nothing was negotiated", () => {
+    expect(eraWithoutDialog("2026-07-28")).toBe(true);
+    expect(eraWithoutDialog("2027-01-01")).toBe(true);
+    expect(eraWithoutDialog("2025-11-25")).toBe(false);
+    expect(eraWithoutDialog("2025-06-18")).toBe(false);
+    expect(eraWithoutDialog(undefined)).toBe(false);
+  });
 });
 
 describe("confirmed", () => {
@@ -63,15 +84,19 @@ describe("confirmed", () => {
   });
 });
 
-/** A client that can (or cannot) show a form, answering every elicitation with `answer`. */
-async function connect(answer?: { action: "accept" | "decline" | "cancel"; content?: Record<string, unknown> }) {
+/**
+ * A client that can (or cannot) show a form, answering every elicitation with `answer`. `era` makes
+ * the server report that protocol revision as negotiated, as a connection on it would.
+ */
+async function connect(answer?: { action: "accept" | "decline" | "cancel"; content?: Record<string, unknown> }, era?: string) {
   const server = new McpServer({ name: "mailwarden", version: "0.0.0" });
   registerTools(server);
+  if (era) vi.spyOn(server.server, "getNegotiatedProtocolVersion").mockReturnValue(era);
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0.0.0" }, answer ? { capabilities: { elicitation: {} } } : {});
   const asked: string[] = [];
   if (answer) {
-    client.setRequestHandler(ElicitRequestSchema, async (req) => {
+    client.setRequestHandler("elicitation/create", async (req) => {
       asked.push(String((req.params as { message?: string }).message));
       return answer;
     });
@@ -162,6 +187,25 @@ describe("MAILWARDEN_CONFIRM on create_filter", () => {
     expect(JSON.stringify(res.content)).toMatch(/cannot show a confirmation dialog/);
     expect(created).toEqual([]);
   });
+
+  it("ask: on protocol 2026-07-28 it refuses instead of going ahead unasked, and nothing is created", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    const created = filterApi();
+    const { client } = await connect(undefined, "2026-07-28");
+    const res: any = await client.callTool({ name: "create_filter", arguments: filterArgs });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/declined_by_user/);
+    expect(JSON.stringify(res.content)).toMatch(/protocol 2026-07-28/);
+    expect(created).toEqual([]);
+  });
+
+  it("off: on protocol 2026-07-28 nothing is asked and the filter is created, as configured", async () => {
+    const created = filterApi();
+    const { client } = await connect(undefined, "2026-07-28");
+    const res: any = await client.callTool({ name: "create_filter", arguments: filterArgs });
+    expect(res.isError).toBeFalsy();
+    expect(created).toHaveLength(1);
+  });
 });
 
 describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
@@ -234,6 +278,15 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]).not.toMatch(/\n|\u202E/);
     expect(asked[0]).toMatch(/x\.example/);
+  });
+
+  it("on protocol 2026-07-28 a bulk run under ask is refused before anyone is contacted", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    newsletter();
+    const { client } = await connect(undefined, "2026-07-28");
+    const res: any = await client.callTool({ name: "bulk_unsubscribe", arguments: { threadIds: ["t1"] } });
+    expect(res.isError).toBe(true);
+    expect(JSON.stringify(res.content)).toMatch(/protocol 2026-07-28/);
   });
 
   it("does not ask for a dry run, which contacts nobody", async () => {

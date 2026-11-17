@@ -132,6 +132,12 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   without hidden characters, and so are the filter criteria and label names, which come from the model:
   neither a display name nor a model can lay out text of its own in it. A label change is not on the list: it is
   reversible, exactly so with `undo: true`.
+  The dialog is a server-to-client request, which MCP protocol 2026-07-28 no longer has. mailwarden
+  therefore speaks the 2025 revisions only: it answers a client's `server/discover` probe with "method
+  not found", and the client falls back to the 2025 handshake (Claude Code 2.1.318 does, measured
+  17 November 2026). Should a connection ever run on 2026-07-28 regardless, `ask` and `require` both
+  refuse there instead of proceeding, because the client's capabilities read as absent on that
+  revision and `ask` would otherwise go ahead unasked. Tests hold both in place.
 - **A preview that binds the write.** A `bulk_modify` dry run returns a `previewToken`; the write that
   carries it acts on exactly the previewed messages and refuses a reworded query or a different
   label change, so the set a user agreed to is the set that changes.

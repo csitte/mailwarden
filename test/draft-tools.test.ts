@@ -1,8 +1,7 @@
 import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { ElicitRequestSchema } from "@modelcontextprotocol/sdk/types.js";
+import { McpServer } from "@modelcontextprotocol/server";
+import { Client } from "@modelcontextprotocol/client";
+import { InMemoryTransport } from "@modelcontextprotocol/server";
 import type { gmail_v1 } from "@googleapis/gmail";
 import { promises as fs } from "node:fs";
 import os from "node:os";
@@ -316,7 +315,7 @@ async function connect(answer?: { action: "accept" | "decline" | "cancel"; conte
   const client = new Client({ name: "test", version: "0.0.0" }, answer ? { capabilities: { elicitation: {} } } : {});
   const asked: string[] = [];
   if (answer) {
-    client.setRequestHandler(ElicitRequestSchema, async (req) => {
+    client.setRequestHandler("elicitation/create", async (req) => {
       asked.push(String((req.params as { message?: string }).message));
       return answer;
     });
@@ -740,13 +739,13 @@ describe("a confirmation dialog nobody answers", () => {
     const [ct, st] = InMemoryTransport.createLinkedPair();
     const client = new Client({ name: "test", version: "0.0.0" }, { capabilities: { elicitation: {} } });
     let asked = 0;
-    client.setRequestHandler(ElicitRequestSchema, () => {
+    client.setRequestHandler("elicitation/create", () => {
       asked++;
       return new Promise(() => {});
     });
     await Promise.all([server.connect(st), client.connect(ct)]);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
-    const pending = client.callTool({ name: "create_draft", arguments: { to: ["zoe@example.com"], subject: "Hi", body: "x" } }, undefined, {
+    const pending = client.callTool({ name: "create_draft", arguments: { to: ["zoe@example.com"], subject: "Hi", body: "x" } }, {
       timeout: 60 * 60_000,
     }) as Promise<any>;
     let settled = false;
