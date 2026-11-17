@@ -67,9 +67,9 @@ recorded per version in [`CHANGELOG.md`](../CHANGELOG.md) — this file only kee
 
 1. **MCP SDK v2 / spec 2026-07-28** — `@modelcontextprotocol/server` 2.x (stateless core,
    `server/discover`, Zod 4), tracked in [issue #8](https://github.com/csitte/mailwarden/issues/8).
-   Not urgent: current clients negotiate down to the 1.x protocol and the 1.x SDK is maintained
-   through at least early 2027; `src/http.ts` is already stateless and the schemas already use Zod 4.
-   Not started as of 15 November 2026.
+   Planned in [`docs/SDK-2-PLAN.md`](SDK-2-PLAN.md) as two steps. Step 1 (the SDK swap, held at
+   the 2025 protocol revisions so the confirmation dialogs keep working) was built on 17 November
+   2026 and is not released yet. Step 2 rebuilds the dialogs for 2026-07-28 and is not started.
 
 That is the whole list, and the short list is the finding rather than an omission. The September
 2026 survey turned up no capability gap worth closing: of the five servers in the README's
