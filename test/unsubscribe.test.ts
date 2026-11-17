@@ -1725,7 +1725,7 @@ describe("a request that failed after it was sent — the edges found in review"
     expect(provablyNotSent(new AggregateError([]))).toBe(false);
   });
 
-  it("our own deadline counts as sent, even if it fired while still connecting", async () => {
+  it("our own deadline counts as sent: its abort carries no code that proves otherwise", async () => {
     const { deps } = fakeDeps([]);
     deps.fetch = ((_url: any, init: any) =>
       new Promise((_, reject) => {
@@ -1799,6 +1799,38 @@ describe("a request that failed after it was sent — the edges found in review"
     expect(calls).toHaveLength(1);
     // Settled as an answered request: an ordinary duplicate now.
     expect((await unsubscribeThread(gmail, "t2", deps)).reason).toMatch(/already went out/);
+  });
+
+  it("force:true does not get past a call still running, and two declines leave no hold behind", async () => {
+    // Found in review: force used to pass a pending hold; with both dialogs declined, the second
+    // release put the first call's hold back, and the sender stayed held for the life of the process.
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t3: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    let answerA!: (yes: boolean) => void;
+    const dialogA = new Promise<boolean>((r) => (answerA = r));
+    const a = unsubscribeThread(gmail, "t1", deps, {
+      beforeRequest: async () => {
+        if (!(await dialogA)) throw new Error("declined A");
+      },
+    });
+    await vi.waitFor(() => expect(contactedSenderCount()).toBe(1));
+    const b = await unsubscribeThread(gmail, "t2", deps, {
+      force: true,
+      beforeRequest: async () => {
+        throw new Error("B must not be asked while A runs");
+      },
+    });
+    expect(b).toMatchObject({ duplicateOf: "t1", unsubscribed: false });
+    expect(b.reason).toMatch(/Another call is contacting this sender right now/);
+    answerA(false);
+    await expect(a).rejects.toThrow(/declined A/);
+    expect(contactedSenderCount()).toBe(0);
+    expect(await unsubscribeThread(gmail, "t3", deps)).toMatchObject({ unsubscribed: true });
+    expect(calls).toHaveLength(1);
   });
 
   it("a declined force:true attempt puts the earlier record back", async () => {

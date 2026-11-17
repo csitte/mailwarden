@@ -1381,7 +1381,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
         "If the sender offers nothing automatable this returns unsubscribed:false with the alternatives in `options` — it is not an error. " +
         "USE WHEN: the user wants off a newsletter. Pair with archive/trash or create_filter to deal with mail already in the mailbox. " +
         "DO NOT USE: to check whether unsubscribing is possible (use list_unsubscribe — it contacts nobody). " +
-        "A sender already contacted in this session is reported with `duplicateOf` and NOT contacted again — safe to retry after a timeout. Pass force:true for a deliberate second attempt (e.g. the endpoint answered 500). " +
+        "A sender already contacted in this session, or being contacted right now by another call, is reported with `duplicateOf` and NOT contacted again — safe to retry after a timeout. Pass force:true for a deliberate second attempt after a finished one (e.g. the endpoint answered 500); it does not override a call still running. " +
         "SIDE EFFECTS: makes an outbound HTTPS request to the sender's unsubscribe endpoint (plus up to 3 redirects) — the only non-Google host mailwarden ever contacts. " +
         "This confirms to the sender that the address is live, and it cannot be undone. The mailbox itself is not changed.",
       inputSchema: { threadId: z.string(), force: z.boolean().default(false) },
@@ -1427,11 +1427,11 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
     {
       description:
         "Unsubscribe from several mailing lists in one call, one thread id per list. " +
-        "Threads are processed SEQUENTIALLY, and at most ONE request is made per sender — a second thread from a sender whose request already went out is reported with `duplicateOf` and no request (and says so when it advertises a DIFFERENT endpoint, i.e. is probably a separate list from the same sender). " +
+        "Threads are processed SEQUENTIALLY, and at most ONE request is made per sender — a thread from a sender whose request already went out (in this call, an earlier call of this session, or a call still running) is reported with `duplicateOf` and no request (and says so when it advertises a DIFFERENT endpoint, i.e. is probably a separate list from the same sender). " +
         "The whole call shares a 60-second budget; threads left over when it runs out come back with `skippedOutOfTime` and a reason, so re-running with the remaining ids finishes the job. " +
         "Like unsubscribe, there is no URL parameter: every endpoint comes from that thread's own List-Unsubscribe header. Only RFC 8058 one-click senders are contacted; the rest come back with their alternatives in `options`. " +
         "Partial success is reported, never hidden: a thread that cannot be read or whose endpoint fails becomes an entry with a `reason`, and the remaining threads still run. " +
-        "Set dryRun:true to rehearse: same header reads, same per-sender dedupe (as a real run with every request succeeding), and each entry a real run would contact reports the endpoint it `wouldCall`; refusals and duplicates carry none — and nobody is contacted. " +
+        "Set dryRun:true to rehearse: same header reads, same per-sender dedupe (as a real run with every request succeeding, against the senders recorded at that moment), and each entry a real run would contact reports the endpoint it `wouldCall`; refusals and duplicates carry none — and nobody is contacted. " +
         "USE WHEN: clearing out several newsletters at once — pair with list_subscriptions, which gives you the sender rows and their newestThreadId; dryRun first to show the user which senders would be contacted. " +
         "DO NOT USE: for one thread (use unsubscribe), or to find candidates (use list_subscriptions — it contacts nobody). " +
         "SIDE EFFECTS: up to one outbound HTTPS request per DISTINCT sender (plus up to 3 redirects each) — the only non-Google hosts mailwarden ever contacts (none with dryRun). " +

@@ -387,9 +387,11 @@ place mailwarden ever talks to a host that isn't Google, so the rules are tight:
   confirms your address twice. A sender is recorded once a request *may* have reached them: any
   answer, and also a request that failed after it was sent (a timeout, a dropped connection, a
   redirect the vetting refused), since it may have arrived. A refusal, or a connection that provably
-  never opened (refused, unresolvable, a certificate error), leaves the next thread its own try. A
-  call still waiting on its dialog or its answer holds the sender, so a call made meanwhile sends
-  nothing — and if
+  never opened (refused, unresolvable, a certificate error), leaves the next thread its own try. An
+  `unsubscribe` waiting on its dialog, or any call waiting on its endpoint's answer, holds the
+  sender, so a call made meanwhile sends nothing to them, `force: true` included; a
+  `bulk_unsubscribe` run reads the record thread by thread, so a sender contacted while its own dialog
+  was open is skipped in the run — and if
   the skipped thread advertises a *different* endpoint, the reason says so, since one sender can run
   several lists. **That memory spans calls** for as long as the server runs, and `unsubscribe` shares
   it: a call that times out is safe to repeat, and asking twice for the same newsletter contacts the

@@ -54,18 +54,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that the earlier request may or may not have arrived, and the error is a `network_error` with
   `retryable: false` (it was filed as retryable by its wording). Left unrecorded, as before, are
   refusals and failures that prove nothing left: connection refused, an unresolvable or unreachable
-  host, a certificate error, and anything stopped by the vetting before the first request. A timeout
-  counts as sent, also one that hits while the connection is still being set up, because the error
-  does not say which it was; `force: true` on `unsubscribe` sends again.
+  host, a certificate error, and anything stopped by the vetting before the first request. When
+  mailwarden's own 10-second deadline runs out, that counts as sent, also while the connection is
+  still being set up, because the error does not say which it was; `force: true` on `unsubscribe`
+  sends again.
 - **A retry while the first call is still running no longer sends twice.** The record was written
-  only when a call ended, so a second call made while the first one's dialog was open or its request
+  only when a call ended, so a second call made while an `unsubscribe` dialog was open or a request
   had not been answered (a client that gave up waiting and retried, or two calls in parallel) found
   no record and contacted the sender too. A call now holds the sender from the moment it decides to
   contact them until the outcome is known; a call arriving meanwhile is reported as a duplicate
-  ("another call is contacting this sender right now") and sends nothing. If the first call ends
-  without sending anything (declined, refused, provably not sent), the hold is released.
-  `bulk_unsubscribe` reads the record afresh for each thread instead of once at the start, so it also
-  sees a hold or a send made by a call running alongside it.
+  ("another call is contacting this sender right now") and sends nothing, even with `force: true`,
+  which now overrides only a finished attempt. If the first call ends without sending anything
+  (declined, refused, provably not sent), the hold is released. `bulk_unsubscribe` holds nothing
+  while its own dialog is open, but its real run reads the record afresh for each thread instead of
+  once at the start, so a sender contacted by another call meanwhile is skipped, not contacted twice.
 
 ## [0.31.2] - 2026-11-16
 

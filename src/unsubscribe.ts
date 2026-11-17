@@ -697,7 +697,9 @@ function earlierNote(earlier: ContactRecord): string {
  * Hold `key` for the call about to contact it, and return how to settle the hold: "sent" (an
  * answer came back), "unconfirmed" (it failed after it was sent), or "nothing" (refusal, declined
  * dialog, a failure that proves nothing left). Must be called with no `await` between the duplicate
- * check and the hold, so two calls cannot both pass the check.
+ * check and the hold, so two calls cannot both pass the check. Never called over a pending record
+ * (force:true does not pass one), so there is at most one hold per sender and `before` is always a
+ * finished record or nothing.
  */
 function holdSender(key: string, threadId: string, urls: string[]): (outcome: "sent" | "unconfirmed" | "nothing") => void {
   const before = contactedSenders.get(key);
@@ -781,7 +783,10 @@ export async function unsubscribeThread(
   const key = senderKeyOf(info.from);
   const earlier = key ? contactedSenders.get(key) : undefined;
 
-  if (earlier && opts.force !== true) {
+  // force:true is the deliberate second attempt after a FINISHED one. It never gets past a call that
+  // is still running: that would mean two requests in flight, and two holds whose releases could
+  // restore each other and leave the sender held for good.
+  if (earlier && (opts.force !== true || earlier.pending)) {
     const elsewhere = info.httpsUrls.length > 0 && !info.httpsUrls.some((u) => earlier.urls.includes(u));
     return {
       threadId: info.threadId,
