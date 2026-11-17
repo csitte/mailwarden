@@ -37,8 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   all, even under `require`, and the run went ahead; and a sender whose first request threw (an
   unresolvable host, say) was not remembered, so its next thread was contacted, possibly at another
   host, although the dialog had listed it as a duplicate. The real run is now held to the dialog: a
-  thread is contacted only at exactly the endpoint the dialog's dry run named for it, and every other
-  thread comes back with a reason and no request. With `MAILWARDEN_CONFIRM=off` nothing changes.
+  thread's first request goes only to exactly the endpoint the dialog's dry run found for it (the
+  dialog shows that endpoint's host), at most once per listed thread, and every other thread comes
+  back with a reason and no request. Redirects from a confirmed endpoint, at most three, are followed
+  and vetted as before, and the dialog says so. Where no dialog is put (`off`, or `ask` on a client
+  that cannot show one) nothing changes.
 
 ## [0.31.2] - 2026-11-16
 

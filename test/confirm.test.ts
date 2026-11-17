@@ -15,6 +15,16 @@ import {
 import { registerTools } from "../src/tools.js";
 import { getAuth } from "../src/auth.js";
 
+// The one-click path resolves the endpoint's host first. Answered here, never by a real resolver:
+// the hosts asked for are the record of who a real run would have contacted.
+const resolved = vi.hoisted(() => [] as string[]);
+vi.mock("node:dns/promises", () => ({
+  lookup: async (host: string) => {
+    resolved.push(host);
+    throw new Error(`no resolver in tests (${host})`);
+  },
+}));
+
 vi.mock("../src/auth.js", async (orig) => ({
   ...(await orig<typeof import("../src/auth.js")>()),
   getAuth: vi.fn(),
@@ -22,6 +32,7 @@ vi.mock("../src/auth.js", async (orig) => ({
 }));
 
 afterEach(() => {
+  resolved.length = 0;
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
@@ -330,9 +341,10 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     expect(asked).toHaveLength(1);
     expect(asked[0]).toMatch(/1 unsubscribe request/);
     expect(asked[0]).not.toMatch(/t2\.example/);
+    expect(resolved).toEqual(["t1.example"]);
     const t2 = res.structuredContent.results.find((r: any) => r.threadId === "t2");
     expect(t2.url).toBeUndefined();
-    expect(t2.reason).toMatch(/not in the confirmation/);
+    expect(t2.reason).toMatch(/no confirmation covered/);
   });
 
   it("when no read works in the rehearsal there is no dialog, and nobody is contacted", async () => {
@@ -341,8 +353,9 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     const { client, asked } = await connect({ action: "accept", content: { confirm: true } });
     const res: any = await client.callTool({ name: "bulk_unsubscribe", arguments: { threadIds: ["t1", "t2"] } });
     expect(asked).toEqual([]);
+    expect(resolved).toEqual([]);
     expect(res.structuredContent.requests).toBe(0);
-    for (const r of res.structuredContent.results) expect(r.reason).toMatch(/not in the confirmation/);
+    for (const r of res.structuredContent.results) expect(r.reason).toMatch(/no confirmation covered/);
   });
 
   it("does not ask for a dry run, which contacts nobody", async () => {

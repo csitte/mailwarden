@@ -149,7 +149,10 @@ out of the tree, at the cost of our own code on the request path. That option st
    17 November 2026, on this branch:** the real run is held to the dialog's thread-to-endpoint list
    (`approved` in `bulkUnsubscribe`), and everything outside it is reported, not contacted. Step 2
    must keep that binding when the dialog moves to `inputRequired`: the rehearsal then runs in round
-   one and the list has to travel in the protected `requestState`.
+   one and the list has to travel in the protected `requestState`. Each listed thread gets one
+   attempt, so a thread id given twice cannot buy a second request after the first threw. Still open,
+   and older: a request that went out and then failed on a redirect (to plain http, to a private
+   address) leaves the sender unrecorded, so a LATER call contacts it again without a duplicate note.
 
 ## Estimate for step 2
 

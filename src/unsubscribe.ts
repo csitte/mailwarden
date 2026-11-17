@@ -978,11 +978,12 @@ export function approvedEndpoints(rehearsal: BulkUnsubscribeReport): Map<string,
   return out;
 }
 
-/** Thrown before a request the user's dialog did not cover; becomes that thread's `reason`. */
+/** Thrown before a request no confirmation covered; becomes that thread's `reason`. */
 const NOT_APPROVED =
-  "Not contacted: this thread's endpoint was not in the confirmation the user answered " +
-  "(the rehearsal behind the dialog could not read the thread, counted it under another thread of the same sender, " +
-  "or found a different endpoint). Call unsubscribe on it to be asked about it on its own.";
+  "Not contacted: no confirmation covered this request. The dry run that decides what is put to the user " +
+  "could not read this thread, ran out of time before it, counted it under another thread of the same sender, " +
+  "or found a different endpoint; or this thread id was listed twice and its one confirmed attempt is used. " +
+  "Call unsubscribe on it to be asked about it on its own.";
 
 /**
  * Wall-clock budget for a whole bulk call. The single-thread path allows 10s, and
@@ -1034,6 +1035,8 @@ export async function bulkUnsubscribe(
   // call does not tell a sender twice that the address is live. A dry run reads the
   // same seed (it must predict what a real run would skip) but never writes to it.
   const handled = new Map<string, ContactRecord>(contactedSenders);
+  // A copy, because an approval is used up by the attempt it allows.
+  const approved = opts.approved ? new Map(opts.approved) : undefined;
   const now = deps.now ?? (() => Date.now());
   const startedAt = now();
   let attempted = 0;
@@ -1124,7 +1127,6 @@ export async function bulkUnsubscribe(
     // Never let one slow endpoint eat the rest of the budget.
     const perThread = Math.min(TIMEOUT_MS, remaining);
     try {
-      const approved = opts.approved;
       const res = await unsubscribeFromInfo(
         info,
         deps,
@@ -1132,6 +1134,9 @@ export async function bulkUnsubscribe(
         approved
           ? async (endpoint) => {
               if (approved.get(threadId) !== endpoint) throw new Error(NOT_APPROVED);
+              // One confirmed line, one attempt: a thread id given twice must not get a second try after
+              // the first one threw (the sender is recorded only once a request has succeeded).
+              approved.delete(threadId);
             }
           : undefined,
       );

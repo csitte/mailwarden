@@ -1435,7 +1435,7 @@ describe("bulkUnsubscribe — a real run is held to the endpoints the user appro
     expect(calls.map((c) => c.url)).toEqual(["https://a.example/u"]);
     expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: false });
     expect(rep.results[1].url).toBeUndefined();
-    expect(rep.results[1].reason).toMatch(/not in the confirmation/);
+    expect(rep.results[1].reason).toMatch(/no confirmation covered/);
     expect(rep.requests).toBe(1);
   });
 
@@ -1444,7 +1444,7 @@ describe("bulkUnsubscribe — a real run is held to the endpoints the user appro
     const { deps, calls } = fakeDeps([{ status: 200 }]);
     const rep = await bulkUnsubscribe(gmail, ["t1"], deps, { approved: new Map([["t1", "https://a.example/other"]]) });
     expect(calls).toEqual([]);
-    expect(rep.results[0].reason).toMatch(/not in the confirmation/);
+    expect(rep.results[0].reason).toMatch(/no confirmation covered/);
   });
 
   it("an empty approval contacts nobody", async () => {
@@ -1472,7 +1472,20 @@ describe("bulkUnsubscribe — a real run is held to the endpoints the user appro
     });
     const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { approved: approvedEndpoints(rehearsal) });
     expect(hosts).toEqual(["a.example"]);
-    expect(rep.results[1].reason).toMatch(/not in the confirmation/);
+    expect(rep.results[1].reason).toMatch(/no confirmation covered/);
+  });
+
+  it("a thread id listed twice gets one attempt, not a second after the first threw", async () => {
+    const { gmail } = gmailByThread({ t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")] });
+    const { deps } = fakeDeps([]);
+    const rehearsal = await bulkUnsubscribe(gmail, ["t1", "t1"], deps, { dryRun: true });
+    expect(approvedEndpoints(rehearsal).size).toBe(1);
+    // The endpoint answers with a redirect to plain http, which the vetting refuses: the request
+    // went out, threw, and the sender is not recorded.
+    const { deps: real, calls } = fakeDeps([{ status: 302, location: "http://a.example/x" }, { status: 302, location: "http://a.example/x" }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t1"], real, { approved: approvedEndpoints(rehearsal) });
+    expect(calls).toHaveLength(1);
+    expect(rep.results[1].reason).toMatch(/no confirmation covered/);
   });
 
   it("approvedEndpoints takes exactly the threads a dry run would contact", async () => {
