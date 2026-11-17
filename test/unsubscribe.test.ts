@@ -16,11 +16,13 @@ import {
   resetContactedSenders,
   provablyNotSent,
   UnsubscribeRequestError,
+  contactedSenderCount,
   type UnsubscribeDeps,
   type UnsubscribeInfo,
   type UnsubscribeOptions,
 } from "../src/unsubscribe.js";
 import { Gmail, type ThreadSummary } from "../src/gmail.js";
+import { classifyError } from "../src/errors.js";
 
 // The "already contacted" record is process-wide by design (see unsubscribe.ts).
 // Tests share one process, so each starts from an empty one.
@@ -1649,13 +1651,16 @@ describe("a request that failed after it was sent — it may have arrived (plan 
     const { gmail } = gmailByThread({
       t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
       t2: [oneClickMsg("Other <other@example.com>", "https://b.example/u")],
+      t3: [oneClickMsg("Third <third@example.com>", "https://c.example/u")],
     });
     const { deps, calls } = fakeDeps([{ status: 200 }]);
+    // The dialog covered t1 and t2 only.
     const approved = approvedEndpoints(await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { dryRun: true }));
     failFirst(deps, hangUp);
-    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { approved });
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2", "t3"], deps, { approved });
     expect(rep.results[0].url).toBe("https://a.example/u");
     expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: true });
+    expect(rep.results[2].reason).toMatch(/no confirmation covered/);
     expect(calls.map((c) => c.url)).toEqual(["https://b.example/u"]);
     expect((await unsubscribeThread(gmail, "t1", deps)).duplicateOf).toBe("t1");
   });
@@ -1701,5 +1706,117 @@ describe("a request that failed after it was sent — it may have arrived (plan 
     const ok = fakeDeps([{ status: 200 }]);
     expect(await unsubscribeThread(gmail, "t2", ok.deps)).toMatchObject({ unsubscribed: true });
     expect(ok.calls).toHaveLength(1);
+  });
+});
+
+describe("a request that failed after it was sent — the edges found in review", () => {
+  const coded = (code: string) => Object.assign(new Error(code), { code });
+
+  it("provablyNotSent fails closed on anything it cannot vouch for", () => {
+    // One member without a code: unknown, so "may have been sent".
+    expect(provablyNotSent(new AggregateError([coded("ECONNREFUSED"), new Error("??")]))).toBe(false);
+    // A cause that is not an error object.
+    expect(provablyNotSent(Object.assign(new TypeError("fetch failed"), { cause: "ECONNREFUSED" }))).toBe(false);
+    // A chain deeper than the walk follows.
+    let deep: any = coded("ECONNREFUSED");
+    for (let i = 0; i < 6; i++) deep = new TypeError("wrap", { cause: deep });
+    expect(provablyNotSent(deep)).toBe(false);
+    // An empty AggregateError carries nothing.
+    expect(provablyNotSent(new AggregateError([]))).toBe(false);
+  });
+
+  it("our own deadline counts as sent, even if it fired while still connecting", async () => {
+    const { deps } = fakeDeps([]);
+    deps.fetch = ((_url: any, init: any) =>
+      new Promise((_, reject) => {
+        init.signal.addEventListener("abort", () => reject(init.signal.reason), { once: true });
+      })) as typeof globalThis.fetch;
+    const err = await oneClickUnsubscribe("https://a.example/u", deps, 20).catch((e) => e);
+    expect(err).toBeInstanceOf(UnsubscribeRequestError);
+    expect(err.message).toMatch(/timeout|timed out|aborted/i);
+  });
+
+  it("the error names the real cause, and is a non-retryable network_error", async () => {
+    const { deps } = fakeDeps([]);
+    failFirst(deps, () => new TypeError("fetch failed", { cause: coded("UND_ERR_SOCKET") }));
+    const err = await oneClickUnsubscribe("https://a.example/u", deps).catch((e) => e);
+    expect(err.message).toMatch(/fetch failed: UND_ERR_SOCKET/);
+    expect(classifyError(err)).toMatchObject({ code: "network_error", retryable: false });
+  });
+
+  it("single: a second call while the first one's dialog is open sends nothing", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t3: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    let answer!: (yes: boolean) => void;
+    const dialog = new Promise<boolean>((r) => (answer = r));
+    const first = unsubscribeThread(gmail, "t1", deps, {
+      beforeRequest: async () => {
+        if (!(await dialog)) throw new Error("declined");
+      },
+    });
+    await vi.waitFor(() => expect(contactedSenderCount()).toBe(1));
+
+    // The client gave up waiting and retried.
+    const retry = await unsubscribeThread(gmail, "t2", deps);
+    expect(retry).toMatchObject({ duplicateOf: "t1", unsubscribed: false });
+    expect(retry.reason).toMatch(/Another call is contacting this sender right now/);
+    const bulk = await bulkUnsubscribe(gmail, ["t2"], deps);
+    expect(bulk).toMatchObject({ skippedDuplicates: 1, requests: 0 });
+    expect(bulk.results[0].reason).toMatch(/has not finished yet/);
+    expect(calls).toHaveLength(0);
+
+    // Declined: nothing was sent, so the hold is released and a later call is asked again.
+    answer(false);
+    await expect(first).rejects.toThrow(/declined/);
+    expect(contactedSenderCount()).toBe(0);
+    expect(await unsubscribeThread(gmail, "t3", deps)).toMatchObject({ unsubscribed: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("bulk: a call started while a bulk request is in flight sees the hold", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const inner = deps.fetch;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    deps.fetch = (async (url: any, init: any) => {
+      await gate;
+      return (inner as any)(url, init);
+    }) as typeof globalThis.fetch;
+    const run = bulkUnsubscribe(gmail, ["t1"], deps);
+    await vi.waitFor(() => expect(contactedSenderCount()).toBe(1));
+    const meanwhile = await unsubscribeThread(gmail, "t2", deps);
+    expect(meanwhile).toMatchObject({ duplicateOf: "t1", unsubscribed: false });
+    release();
+    expect((await run).results[0]).toMatchObject({ unsubscribed: true });
+    expect(calls).toHaveLength(1);
+    // Settled as an answered request: an ordinary duplicate now.
+    expect((await unsubscribeThread(gmail, "t2", deps)).reason).toMatch(/already went out/);
+  });
+
+  it("a declined force:true attempt puts the earlier record back", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    await unsubscribeThread(gmail, "t1", deps);
+    await expect(
+      unsubscribeThread(gmail, "t2", deps, {
+        force: true,
+        beforeRequest: async () => {
+          throw new Error("declined");
+        },
+      }),
+    ).rejects.toThrow(/declined/);
+    expect((await unsubscribeThread(gmail, "t2", deps)).duplicateOf).toBe("t1");
+    expect(calls).toHaveLength(1);
   });
 });

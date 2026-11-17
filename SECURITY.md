@@ -321,7 +321,8 @@ only this machine can reach.
 - **Bounded when repeated.** `bulk_unsubscribe` multiplies this request, so it is bounded on three
   axes rather than one: at most 25 threads per call, **at most one request per sender — for the life
   of the server process, not just the call** (recorded once a request may have reached the sender,
-  which includes a request that failed after it was sent; a refusal, or a connection that provably
+  which includes a request that failed after it was sent, and held while a call is still deciding or
+  waiting, so a parallel call cannot send as well; a refusal, or a connection that provably
   never opened, does not suppress the next thread; `unsubscribe` reads and writes the
   same record, and `force: true` is the deliberate override), and one 60-second budget for the whole call — 25 × the single-request timeout would stall
   far past any client's patience, and threads left over are reported as untouched rather than dropped.

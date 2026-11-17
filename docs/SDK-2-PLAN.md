@@ -144,7 +144,7 @@ out of the tree, at the cost of our own code on the request path. That option st
    this change).** The dialog lists the hosts from a dry run; the real run reads the threads again
    and asks no question of its own. A thread whose read fails in the rehearsal is missing from the
    dialog and still contacted in the run; if every read fails, no dialog is shown at all, even under
-   `require`. A sender whose first request throws is not remembered, so its second thread is
+   `require`. A sender whose first request threw was not remembered, so its second thread was
    contacted, possibly at another host, though the dialog listed it as a duplicate. **Fixed
    17 November 2026, on this branch:** the real run is held to the dialog's thread-to-endpoint list
    (`approved` in `bulkUnsubscribe`), and everything outside it is reported, not contacted. Step 2
@@ -156,9 +156,15 @@ out of the tree, at the cost of our own code on the request path. That option st
    **fixed too (17 November 2026, same branch):** `oneClickUnsubscribe` throws
    `UnsubscribeRequestError` for any failure after the first request started, unless no hop had
    answered and every error code in the chain proves nothing left (`provablyNotSent`: refused,
-   unresolvable, unreachable, connect timeout, certificate errors). Both paths record the sender for
-   that error, marked as unconfirmed, and say so in the next duplicate's reason. A timeout counts as
-   sent, since it carries no code that proves otherwise.
+   unresolvable, unreachable, certificate errors; anything it cannot vouch for counts as sent).
+   Both paths record the sender for that error, marked as unconfirmed, and say so in the next
+   duplicate's reason. A timeout counts as sent, also one during connection setup: our deadline
+   fires as a `TimeoutError` without a code, before undici's own connect timeout could. The review
+   of that fix found a third, concurrent case: the record was written only when a call ended, so a
+   retry during an open dialog or an unanswered request sent as well. A call now holds the sender
+   from its decision to its outcome (`holdSender`), and the bulk run reads the record per thread.
+   Step 2 must keep the hold across both `inputRequired` rounds, or release it between them and
+   recheck on re-entry.
 
 ## Estimate for step 2
 

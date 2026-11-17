@@ -25,6 +25,7 @@
  *    every hop (including redirects) must resolve exclusively to public addresses.
  */
 import { lookup as dnsLookup } from "node:dns/promises";
+import { ToolError } from "./cli.js";
 import { parseSender } from "./digest.js";
 import { isThrottled, type Gmail, type ThreadSummary } from "./gmail.js";
 
@@ -459,22 +460,37 @@ const NOT_SENT_CODES = new Set([
 /**
  * True only when a failed `fetch` proves nothing was sent: every error code in the chain (the
  * error, its `cause`s, the members of an `AggregateError` from trying several addresses) is one of
- * {@link NOT_SENT_CODES}. No code at all proves nothing, so it counts as "may have been sent".
+ * {@link NOT_SENT_CODES}. Anything the walk cannot vouch for counts as "may have been sent": no code
+ * at all, a link in the chain that ends without a code (a non-object, or an error with neither a code
+ * nor a cause), or a chain deeper than the walk follows.
+ *
+ * That includes the deadline: our own `AbortSignal.timeout` fires as a `TimeoutError` with no string
+ * code, whether the connection was still being set up or the endpoint already had the request, so a
+ * timeout always counts as sent. (undici's own connect timeout would carry `UND_ERR_CONNECT_TIMEOUT`,
+ * but it defaults to the same 10 s as our deadline, which starts earlier and so fires first.)
  */
 export function provablyNotSent(err: unknown): boolean {
   const codes: string[] = [];
   const seen = new Set<unknown>();
+  let unknown = false;
   const walk = (e: unknown, depth: number): void => {
-    if (!e || typeof e !== "object" || seen.has(e) || depth > 4) return;
+    if (depth > 4 || !e || typeof e !== "object") {
+      unknown = true;
+      return;
+    }
+    if (seen.has(e)) return;
     seen.add(e);
     const code = (e as { code?: unknown }).code;
-    if (typeof code === "string") codes.push(code);
-    walk((e as { cause?: unknown }).cause, depth + 1);
+    const cause = (e as { cause?: unknown }).cause;
     const members = (e as { errors?: unknown }).errors;
-    if (Array.isArray(members)) for (const m of members) walk(m, depth + 1);
+    const hasMembers = Array.isArray(members) && members.length > 0;
+    if (typeof code === "string") codes.push(code);
+    else if (cause === undefined && !hasMembers) unknown = true;
+    if (cause !== undefined) walk(cause, depth + 1);
+    if (hasMembers) for (const m of members as unknown[]) walk(m, depth + 1);
   };
   walk(err, 0);
-  return codes.length > 0 && codes.every((c) => NOT_SENT_CODES.has(c));
+  return !unknown && codes.length > 0 && codes.every((c) => NOT_SENT_CODES.has(c));
 }
 
 /**
@@ -483,17 +499,23 @@ export function provablyNotSent(err: unknown): boolean {
  * proof that nothing was sent. The caller must treat the sender as contacted — retrying would
  * risk telling them twice that the address is live.
  */
-export class UnsubscribeRequestError extends Error {
+export class UnsubscribeRequestError extends ToolError {
   /** The URL of the last request that was started. */
   readonly url: string;
   constructor(url: string, cause: unknown) {
-    const detail = cause instanceof Error ? cause.message : String(cause);
+    // undici wraps the real failure: "fetch failed" alone says nothing, its cause does.
+    const inner = cause instanceof Error ? cause.cause : undefined;
+    const detail =
+      (cause instanceof Error ? cause.message : String(cause)) + (inner instanceof Error ? `: ${inner.message}` : "");
     super(
+      "network_error",
       `The unsubscribe request to ${new URL(url).host} failed after it was sent (${detail}). ` +
         "It may have reached the sender, so mailwarden counts this sender as contacted and makes no " +
         "further request to them in this session; call unsubscribe with force:true to send again.",
-      { cause },
+      // Not retryable: calling again unchanged only reports the sender as already contacted.
+      false,
     );
+    this.cause = cause;
     this.name = "UnsubscribeRequestError";
     this.url = url;
   }
@@ -633,7 +655,8 @@ export interface UnsubscribeResult {
    * Set when no request was made because one had ALREADY GONE OUT to this sender —
    * earlier in the same bulk call, or earlier in this server process. Names that
    * thread. That includes a request that failed after it was sent, since it may have
-   * arrived. A sender whose earlier thread only produced a refusal, or whose request
+   * arrived, and a call that is still running for this sender (dialog open, request
+   * unanswered). A sender whose earlier thread only produced a refusal, or whose request
    * provably never left (connection refused, name or TLS failure), is not recorded, so
    * this thread still gets its own try.
    */
@@ -648,11 +671,48 @@ interface ContactRecord {
   urls: string[];
   /** The request failed after it was sent ({@link UnsubscribeRequestError}): it may or may not have arrived. */
   unconfirmed?: true;
+  /**
+   * A call is still working on this sender: its dialog is open or its request has not settled. Held
+   * so that a second call made meanwhile (a client that gave up waiting and retried, two calls in
+   * parallel) cannot send as well. Released again if that call ends without sending anything.
+   */
+  pending?: true;
 }
 
-/** The sentence a duplicate's reason adds when the earlier request's outcome is unknown. */
-const UNCONFIRMED_NOTE =
-  " That request failed after it was sent, so it may have arrived; force:true on unsubscribe sends again.";
+/** The sentence a duplicate's reason adds about the earlier record, if it is not a plain answer. */
+function earlierNote(earlier: ContactRecord): string {
+  if (earlier.pending) {
+    return (
+      " That call has not finished yet (its confirmation dialog is open or its request has not been answered); " +
+      "if it ends without sending anything, the sender is free again and this thread can be retried."
+    );
+  }
+  if (earlier.unconfirmed) {
+    return " That request failed after it was sent, so it may have arrived; force:true on unsubscribe sends again.";
+  }
+  return "";
+}
+
+/**
+ * Hold `key` for the call about to contact it, and return how to settle the hold: "sent" (an
+ * answer came back), "unconfirmed" (it failed after it was sent), or "nothing" (refusal, declined
+ * dialog, a failure that proves nothing left). Must be called with no `await` between the duplicate
+ * check and the hold, so two calls cannot both pass the check.
+ */
+function holdSender(key: string, threadId: string, urls: string[]): (outcome: "sent" | "unconfirmed" | "nothing") => void {
+  const before = contactedSenders.get(key);
+  const hold: ContactRecord = { threadId, urls, pending: true };
+  contactedSenders.set(key, hold);
+  return (outcome) => {
+    if (outcome === "sent") contactedSenders.set(key, { threadId, urls });
+    else if (outcome === "unconfirmed") contactedSenders.set(key, { threadId, urls, unconfirmed: true });
+    else if (contactedSenders.get(key) === hold) {
+      // Back to what stood before: nothing (a first attempt) or the record a force:true call overrode.
+      if (before) contactedSenders.set(key, before);
+      else contactedSenders.delete(key);
+    }
+  };
+}
 
 /**
  * Senders this process has already contacted, for the lifetime of the process.
@@ -682,7 +742,7 @@ export function resetContactedSenders(): void {
   contactedSenders.clear();
 }
 
-/** How many distinct senders this process has contacted (reported by `--check`-style callers). */
+/** How many distinct senders this process has contacted or is contacting right now (held by a running call). */
 export function contactedSenderCount(): number {
   return contactedSenders.size;
 }
@@ -729,31 +789,33 @@ export async function unsubscribeThread(
       from: info.from,
       unsubscribed: false,
       duplicateOf: earlier.threadId,
-      reason:
-        `A request already went out to this sender in this session (thread ${earlier.threadId}) — no second one made. ` +
-        (earlier.unconfirmed ? "That request failed after it was sent, so it may have arrived. " : "") +
-        (elsewhere
-          ? "This thread advertises a DIFFERENT opt-out endpoint, so it may be a separate list from the same sender: "
-          : "Pass force:true to contact them again, e.g. if the first attempt failed: ") +
-        "re-run with force:true.",
+      reason: earlier.pending
+        ? `Another call is contacting this sender right now (thread ${earlier.threadId}) — no second request made.` +
+          earlierNote(earlier)
+        : `A request already went out to this sender in this session (thread ${earlier.threadId}) — no second one made. ` +
+          (earlier.unconfirmed ? "That request failed after it was sent, so it may have arrived. " : "") +
+          (elsewhere
+            ? "This thread advertises a DIFFERENT opt-out endpoint, so it may be a separate list from the same sender: "
+            : "Pass force:true to contact them again, e.g. if the first attempt failed: ") +
+          "re-run with force:true.",
       options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
     };
   }
 
+  // Held from here (no await since the check above) until the outcome is known, dialog included.
+  const settle = key ? holdSender(key, threadId, info.httpsUrls) : () => {};
   let res: UnsubscribeResult;
   try {
     res = await unsubscribeFromInfo(info, deps, TIMEOUT_MS, opts.beforeRequest);
   } catch (err) {
     // Sent, then failed: it may have arrived, so the sender counts as contacted. Every other throw
     // (a declined dialog, vetting, a connection that provably never opened) sent nothing.
-    if (key && err instanceof UnsubscribeRequestError) {
-      contactedSenders.set(key, { threadId, urls: info.httpsUrls, unconfirmed: true });
-    }
+    settle(err instanceof UnsubscribeRequestError ? "unconfirmed" : "nothing");
     throw err;
   }
   // `url` is set exactly when an endpoint answered. A refusal must not block the next
   // thread from the same sender.
-  if (key && res.url) contactedSenders.set(key, { threadId, urls: info.httpsUrls });
+  settle(res.url ? "sent" : "nothing");
   return res;
 }
 
@@ -1131,10 +1193,14 @@ export async function bulkUnsubscribe(
   // called can differ from the header's after a redirect, and comparing against that
   // would flag every redirecting sender as a second list.
   //
-  // Seeded from what this process has already contacted, so a retried or repeated
-  // call does not tell a sender twice that the address is live. A dry run reads the
-  // same seed (it must predict what a real run would skip) but never writes to it.
-  const handled = new Map<string, ContactRecord>(contactedSenders);
+  // A real run also reads the process-wide record LIVE at every thread, so a retried or repeated
+  // call does not tell a sender twice that the address is live, and a call running alongside this
+  // one (holding a sender while its dialog is open) is seen when it starts, not only when this run
+  // did. A dry run takes a snapshot instead (it must predict what a real run would skip) and never
+  // writes to the process-wide record.
+  const handled = new Map<string, ContactRecord>(dryRun ? contactedSenders : []);
+  const recordOf = (key: string): ContactRecord | undefined =>
+    handled.get(key) ?? (dryRun ? undefined : contactedSenders.get(key));
   // A copy, because an approval is used up by the attempt it allows.
   const approved = opts.approved ? new Map(opts.approved) : undefined;
   const now = deps.now ?? (() => Date.now());
@@ -1177,7 +1243,7 @@ export async function bulkUnsubscribe(
 
     const options = { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos };
     const senderKey = senderKeyOf(info.from);
-    const earlier = senderKey ? handled.get(senderKey) : undefined;
+    const earlier = senderKey ? recordOf(senderKey) : undefined;
     if (earlier) {
       skippedDuplicates++;
       // One sender can run several lists. If this thread points somewhere else, the
@@ -1191,11 +1257,13 @@ export async function bulkUnsubscribe(
         unsubscribed: false,
         duplicateOf: earlier.threadId,
         reason:
-          `A request already went out to this sender for thread ${earlier.threadId}` +
-          (results.some((r) => r.threadId === earlier.threadId)
-            ? " — no second one made."
-            : " in an earlier call in this session — no second one made.") +
-          (earlier.unconfirmed ? UNCONFIRMED_NOTE : "") +
+          (earlier.pending
+            ? `Another call is contacting this sender right now (thread ${earlier.threadId}) — no second request made.`
+            : `A request already went out to this sender for thread ${earlier.threadId}` +
+              (results.some((r) => r.threadId === earlier.threadId)
+                ? " — no second one made."
+                : " in an earlier call in this session — no second one made.")) +
+          earlierNote(earlier) +
           (elsewhere
             ? " Note that this thread advertises a DIFFERENT opt-out endpoint (see `options.httpsUrls`), " +
               "so it may be a separate list from the same sender — call unsubscribe on it directly if you meant that one."
@@ -1227,6 +1295,8 @@ export async function bulkUnsubscribe(
     }
     // Never let one slow endpoint eat the rest of the budget.
     const perThread = Math.min(TIMEOUT_MS, remaining);
+    // Held from here (no await since the check above) until the outcome is known.
+    const settle = senderKey ? holdSender(senderKey, threadId, info.httpsUrls) : () => {};
     try {
       const res = await unsubscribeFromInfo(
         info,
@@ -1243,21 +1313,16 @@ export async function bulkUnsubscribe(
       );
       // `url` is set exactly when an endpoint answered (a failure after sending is the
       // catch below). A refusal must not suppress the next thread.
-      if (senderKey && res.url) {
-        const record = { threadId, urls: info.httpsUrls };
-        handled.set(senderKey, record);
-        contactedSenders.set(senderKey, record); // outlives this call, see the store's comment
-      }
+      // The process-wide record outlives this call, see the store's comment.
+      settle(res.url ? "sent" : "nothing");
+      if (senderKey && res.url) handled.set(senderKey, { threadId, urls: info.httpsUrls });
       if (res.url) requests++;
       results.push(res);
     } catch (err) {
       if (err instanceof UnsubscribeRequestError) {
         // Sent, then failed: it may have arrived, so this sender is done for this call and the next.
-        const record = { threadId, urls: info.httpsUrls, unconfirmed: true as const };
-        if (senderKey) {
-          handled.set(senderKey, record);
-          contactedSenders.set(senderKey, record);
-        }
+        settle("unconfirmed");
+        if (senderKey) handled.set(senderKey, { threadId, urls: info.httpsUrls, unconfirmed: true });
         requests++;
         results.push({
           threadId,
@@ -1270,6 +1335,7 @@ export async function bulkUnsubscribe(
         });
         continue;
       }
+      settle("nothing");
       results.push({
         threadId,
         messageId: info.messageId,
