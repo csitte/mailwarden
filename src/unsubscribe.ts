@@ -958,7 +958,31 @@ export interface BulkUnsubscribeOptions {
    */
   dryRun?: boolean;
   budgetMs?: number;
+  /**
+   * Thread id -> the one endpoint the user agreed to, taken from the rehearsal their dialog showed
+   * (see `approvedEndpoints`). When set, a real run contacts a thread only at exactly that endpoint;
+   * every other thread is reported as not contacted. Unset means no dialog stands in front of this
+   * run (MAILWARDEN_CONFIRM=off, or a client the setting lets through), and nothing is filtered.
+   *
+   * Without it the dialog only described the run: the real run reads every thread again, so a thread
+   * whose read failed during the rehearsal, a second thread of a sender whose first request threw, or
+   * a thread that now names another endpoint would be contacted although no one was asked about it.
+   */
+  approved?: ReadonlyMap<string, string>;
 }
+
+/** The endpoints a dry-run report would contact, by thread: what a dialog built from it shows. */
+export function approvedEndpoints(rehearsal: BulkUnsubscribeReport): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const r of rehearsal.results) if (r.wouldCall) out.set(r.threadId, r.wouldCall);
+  return out;
+}
+
+/** Thrown before a request the user's dialog did not cover; becomes that thread's `reason`. */
+const NOT_APPROVED =
+  "Not contacted: this thread's endpoint was not in the confirmation the user answered " +
+  "(the rehearsal behind the dialog could not read the thread, counted it under another thread of the same sender, " +
+  "or found a different endpoint). Call unsubscribe on it to be asked about it on its own.";
 
 /**
  * Wall-clock budget for a whole bulk call. The single-thread path allows 10s, and
@@ -1100,7 +1124,17 @@ export async function bulkUnsubscribe(
     // Never let one slow endpoint eat the rest of the budget.
     const perThread = Math.min(TIMEOUT_MS, remaining);
     try {
-      const res = await unsubscribeFromInfo(info, deps, perThread);
+      const approved = opts.approved;
+      const res = await unsubscribeFromInfo(
+        info,
+        deps,
+        perThread,
+        approved
+          ? async (endpoint) => {
+              if (approved.get(threadId) !== endpoint) throw new Error(NOT_APPROVED);
+            }
+          : undefined,
+      );
       // Record the sender only if a request actually reached an endpoint: `url` is
       // set exactly when one was made. A refusal must not suppress the next thread.
       if (senderKey && res.url) {

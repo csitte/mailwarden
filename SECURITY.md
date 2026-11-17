@@ -132,6 +132,10 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   without hidden characters, and so are the filter criteria and label names, which come from the model:
   neither a display name nor a model can lay out text of its own in it. A label change is not on the list: it is
   reversible, exactly so with `undo: true`.
+  For `bulk_unsubscribe` the dialog lists what a dry run of the same call found, and the real run is
+  held to that list: a thread is contacted only at the endpoint the dialog named for it, so a thread
+  the dry run could not read, or a second thread of a sender whose first request failed, is reported
+  and not contacted (since the release after 0.31.2; before, the real run acted on its own reads).
   The dialog is a server-to-client request, which MCP protocol 2026-07-28 no longer has. mailwarden
   therefore speaks the 2025 revisions only: it answers a client's `server/discover` probe with "method
   not found" (over HTTP, a probe that already carries the 2026-07-28 version header gets HTTP 400

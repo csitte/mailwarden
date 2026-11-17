@@ -5,6 +5,7 @@ import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "./aut
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
 import {
+  approvedEndpoints,
   bulkUnsubscribe,
   inspectUnsubscribe,
   listSubscriptions,
@@ -1476,9 +1477,12 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
     },
     async ({ threadIds, dryRun }) => {
       const gmail = await client();
-      // One question for the whole batch, asked with the dry run's own list of who would be contacted.
+      // One question for the whole batch, asked with the dry run's own list of who would be contacted,
+      // and the real run held to exactly that list: a thread the dialog did not show is not contacted.
+      let approved: Map<string, string> | undefined;
       if (!dryRun && dialogPlan(server, confirmMode) !== "proceed") {
         const rehearsal = await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun: true });
+        approved = approvedEndpoints(rehearsal);
         const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${dialogText(r.from ?? "") || r.threadId} → ${new URL(r.wouldCall!).host}`);
         if (contacted.length > 0) {
           await confirmWithUser(
@@ -1492,7 +1496,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
           );
         }
       }
-      return ok(await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun }));
+      return ok(await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun, approved }));
     },
   );
 

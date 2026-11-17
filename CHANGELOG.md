@@ -30,6 +30,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   instead. `off` behaves as before, and so does an instance that negotiated nothing (stateless HTTP).
   mailwarden does not serve that revision today (see above), so this guards the next change, not a
   current path.
+- **`bulk_unsubscribe` contacts only what its dialog showed.** Since 0.24.0, under
+  `MAILWARDEN_CONFIRM=ask` or `require` the dialog listed the hosts a dry run found, and the real run
+  then read every thread again and acted on what it read. A thread whose read failed during the dry
+  run was missing from the dialog and contacted anyway; when every read failed there was no dialog at
+  all, even under `require`, and the run went ahead; and a sender whose first request threw (an
+  unresolvable host, say) was not remembered, so its next thread was contacted, possibly at another
+  host, although the dialog had listed it as a duplicate. The real run is now held to the dialog: a
+  thread is contacted only at exactly the endpoint the dialog's dry run named for it, and every other
+  thread comes back with a reason and no request. With `MAILWARDEN_CONFIRM=off` nothing changes.
 
 ## [0.31.2] - 2026-11-16
 

@@ -145,8 +145,11 @@ out of the tree, at the cost of our own code on the request path. That option st
    and asks no question of its own. A thread whose read fails in the rehearsal is missing from the
    dialog and still contacted in the run; if every read fails, no dialog is shown at all, even under
    `require`. A sender whose first request throws is not remembered, so its second thread is
-   contacted, possibly at another host, though the dialog listed it as a duplicate. To be fixed on
-   its own, before or independent of step 2.
+   contacted, possibly at another host, though the dialog listed it as a duplicate. **Fixed
+   17 November 2026, on this branch:** the real run is held to the dialog's thread-to-endpoint list
+   (`approved` in `bulkUnsubscribe`), and everything outside it is reported, not contacted. Step 2
+   must keep that binding when the dialog moves to `inputRequired`: the rehearsal then runs in round
+   one and the list has to travel in the protected `requestState`.
 
 ## Estimate for step 2
 

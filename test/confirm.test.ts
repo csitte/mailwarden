@@ -289,6 +289,62 @@ describe("MAILWARDEN_CONFIRM on unsubscribe", () => {
     expect(JSON.stringify(res.content)).toMatch(/protocol 2026-07-28/);
   });
 
+  /** Two newsletters; the reads of the ids in `failFirst` fail the first time only, i.e. in the rehearsal. */
+  function twoNewsletters(failFirst: string[]) {
+    const reads = new Map<string, number>();
+    (getAuth as Mock).mockResolvedValue({
+      users: {
+        threads: {
+          get: async ({ id }: { id: string }) => {
+            const n = (reads.get(id) ?? 0) + 1;
+            reads.set(id, n);
+            if (n === 1 && failFirst.includes(id)) throw new Error("transient read failure");
+            return {
+              data: {
+                id,
+                messages: [
+                  {
+                    id: `${id}-m1`,
+                    payload: {
+                      headers: [
+                        { name: "From", value: `News <news@${id}.example>` },
+                        { name: "List-Unsubscribe", value: `<https://${id}.example/u>` },
+                        { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+                      ],
+                    },
+                  },
+                ],
+              },
+            };
+          },
+        },
+      },
+    });
+  }
+
+  it("a thread the dialog did not show is not contacted, even when its second read works", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    twoNewsletters(["t2"]);
+    const { client, asked } = await connect({ action: "accept", content: { confirm: true } });
+    const res: any = await client.callTool({ name: "bulk_unsubscribe", arguments: { threadIds: ["t1", "t2"] } });
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatch(/1 unsubscribe request/);
+    expect(asked[0]).not.toMatch(/t2\.example/);
+    const t2 = res.structuredContent.results.find((r: any) => r.threadId === "t2");
+    expect(t2.url).toBeUndefined();
+    expect(t2.reason).toMatch(/not in the confirmation/);
+  });
+
+  it("when no read works in the rehearsal there is no dialog, and nobody is contacted", async () => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "require");
+    twoNewsletters(["t1", "t2"]);
+    const { client, asked } = await connect({ action: "accept", content: { confirm: true } });
+    const res: any = await client.callTool({ name: "bulk_unsubscribe", arguments: { threadIds: ["t1", "t2"] } });
+    expect(asked).toEqual([]);
+    expect(res.structuredContent.requests).toBe(0);
+    for (const r of res.structuredContent.results) expect(r.reason).toMatch(/not in the confirmation/);
+  });
+
   it("does not ask for a dry run, which contacts nobody", async () => {
     vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
     newsletter();

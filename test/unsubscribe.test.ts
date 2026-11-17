@@ -11,6 +11,7 @@ import {
   classifyOptOut,
   listSubscriptions,
   bulkUnsubscribe,
+  approvedEndpoints,
   planUnsubscribe,
   resetContactedSenders,
   type UnsubscribeDeps,
@@ -1418,5 +1419,70 @@ describe("listSubscriptions — out of quota", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// Found in the SDK 2 review, 17 Nov 2026: the confirmation for bulk_unsubscribe showed a rehearsal,
+// and the real run read every thread again. Whatever the rehearsal did not show still went out.
+describe("bulkUnsubscribe — a real run is held to the endpoints the user approved", () => {
+  it("contacts only the approved thread at its approved endpoint", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("B <b@example.com>", "https://b.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { approved: new Map([["t1", "https://a.example/u"]]) });
+    expect(calls.map((c) => c.url)).toEqual(["https://a.example/u"]);
+    expect(rep.results[1]).toMatchObject({ threadId: "t2", unsubscribed: false });
+    expect(rep.results[1].url).toBeUndefined();
+    expect(rep.results[1].reason).toMatch(/not in the confirmation/);
+    expect(rep.requests).toBe(1);
+  });
+
+  it("does not contact a thread whose endpoint is not the one approved", async () => {
+    const { gmail } = gmailByThread({ t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")] });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1"], deps, { approved: new Map([["t1", "https://a.example/other"]]) });
+    expect(calls).toEqual([]);
+    expect(rep.results[0].reason).toMatch(/not in the confirmation/);
+  });
+
+  it("an empty approval contacts nobody", async () => {
+    const { gmail } = gmailByThread({ t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")] });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1"], deps, { approved: new Map() });
+    expect(calls).toEqual([]);
+    expect(rep.unsubscribed).toBe(0);
+  });
+
+  it("after a request that threw, the sender's next thread is not contacted — the dialog counted it a duplicate", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("News <news@example.com>", "https://b.example/u")],
+    });
+    const { deps } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    const rehearsal = await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { dryRun: true });
+    expect(rehearsal.results[1].duplicateOf).toBe("t1");
+    // The first host does not resolve, so no request goes out and the sender is not recorded.
+    const hosts: string[] = [];
+    deps.resolveHost = vi.fn(async (h: string) => {
+      hosts.push(h);
+      if (h === "a.example") throw new Error("ENOTFOUND");
+      return ["93.184.216.34"];
+    });
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { approved: approvedEndpoints(rehearsal) });
+    expect(hosts).toEqual(["a.example"]);
+    expect(rep.results[1].reason).toMatch(/not in the confirmation/);
+  });
+
+  it("approvedEndpoints takes exactly the threads a dry run would contact", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      t2: [oneClickMsg("A <a@example.com>", "https://a.example/u")],
+      bad: "throw",
+      t3: [{ From: "C <c@example.com>", "List-Unsubscribe": "<mailto:x@c.example>" }],
+    });
+    const rehearsal = await bulkUnsubscribe(gmail, ["t1", "t2", "bad", "t3"], fakeDeps([]).deps, { dryRun: true });
+    expect([...approvedEndpoints(rehearsal)]).toEqual([["t1", "https://a.example/u"]]);
   });
 });
