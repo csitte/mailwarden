@@ -150,10 +150,15 @@ out of the tree, at the cost of our own code on the request path. That option st
    (`approved` in `bulkUnsubscribe`), and everything outside it is reported, not contacted. Step 2
    must keep that binding when the dialog moves to `inputRequired`: the rehearsal then runs in round
    one and the list has to travel in the protected `requestState`. Each listed thread gets one
-   attempt, so a thread id given twice cannot buy a second request after the first threw. Still open,
-   and older: a request that went out and then failed (a redirect the vetting refuses, a timeout, a
-   dropped connection) leaves the sender unrecorded, because the record is written only for a
-   returned result; a LATER call contacts that sender again without a duplicate note.
+   attempt, so a thread id given twice cannot buy a second request after the first threw. The older
+   half, a request that went out and then failed (a redirect the vetting refuses, a timeout, a
+   dropped connection) leaving the sender unrecorded so that a LATER call contacted it again, is
+   **fixed too (17 November 2026, same branch):** `oneClickUnsubscribe` throws
+   `UnsubscribeRequestError` for any failure after the first request started, unless no hop had
+   answered and every error code in the chain proves nothing left (`provablyNotSent`: refused,
+   unresolvable, unreachable, connect timeout, certificate errors). Both paths record the sender for
+   that error, marked as unconfirmed, and say so in the next duplicate's reason. A timeout counts as
+   sent, since it carries no code that proves otherwise.
 
 ## Estimate for step 2
 

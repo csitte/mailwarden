@@ -43,6 +43,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and vetted as before, and the dialog says so. When the dry run finds nobody to contact there is
   still no dialog, and now no request either. Where no dialog is possible or wanted (`off`, or `ask`
   on a client that cannot show one) nothing changes.
+- **An unsubscribe request that failed after it was sent now counts as sent.** Since the per-sender
+  record arrived (0.9.0 within a call, 0.14.0 across calls), a sender was recorded only when its
+  endpoint answered. A request that went out and then failed (a timeout, a dropped connection, a
+  redirect the vetting refused after the first hop had the POST) left the sender unrecorded, so the
+  next thread of that sender, in the same `bulk_unsubscribe` run or in any later call, was contacted
+  again, possibly at another host. The `unsubscribe` description already promised that a retry
+  after a timeout is safe; it was not. Such a sender is now recorded for the rest of the process,
+  `bulk_unsubscribe` counts the request and shows the URL tried, and the next duplicate's reason says
+  that the earlier request may or may not have arrived. Left unrecorded, as before, are refusals and
+  failures that prove nothing left: connection refused, an unresolvable or unreachable host, a
+  connect timeout, a certificate error, and anything stopped by the vetting before the first request.
+  `force: true` on `unsubscribe` still sends again.
 
 ## [0.31.2] - 2026-11-16
 

@@ -384,8 +384,10 @@ place mailwarden ever talks to a host that isn't Google, so the rules are tight:
   (never a query — a query-driven bulk would fire off a request per matched sender before anyone had
   looked). Threads from a sender whose request already went out are reported with `duplicateOf` and
   cost no second request: two threads from one list share an opt-out, and calling it twice only
-  confirms your address twice. A sender is only recorded once a request actually *reached* an
-  endpoint, so a refusal or a dropped connection still leaves the next thread its own try — and if
+  confirms your address twice. A sender is recorded once a request *may* have reached them: any
+  answer, and also a request that failed after it was sent (a timeout, a dropped connection, a
+  redirect the vetting refused), since it may have arrived. A refusal, or a connection that provably
+  never opened (refused, unresolvable, failed TLS), leaves the next thread its own try — and if
   the skipped thread advertises a *different* endpoint, the reason says so, since one sender can run
   several lists. **That memory spans calls** for as long as the server runs, and `unsubscribe` shares
   it: a call that times out is safe to repeat, and asking twice for the same newsletter contacts the

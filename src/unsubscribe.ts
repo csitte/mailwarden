@@ -435,6 +435,71 @@ const MAX_REDIRECTS = 3;
 const USER_AGENT = "mailwarden (+https://github.com/csitte/mailwarden)";
 
 /**
+ * Error codes that prove a request never left this machine: no connection was set up, or the TLS
+ * handshake failed before a byte of HTTP was written. Any other failure after `fetch` was called —
+ * a reset, a hang-up, a timeout, a malformed answer — may come after the endpoint had the request.
+ */
+const NOT_SENT_CODES = new Set([
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "ENETUNREACH",
+  "EHOSTUNREACH",
+  "EADDRNOTAVAIL",
+  "UND_ERR_CONNECT_TIMEOUT",
+  "ERR_TLS_CERT_ALTNAME_INVALID",
+  "CERT_HAS_EXPIRED",
+  "CERT_NOT_YET_VALID",
+  "UNABLE_TO_VERIFY_LEAF_SIGNATURE",
+  "UNABLE_TO_GET_ISSUER_CERT_LOCALLY",
+  "DEPTH_ZERO_SELF_SIGNED_CERT",
+  "SELF_SIGNED_CERT_IN_CHAIN",
+]);
+
+/**
+ * True only when a failed `fetch` proves nothing was sent: every error code in the chain (the
+ * error, its `cause`s, the members of an `AggregateError` from trying several addresses) is one of
+ * {@link NOT_SENT_CODES}. No code at all proves nothing, so it counts as "may have been sent".
+ */
+export function provablyNotSent(err: unknown): boolean {
+  const codes: string[] = [];
+  const seen = new Set<unknown>();
+  const walk = (e: unknown, depth: number): void => {
+    if (!e || typeof e !== "object" || seen.has(e) || depth > 4) return;
+    seen.add(e);
+    const code = (e as { code?: unknown }).code;
+    if (typeof code === "string") codes.push(code);
+    walk((e as { cause?: unknown }).cause, depth + 1);
+    const members = (e as { errors?: unknown }).errors;
+    if (Array.isArray(members)) for (const m of members) walk(m, depth + 1);
+  };
+  walk(err, 0);
+  return codes.length > 0 && codes.every((c) => NOT_SENT_CODES.has(c));
+}
+
+/**
+ * A one-click request that failed AFTER it may have reached the sender: a hop had already answered
+ * (a redirect that the vetting then refused, or one too many), or the connection broke without
+ * proof that nothing was sent. The caller must treat the sender as contacted — retrying would
+ * risk telling them twice that the address is live.
+ */
+export class UnsubscribeRequestError extends Error {
+  /** The URL of the last request that was started. */
+  readonly url: string;
+  constructor(url: string, cause: unknown) {
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    super(
+      `The unsubscribe request to ${new URL(url).host} failed after it was sent (${detail}). ` +
+        "It may have reached the sender, so mailwarden counts this sender as contacted and makes no " +
+        "further request to them in this session; call unsubscribe with force:true to send again.",
+      { cause },
+    );
+    this.name = "UnsubscribeRequestError";
+    this.url = url;
+  }
+}
+
+/**
  * Perform the RFC 8058 one-click opt-out: POST `List-Unsubscribe=One-Click` to
  * the sender's https endpoint. Redirects are followed manually (up to
  * MAX_REDIRECTS) so every hop is re-validated — a permissive endpoint must not
@@ -442,6 +507,10 @@ const USER_AGENT = "mailwarden (+https://github.com/csitte/mailwarden)";
  * per the usual rules; 307/308 repeat the POST.
  *
  * The response body is never read: only the status code is returned.
+ *
+ * A failure before the first request starts (vetting, resolution, a non-public host) is thrown as
+ * it is: nothing was sent. A failure after that is thrown as {@link UnsubscribeRequestError} unless
+ * it proves nothing left ({@link provablyNotSent}) and no hop had answered yet.
  */
 export async function oneClickUnsubscribe(
   rawUrl: string,
@@ -453,36 +522,47 @@ export async function oneClickUnsubscribe(
   // ONE budget for the whole chain, not per hop — a per-hop timeout would let a
   // redirecting endpoint stall the tool call for MAX_REDIRECTS × TIMEOUT_MS.
   const deadline = AbortSignal.timeout(timeoutMs);
+  // The last request started, and whether any hop has answered: together they decide whether a
+  // failure may come after the sender already had the request.
+  let started: string | undefined;
+  let answered = false;
 
-  for (let redirects = 0; ; redirects++) {
-    await assertPublicHost(url, deps, deadline);
-    const res = await deps.fetch(url.toString(), {
-      method,
-      redirect: "manual",
-      headers:
-        method === "POST"
-          ? { "content-type": "application/x-www-form-urlencoded", "user-agent": USER_AGENT }
-          : { "user-agent": USER_AGENT },
-      body: method === "POST" ? "List-Unsubscribe=One-Click" : undefined,
-      signal: deadline,
-    });
-    // Discard the body unread — it must not reach the model, and an unconsumed
-    // stream would keep the socket open.
-    try {
-      await res.body?.cancel();
-    } catch {
-      /* body already consumed or not a real stream (tests) */
-    }
+  try {
+    for (let redirects = 0; ; redirects++) {
+      await assertPublicHost(url, deps, deadline);
+      started = url.toString();
+      const res = await deps.fetch(started, {
+        method,
+        redirect: "manual",
+        headers:
+          method === "POST"
+            ? { "content-type": "application/x-www-form-urlencoded", "user-agent": USER_AGENT }
+            : { "user-agent": USER_AGENT },
+        body: method === "POST" ? "List-Unsubscribe=One-Click" : undefined,
+        signal: deadline,
+      });
+      answered = true;
+      // Discard the body unread — it must not reach the model, and an unconsumed
+      // stream would keep the socket open.
+      try {
+        await res.body?.cancel();
+      } catch {
+        /* body already consumed or not a real stream (tests) */
+      }
 
-    const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
-    if (!location) {
-      return { url: url.toString(), status: res.status, ok: res.status >= 200 && res.status < 300, redirects };
+      const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
+      if (!location) {
+        return { url: url.toString(), status: res.status, ok: res.status >= 200 && res.status < 300, redirects };
+      }
+      if (redirects >= MAX_REDIRECTS) {
+        throw new Error(`The unsubscribe endpoint redirected more than ${MAX_REDIRECTS} times.`);
+      }
+      url = validateUnsubscribeUrl(new URL(location, url).toString());
+      if (res.status !== 307 && res.status !== 308) method = "GET";
     }
-    if (redirects >= MAX_REDIRECTS) {
-      throw new Error(`The unsubscribe endpoint redirected more than ${MAX_REDIRECTS} times.`);
-    }
-    url = validateUnsubscribeUrl(new URL(location, url).toString());
-    if (res.status !== 307 && res.status !== 308) method = "GET";
+  } catch (err) {
+    if (started === undefined || (!answered && provablyNotSent(err))) throw err;
+    throw new UnsubscribeRequestError(started, err);
   }
 }
 
@@ -552,8 +632,10 @@ export interface UnsubscribeResult {
   /**
    * Set when no request was made because one had ALREADY GONE OUT to this sender —
    * earlier in the same bulk call, or earlier in this server process. Names that
-   * thread. A sender whose earlier thread only produced a refusal (or whose request
-   * never reached the endpoint) is not recorded, so this thread still gets its own try.
+   * thread. That includes a request that failed after it was sent, since it may have
+   * arrived. A sender whose earlier thread only produced a refusal, or whose request
+   * provably never left (connection refused, name or TLS failure), is not recorded, so
+   * this thread still gets its own try.
    */
   duplicateOf?: string;
   /** Everything the message advertised, so a human can finish what we won't do. */
@@ -564,7 +646,13 @@ export interface UnsubscribeResult {
 interface ContactRecord {
   threadId: string;
   urls: string[];
+  /** The request failed after it was sent ({@link UnsubscribeRequestError}): it may or may not have arrived. */
+  unconfirmed?: true;
 }
+
+/** The sentence a duplicate's reason adds when the earlier request's outcome is unknown. */
+const UNCONFIRMED_NOTE =
+  " That request failed after it was sent, so it may have arrived; force:true on unsubscribe sends again.";
 
 /**
  * Senders this process has already contacted, for the lifetime of the process.
@@ -643,6 +731,7 @@ export async function unsubscribeThread(
       duplicateOf: earlier.threadId,
       reason:
         `A request already went out to this sender in this session (thread ${earlier.threadId}) — no second one made. ` +
+        (earlier.unconfirmed ? "That request failed after it was sent, so it may have arrived. " : "") +
         (elsewhere
           ? "This thread advertises a DIFFERENT opt-out endpoint, so it may be a separate list from the same sender: "
           : "Pass force:true to contact them again, e.g. if the first attempt failed: ") +
@@ -651,9 +740,19 @@ export async function unsubscribeThread(
     };
   }
 
-  const res = await unsubscribeFromInfo(info, deps, TIMEOUT_MS, opts.beforeRequest);
-  // Recorded only once a request actually reached an endpoint: `url` is set exactly
-  // then. A refusal must not block the next thread from the same sender.
+  let res: UnsubscribeResult;
+  try {
+    res = await unsubscribeFromInfo(info, deps, TIMEOUT_MS, opts.beforeRequest);
+  } catch (err) {
+    // Sent, then failed: it may have arrived, so the sender counts as contacted. Every other throw
+    // (a declined dialog, vetting, a connection that provably never opened) sent nothing.
+    if (key && err instanceof UnsubscribeRequestError) {
+      contactedSenders.set(key, { threadId, urls: info.httpsUrls, unconfirmed: true });
+    }
+    throw err;
+  }
+  // `url` is set exactly when an endpoint answered. A refusal must not block the next
+  // thread from the same sender.
   if (key && res.url) contactedSenders.set(key, { threadId, urls: info.httpsUrls });
   return res;
 }
@@ -1004,9 +1103,10 @@ const BULK_BUDGET_MS = 60_000;
  *    should not race the next.
  *  - **One request per sender.** Two threads from the same list share an opt-out;
  *    calling it twice tells the sender twice that the address is live, for nothing.
- *    A sender is recorded only once a request has ACTUALLY gone out — a refusal or a
- *    connection that never reached the endpoint leaves the next thread its own try,
- *    because nothing was confirmed to that sender either way.
+ *    A sender is recorded once a request MAY have reached them: an answer of any status,
+ *    or a failure after the request was sent ({@link UnsubscribeRequestError}). A refusal,
+ *    or a connection that provably never opened, leaves the next thread its own try,
+ *    because nothing reached that sender either way.
  *
  * The whole call shares one wall-clock budget, for the same reason a redirect chain
  * does: 25 threads × the single-thread timeout would stall far past any client's
@@ -1095,6 +1195,7 @@ export async function bulkUnsubscribe(
           (results.some((r) => r.threadId === earlier.threadId)
             ? " — no second one made."
             : " in an earlier call in this session — no second one made.") +
+          (earlier.unconfirmed ? UNCONFIRMED_NOTE : "") +
           (elsewhere
             ? " Note that this thread advertises a DIFFERENT opt-out endpoint (see `options.httpsUrls`), " +
               "so it may be a separate list from the same sender — call unsubscribe on it directly if you meant that one."
@@ -1135,13 +1236,13 @@ export async function bulkUnsubscribe(
           ? async (endpoint) => {
               if (approved.get(threadId) !== endpoint) throw new Error(NOT_APPROVED);
               // One confirmed line, one attempt: a thread id given twice must not get a second try after
-              // the first one threw (the sender is recorded only once a request has succeeded).
+              // the first one threw before anything was sent (that leaves the sender unrecorded).
               approved.delete(threadId);
             }
           : undefined,
       );
-      // Record the sender only if a request actually reached an endpoint: `url` is
-      // set exactly when one was made. A refusal must not suppress the next thread.
+      // `url` is set exactly when an endpoint answered (a failure after sending is the
+      // catch below). A refusal must not suppress the next thread.
       if (senderKey && res.url) {
         const record = { threadId, urls: info.httpsUrls };
         handled.set(senderKey, record);
@@ -1150,6 +1251,25 @@ export async function bulkUnsubscribe(
       if (res.url) requests++;
       results.push(res);
     } catch (err) {
+      if (err instanceof UnsubscribeRequestError) {
+        // Sent, then failed: it may have arrived, so this sender is done for this call and the next.
+        const record = { threadId, urls: info.httpsUrls, unconfirmed: true as const };
+        if (senderKey) {
+          handled.set(senderKey, record);
+          contactedSenders.set(senderKey, record);
+        }
+        requests++;
+        results.push({
+          threadId,
+          messageId: info.messageId,
+          from: info.from,
+          unsubscribed: false,
+          url: err.url,
+          reason: err.message,
+          options,
+        });
+        continue;
+      }
       results.push({
         threadId,
         messageId: info.messageId,
