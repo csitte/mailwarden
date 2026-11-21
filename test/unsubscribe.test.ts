@@ -1852,3 +1852,105 @@ describe("a request that failed after it was sent — the edges found in review"
     expect(calls).toHaveLength(1);
   });
 });
+
+// Grok review of 0.32.0, N3: a message whose From yields no address had no dedupe key, so nothing
+// deduped it and no call held it. It is now keyed on the host it would POST to.
+describe("a message that names no sender is matched by its opt-out host", () => {
+  beforeEach(() => resetContactedSenders());
+
+  const noFrom = (url: string) => {
+    const { From: _, ...rest } = oneClickMsg("", url);
+    return rest;
+  };
+
+  it("single: a second thread at the same host is refused, and the reason says why", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("", "https://a.example/u/1")],
+      t2: [noFrom("https://a.example/u/2")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    expect(await unsubscribeThread(gmail, "t1", deps)).toMatchObject({ unsubscribed: true });
+    const second = await unsubscribeThread(gmail, "t2", deps);
+    expect(second).toMatchObject({ unsubscribed: false, duplicateOf: "t1" });
+    expect(second.reason).toMatch(/names no sender, so it is matched by its opt-out host \(a\.example\)/);
+    expect(second.reason).toMatch(/force:true on unsubscribe contacts it anyway/);
+    expect(calls).toHaveLength(1);
+
+    // Still the deliberate second attempt.
+    expect(await unsubscribeThread(gmail, "t2", deps, { force: true })).toMatchObject({ unsubscribed: true });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("single: a second call while the first one's dialog is open sends nothing", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("", "https://a.example/u")],
+      t2: [oneClickMsg("  ", "https://a.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }]);
+    let answer!: (yes: boolean) => void;
+    const dialog = new Promise<boolean>((r) => (answer = r));
+    const first = unsubscribeThread(gmail, "t1", deps, {
+      beforeRequest: async () => {
+        if (!(await dialog)) throw new Error("declined");
+      },
+    });
+    await vi.waitFor(() => expect(contactedSenderCount()).toBe(1));
+    const retry = await unsubscribeThread(gmail, "t2", deps);
+    expect(retry).toMatchObject({ duplicateOf: "t1", unsubscribed: false });
+    expect(retry.reason).toMatch(/right now/);
+    // force:true cannot pass a running call, so the note does not offer it.
+    expect(retry.reason).not.toMatch(/force:true/);
+    answer(true);
+    expect(await first).toMatchObject({ unsubscribed: true });
+    expect(calls).toHaveLength(1);
+  });
+
+  it("bulk: one request per host among sender-less threads, other hosts are contacted", async () => {
+    const { gmail } = gmailByThread({
+      t1: [noFrom("https://a.example/u/1")],
+      t2: [noFrom("https://A.EXAMPLE/u/2")],
+      t3: [noFrom("https://b.example/u")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }, { status: 200 }]);
+    const rep = await bulkUnsubscribe(gmail, ["t1", "t2", "t3"], deps);
+    expect(rep).toMatchObject({ requests: 2, skippedDuplicates: 1 });
+    expect(rep.results[1]).toMatchObject({ duplicateOf: "t1", unsubscribed: false });
+    expect(rep.results[1].reason).toMatch(/opt-out host \(a\.example\)/);
+    expect(calls.map((c) => new URL(c.url).hostname)).toEqual(["a.example", "b.example"]);
+  });
+
+  it("bulk: the dry run predicts the same skip", async () => {
+    const { gmail } = gmailByThread({
+      t1: [noFrom("https://a.example/u/1")],
+      t2: [noFrom("https://a.example/u/2")],
+    });
+    const { deps, calls } = fakeDeps([]);
+    const dry = await bulkUnsubscribe(gmail, ["t1", "t2"], deps, { dryRun: true });
+    expect(dry).toMatchObject({ requests: 1, skippedDuplicates: 1 });
+    expect(calls).toHaveLength(0);
+    expect(contactedSenderCount()).toBe(0);
+  });
+
+  it("a sender with an address is never merged with a sender-less message at the same host", async () => {
+    const { gmail } = gmailByThread({
+      t1: [oneClickMsg("News <news@example.com>", "https://a.example/u/1")],
+      t2: [noFrom("https://a.example/u/2")],
+    });
+    const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+    await unsubscribeThread(gmail, "t1", deps);
+    expect(await unsubscribeThread(gmail, "t2", deps)).toMatchObject({ unsubscribed: true });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("no usable endpoint: a refusal, and nothing is recorded", async () => {
+    const { gmail } = gmailByThread({
+      t1: [noFrom("https://a.example:8443/u")],
+      t2: [{ "List-Unsubscribe": "<https://a.example/u>" }],
+    });
+    const { deps, calls } = fakeDeps([]);
+    expect((await unsubscribeThread(gmail, "t1", deps)).reason).toMatch(/did not pass vetting/);
+    expect((await unsubscribeThread(gmail, "t2", deps)).reason).toMatch(/did not opt into RFC 8058/);
+    expect(contactedSenderCount()).toBe(0);
+    expect(calls).toHaveLength(0);
+  });
+});

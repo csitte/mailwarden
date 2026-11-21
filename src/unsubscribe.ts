@@ -739,6 +739,36 @@ function senderKeyOf(from: string): string {
   return parseSender(from).email || from.trim().toLowerCase();
 }
 
+/** Marks a dedupe key that names an opt-out host because the message named no sender. */
+const HOST_KEY = "opt-out host ";
+
+/**
+ * Who a request for this thread would reach, for the one-request-per-sender record: the sender's
+ * address, or, when the From header is missing or blank, the host of the endpoint a real run would
+ * POST to. Without that fallback such a message had no key at all, so nothing deduped it and no
+ * call held it: two calls at once could both send (Grok review of 0.32.0, N3). The host is the
+ * wider choice on purpose: two lists at one host then count as one sender, and the cost of that
+ * mistake is a refusal that force:true overrides, not a second request. "" only when no request
+ * would go out anyway (no usable one-click endpoint).
+ */
+function dedupeKeyOf(info: UnsubscribeInfo): string {
+  const sender = senderKeyOf(info.from);
+  if (sender) return sender;
+  const endpoint = planUnsubscribe(info).endpoint;
+  return endpoint ? HOST_KEY + new URL(endpoint).hostname : "";
+}
+
+/** For a duplicate found by host: says why "this sender" means a host here. */
+function hostKeyNote(key: string, earlier: ContactRecord): string {
+  if (!key.startsWith(HOST_KEY)) return "";
+  return (
+    ` This message names no sender, so it is matched by its opt-out host (${key.slice(HOST_KEY.length)}):` +
+    " a different list at that host counts as the same sender" +
+    // force:true never gets past a call that is still running.
+    (earlier.pending ? "." : ", and force:true on unsubscribe contacts it anyway.")
+  );
+}
+
 /** Test seam — a fresh process starts with an empty record, tests need the same. */
 export function resetContactedSenders(): void {
   contactedSenders.clear();
@@ -780,7 +810,7 @@ export async function unsubscribeThread(
   opts: UnsubscribeThreadOptions = {},
 ): Promise<UnsubscribeResult> {
   const info = await inspectUnsubscribe(gmail, threadId);
-  const key = senderKeyOf(info.from);
+  const key = dedupeKeyOf(info);
   const earlier = key ? contactedSenders.get(key) : undefined;
 
   // force:true is the deliberate second attempt after a FINISHED one. It never gets past a call that
@@ -796,13 +826,15 @@ export async function unsubscribeThread(
       duplicateOf: earlier.threadId,
       reason: earlier.pending
         ? `Another call is contacting this sender right now (thread ${earlier.threadId}) — no second request made.` +
-          earlierNote(earlier)
+          earlierNote(earlier) +
+          hostKeyNote(key, earlier)
         : `A request already went out to this sender in this session (thread ${earlier.threadId}) — no second one made. ` +
           (earlier.unconfirmed ? "That request failed after it was sent, so it may have arrived. " : "") +
           (elsewhere
             ? "This thread advertises a DIFFERENT opt-out endpoint, so it may be a separate list from the same sender: "
             : "Pass force:true to contact them again, e.g. if the first attempt failed: ") +
-          "re-run with force:true.",
+          "re-run with force:true." +
+          hostKeyNote(key, earlier),
       options: { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos },
     };
   }
@@ -1247,7 +1279,7 @@ export async function bulkUnsubscribe(
     }
 
     const options = { oneClick: info.oneClick, httpsUrls: info.httpsUrls, mailtos: info.mailtos };
-    const senderKey = senderKeyOf(info.from);
+    const senderKey = dedupeKeyOf(info);
     const earlier = senderKey ? recordOf(senderKey) : undefined;
     if (earlier) {
       skippedDuplicates++;
@@ -1269,6 +1301,7 @@ export async function bulkUnsubscribe(
                 ? " — no second one made."
                 : " in an earlier call in this session — no second one made.")) +
           earlierNote(earlier) +
+          hostKeyNote(senderKey, earlier) +
           (elsewhere
             ? " Note that this thread advertises a DIFFERENT opt-out endpoint (see `options.httpsUrls`), " +
               "so it may be a separate list from the same sender — call unsubscribe on it directly if you meant that one."
