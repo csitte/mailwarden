@@ -87,6 +87,27 @@ export function eraWithoutDialog(protocolVersion: string | undefined): boolean {
 }
 
 /**
+ * The protocol revision that rules the dialog out for this one request, or `undefined` when none
+ * does. Two sources, and either is enough:
+ *
+ * - the revision negotiated on the connection (`eraWithoutDialog`);
+ * - the request's own per-request `_meta` envelope (`io.modelcontextprotocol/*` keys, which the
+ *   SDK lifts into `ctx.mcpReq.envelope`). Those keys exist only from 2026-07-28 on. A hand-wired
+ *   2025 transport still serves such a request when it arrives without any handshake, with nothing
+ *   negotiated and no capabilities, and `ask` would read that as "cannot show a dialog" and go
+ *   ahead unasked (Grok review of 0.32.0, 21 Nov 2026, measured on stdio, in-memory and stateless
+ *   HTTP). Any envelope key counts, whatever revision it claims: a 2025 request carries none.
+ */
+export function requestEraWithoutDialog(
+  negotiated: string | undefined,
+  envelope: Readonly<Record<string, unknown>> | undefined,
+): string | undefined {
+  if (eraWithoutDialog(negotiated)) return negotiated;
+  if (envelope !== undefined && Object.keys(envelope).length > 0) return FIRST_ERA_WITHOUT_DIALOG;
+  return undefined;
+}
+
+/**
  * What to do before a confirmable action, given the mode, whether this client can show a form, and
  * whether the protocol revision rules the dialog out.
  *

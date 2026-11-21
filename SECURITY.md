@@ -141,11 +141,16 @@ An email tries to get the assistant to mass-delete or mislabel mail.
   therefore speaks the 2025 revisions only: it answers a client's `server/discover` probe with "method
   not found" (over HTTP, a probe that already carries the 2026-07-28 version header gets HTTP 400
   instead), and the client falls back to the 2025 handshake (Claude Code 2.1.318 does, measured
-  17 November 2026). Should a connection ever negotiate 2026-07-28 regardless, `ask` and `require`
-  both refuse instead of proceeding: with the SDK's stdio entry point the client's capabilities read
-  as absent on that revision, and `ask` would otherwise go ahead unasked. The guard reads the
-  negotiated revision; an instance that negotiated nothing (stateless HTTP) keeps the behaviour it
-  always had, where `ask` proceeds and `require` refuses. Tests hold both in place.
+  17 November 2026). Where a request is on 2026-07-28 regardless, `ask` and `require` both refuse
+  instead of proceeding: on that revision the client's capabilities read as absent, and `ask` would
+  otherwise go ahead unasked. The guard reads two things, and either is enough: the revision the
+  connection negotiated, and the request's own per-request `_meta` envelope. The second one is a
+  current path, not only a future one: the hand-wired transports serve a `tools/call` that carries
+  that envelope without any handshake (stdio, and stateless HTTP without the version header), and
+  until the release after 0.31.2 such a request went ahead unasked under `ask` (found in the review
+  of 21 November 2026). A 2025 request on an instance that negotiated nothing (stateless HTTP) keeps
+  the behaviour it always had: no capabilities are known there, so `ask` proceeds unasked, in effect
+  `off`, and `require` refuses. Tests hold all of it in place on the real transports.
 - **A preview that binds the write.** A `bulk_modify` dry run returns a `previewToken`; the write that
   carries it acts on exactly the previewed messages and refuses a reworded query or a different
   label change, so the set a user agreed to is the set that changes.

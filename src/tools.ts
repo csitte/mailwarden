@@ -24,7 +24,7 @@ import { attachmentText, AttachmentTextError, DEFAULT_LIMITS, MAX_CHARS_CEILING,
 import {
   CONFIRM_SCHEMA,
   confirmPlan,
-  eraWithoutDialog,
+  requestEraWithoutDialog,
   confirmed,
   dialogText,
   draftConfirmMode,
@@ -169,28 +169,42 @@ async function explainScopeFailure(err: unknown): Promise<unknown> {
  */
 const CONFIRM_TIMEOUT_MS = 10 * 60_000;
 
-/** `confirmPlan` for this connection: the mode, the client's capabilities and the protocol revision. */
-function dialogPlan(server: McpServer, mode: ConfirmMode): ConfirmPlan {
+/**
+ * The part of a tool handler's context the dialog needs: the request's own protocol envelope (see
+ * `requestEraWithoutDialog`) and its cancellation signal, so a dialog does not outlive the call.
+ */
+interface CallContext {
+  mcpReq: { envelope?: Readonly<Record<string, unknown>>; signal?: AbortSignal };
+}
+
+/** The revision that rules the dialog out for this request, from the connection or the request itself. */
+function dialogEra(server: McpServer, ctx: CallContext): string | undefined {
+  return requestEraWithoutDialog(server.server.getNegotiatedProtocolVersion(), ctx.mcpReq.envelope);
+}
+
+/** `confirmPlan` for this request: the mode, the client's capabilities and the protocol revision. */
+function dialogPlan(server: McpServer, ctx: CallContext, mode: ConfirmMode): ConfirmPlan {
   return confirmPlan(
     mode,
     server.server.getClientCapabilities()?.elicitation !== undefined,
-    eraWithoutDialog(server.server.getNegotiatedProtocolVersion()),
+    dialogEra(server, ctx) !== undefined,
   );
 }
 
 async function confirmWithUser(
   server: McpServer,
+  ctx: CallContext,
   mode: ConfirmMode,
   message: string,
   refusal?: string,
 ): Promise<boolean> {
-  const plan = dialogPlan(server, mode);
+  const plan = dialogPlan(server, ctx, mode);
   if (plan === "proceed") return false;
-  const version = server.server.getNegotiatedProtocolVersion();
-  if (plan === "refuse" && eraWithoutDialog(version)) {
+  const era = dialogEra(server, ctx);
+  if (plan === "refuse" && era !== undefined) {
     throw new ToolError(
       "declined_by_user",
-      `This connection speaks MCP protocol ${version}, on which mailwarden cannot show its confirmation dialog yet, ` +
+      `This request uses MCP protocol ${era}, on which mailwarden cannot show its confirmation dialog yet, ` +
         "and this action needs one here. Nothing was done.",
     );
   }
@@ -203,8 +217,16 @@ async function confirmWithUser(
   }
   let answer;
   try {
-    answer = await server.server.elicitInput({ message, requestedSchema: CONFIRM_SCHEMA as never }, { timeout: CONFIRM_TIMEOUT_MS });
+    // The call's own signal: a client that cancels the call withdraws the question with it, and a
+    // yes that arrives afterwards answers nothing (Grok review of 0.32.0, L1).
+    answer = await server.server.elicitInput(
+      { message, requestedSchema: CONFIRM_SCHEMA as never },
+      { timeout: CONFIRM_TIMEOUT_MS, signal: ctx.mcpReq.signal },
+    );
   } catch (err) {
+    if (ctx.mcpReq.signal?.aborted) {
+      throw new ToolError("declined_by_user", "The call was cancelled while the confirmation dialog was open. Nothing was done.");
+    }
     if (err instanceof SdkError && err.code === SdkErrorCode.RequestTimeout) {
       throw new ToolError(
         "declined_by_user",
@@ -1407,13 +1429,14 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
         openWorldHint: true,
       },
     },
-    async ({ threadId, force }) =>
+    async ({ threadId, force }, ctx: CallContext) =>
       ok(
         await unsubscribeThread(await client(), threadId, undefined, {
           force,
           beforeRequest: async (endpoint, info) => {
             await confirmWithUser(
               server,
+              ctx,
               confirmMode,
               `Unsubscribe from mail sent by ${dialogText(info.from) || "this sender"}? mailwarden will send one opt-out request to ${new URL(endpoint).host}; a redirect from there (at most three) is followed and checked the same way.`,
             );
@@ -1475,18 +1498,19 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
         openWorldHint: true,
       },
     },
-    async ({ threadIds, dryRun }) => {
+    async ({ threadIds, dryRun }, ctx: CallContext) => {
       const gmail = await client();
       // One question for the whole batch, asked with the dry run's own list of who would be contacted,
       // and the real run held to exactly that list: a thread the dialog did not show is not contacted.
       let approved: Map<string, string> | undefined;
-      if (!dryRun && dialogPlan(server, confirmMode) !== "proceed") {
+      if (!dryRun && dialogPlan(server, ctx, confirmMode) !== "proceed") {
         const rehearsal = await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun: true });
         approved = approvedEndpoints(rehearsal);
         const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${dialogText(r.from ?? "") || r.threadId} → ${new URL(r.wouldCall!).host}`);
         if (contacted.length > 0) {
           await confirmWithUser(
             server,
+            ctx,
             confirmMode,
             // Every line, never "and N more": the schema caps the batch at 25, and a person can
             // only refuse a host the dialog shows.
@@ -1738,7 +1762,7 @@ function registerFilterTools(server: McpServer, confirmMode: ConfirmMode): void 
       // destructive: with applyToExisting + addLabels:['TRASH'] this bulk-trashes existing mail.
       annotations: { title: "Create filter", ...write, destructiveHint: true, idempotentHint: false },
     },
-    async ({ addLabels, removeLabels, applyToExisting, maxMessages, verify, ...criteria }) => {
+    async ({ addLabels, removeLabels, applyToExisting, maxMessages, verify, ...criteria }, ctx: CallContext) => {
       const { hasPositive } = checkFilterCriteria("create_filter", criteria);
       if (addLabels.length === 0 && removeLabels.length === 0) {
         throw new ToolError(
@@ -1785,6 +1809,7 @@ function registerFilterTools(server: McpServer, confirmMode: ConfirmMode): void 
       ].join("; ");
       await confirmWithUser(
         server,
+        ctx,
         confirmMode,
         `Create a Gmail filter? Every future message matching ${rule} will get: ${action}.` +
           (applyToExisting ? ` It will also be applied now to up to ${maxMessages} messages already in the mailbox.` : ""),
@@ -1985,10 +2010,12 @@ function registerDraftTools(
   const readFile = (given: string) => readAttachmentFile(attachDir, given);
   // `require` here may be forced by a new recipient rather than configured, and the refusal says which.
   // With MAILWARDEN_DRAFT_CONFIRM=off nothing is forced: the mode is the configured one or `off`.
-  const confirm = (chosen: ConfirmMode, message: string) => {
+  // One confirmer per call, so the dialog reads that request's protocol envelope and signal.
+  const confirmFor = (ctx: CallContext) => (chosen: ConfirmMode, message: string) => {
     const mode = draftConfirmMode(chosen, confirmMode, dialogOff);
     return confirmWithUser(
       server,
+      ctx,
       mode,
       message,
       mode === confirmMode
@@ -2041,8 +2068,9 @@ function registerDraftTools(
       outputSchema: draftOutput,
       annotations: { title: "Create draft", readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false },
     },
-    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, quote, forward, forwardAttachments, signature, attachments }) => {
+    async ({ threadId, messageId, replyAll, from, to, cc, bcc, subject, body, quote, forward, forwardAttachments, signature, attachments }, ctx: CallContext) => {
       const gmail = await client();
+      const confirm = confirmFor(ctx);
       if (forward) {
         if (!threadId) throw new ToolError("invalid_input", "forward: true needs the threadId of the mail to forward.");
         if (replyAll || quote) {
@@ -2136,13 +2164,13 @@ function registerDraftTools(
       outputSchema: draftOutput,
       annotations: { title: "Update draft", readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ draftId, messageId, from, to, cc, bcc, subject, body, quote, forward, signature, attachments }) =>
+    async ({ draftId, messageId, from, to, cc, bcc, subject, body, quote, forward, signature, attachments }, ctx: CallContext) =>
       ok(
         await reviseDraft(
           await client(),
           { draftId, messageId, from, to, cc, bcc, subject, body, quote, forward, signature, attachments },
           confirmMode,
-          confirm,
+          confirmFor(ctx),
           selfWithoutDialog,
           readFile,
         ),

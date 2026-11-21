@@ -113,10 +113,12 @@ out of the tree, at the cost of our own code on the request path. That option st
    is accepted. The second guard is `confirmPlan(..., noDialogInThisEra)`: `ask` and `require` both
    refuse when the negotiated revision is 2026-07-28 or later. The tests are red without the guard
    (5 of them, checked). Two limits, from the review on 17 Nov 2026:
-   - The guard reads the *negotiated* revision. An instance that negotiated nothing (stateless
-     HTTP, or stdio with no `initialize`) reads `undefined` even when a request carries a
-     2026-07-28 `_meta` envelope. That is the 1.32.2 behaviour, not a regression, but step 2 must
-     read the era per request (`ctx.mcpReq.envelope`), not per connection.
+   - The guard first read only the *negotiated* revision. An instance that negotiated nothing
+     (stateless HTTP, or stdio with no `initialize`) read `undefined` even when a request carried a
+     2026-07-28 `_meta` envelope, and `ask` went ahead unasked on such a request. Grok measured it
+     on all three transports (review of 21 Nov 2026, M1). Since then the guard also reads the
+     request's own envelope (`ctx.mcpReq.envelope`, `requestEraWithoutDialog` in `src/confirm.ts`),
+     tested on the real wiring in `test/request-era.test.ts`. Step 2 keeps that per-request view.
    - "Capabilities read as absent" holds for `serveStdio`. `createMcpHandler` backfills
      `getClientCapabilities()` per request from the envelope, so there the dialog would be attempted
      and fail at `elicitInput` (as a refusal), not skipped.

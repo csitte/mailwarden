@@ -12,9 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   2.4.0, with `@modelcontextprotocol/node` 2.1.2 for the HTTP transport (and
   `@modelcontextprotocol/client` 2.4.0 for the tests only). mailwarden still speaks the 2025 protocol
   revisions, and the server `instructions` and the confirmation dialogs behave as before. The
-  `tools/list` answer differs from 0.31.2's in two points only, compared over all 33 tools: every
-  schema names the JSON Schema 2020-12 dialect instead of draft-07, and the `execution.taskSupport:
-  "forbidden"` field is gone (SDK 2 dropped task support). The protocol stays on 2025 by design. Its confirmation dialogs are server-to-client requests, which revision 2026-07-28 removed,
+  `tools/list` answer differs from 0.31.2's in three points, compared over all 33 tools: every
+  schema names the JSON Schema 2020-12 dialect instead of draft-07, the `execution.taskSupport:
+  "forbidden"` field is gone (SDK 2 dropped task support), and the descriptions of `unsubscribe` and
+  `bulk_unsubscribe` say what the fixes below changed. The three SDK packages are pinned to exact
+  versions while the 2025 protocol rests on how they negotiate. The protocol stays on 2025 by design. Its confirmation dialogs are server-to-client requests, which revision 2026-07-28 removed,
   and a client that can speak 2026-07-28 (Claude Code 2.1.318 probes with `server/discover`) gets
   "method not found" and falls back to the 2025 handshake. Checked live with Claude Code 2.1.318.
   Rebuilding the dialogs for 2026-07-28 is the second step in `docs/SDK-2-PLAN.md`. The direct
@@ -25,11 +27,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A confirmation is not skipped because of the protocol revision.** On MCP 2026-07-28 served
   through the SDK's stdio entry point, a client's capabilities read as absent, and
   `MAILWARDEN_CONFIRM=ask` would have taken that for "this client cannot show a dialog" and gone ahead
-  unasked. Should a connection ever negotiate that revision, `ask` and `require` now refuse
-  `create_filter`, `unsubscribe`, `bulk_unsubscribe` and the draft dialogs with `declined_by_user`
-  instead. `off` behaves as before, and so does an instance that negotiated nothing (stateless HTTP).
-  mailwarden does not serve that revision today (see above), so this guards the next change, not a
-  current path.
+  unasked. Where a request is on that revision, `ask` and `require` now refuse `create_filter`,
+  `unsubscribe`, `bulk_unsubscribe` and the draft dialogs with `declined_by_user` instead. A request
+  counts as on it when the connection negotiated it or when the request carries the 2026-07-28
+  per-request `_meta` envelope. The second case is a current path: mailwarden negotiates 2025 only,
+  but its transports serve a `tools/call` with that envelope and no handshake, over stdio and over
+  stateless HTTP without the version header, and under `ask` such a call went ahead unasked. `off`
+  behaves as before, and so does a 2025 request on an instance that negotiated nothing (stateless
+  HTTP, where `ask` proceeds unasked as it always did).
+- **A dialog no longer outlives its call.** A client that cancelled a call while its confirmation
+  dialog was open left the question standing: the sender stayed reserved, so a retry was told
+  another call was contacting it (for up to the ten-minute dialog timeout), and a yes given to the
+  orphaned dialog afterwards still sent the request. The dialog now carries the call's cancellation
+  signal; cancelling the call withdraws the question and frees the sender.
 - **`bulk_unsubscribe` contacts only what its dialog showed.** Since 0.24.0, under
   `MAILWARDEN_CONFIRM=ask` or `require` the dialog listed the hosts a dry run found, and the real run
   then read every thread again and acted on what it read. A thread whose read failed during the dry
