@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-21
+
 ### Changed
 - **MCP SDK 2.x.** `@modelcontextprotocol/sdk` 1.32.2 is replaced by `@modelcontextprotocol/server`
   2.4.0, with `@modelcontextprotocol/node` 2.1.2 for the HTTP transport (and
@@ -2741,7 +2743,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.31.2...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/csitte/mailwarden/compare/v0.31.2...v0.32.0
 [0.31.2]: https://github.com/csitte/mailwarden/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/csitte/mailwarden/compare/v0.31.0...v0.31.1
 [0.31.0]: https://github.com/csitte/mailwarden/compare/v0.30.0...v0.31.0
