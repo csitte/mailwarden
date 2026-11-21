@@ -70,6 +70,33 @@ function filterApi() {
   return created;
 }
 
+/** One newsletter thread with a one-click opt-out at x.example. */
+function newsletter() {
+  (getAuth as Mock).mockResolvedValue({
+    users: {
+      threads: {
+        get: async () => ({
+          data: {
+            id: "t1",
+            messages: [
+              {
+                id: "m1",
+                payload: {
+                  headers: [
+                    { name: "From", value: "News <news@x.example>" },
+                    { name: "List-Unsubscribe", value: "<https://x.example/u/1>" },
+                    { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
+                  ],
+                },
+              },
+            ],
+          },
+        }),
+      },
+    },
+  });
+}
+
 function server(): McpServer {
   const s = new McpServer({ name: "mailwarden", version: "0.0.0" });
   registerTools(s);
@@ -77,14 +104,14 @@ function server(): McpServer {
 }
 
 /** In memory, no handshake: the request is the first thing the server hears. */
-async function overMemory(): Promise<string> {
+async function overMemory(call: typeof FILTER_CALL = FILTER_CALL): Promise<string> {
   const s = server();
   const [ct, st] = InMemoryTransport.createLinkedPair();
   const answers: unknown[] = [];
   ct.onmessage = (m) => answers.push(m);
   await s.connect(st);
   await ct.start();
-  await ct.send(FILTER_CALL);
+  await ct.send(call);
   await expect.poll(() => answers.length, { timeout: 5000 }).toBe(1);
   await s.close();
   return JSON.stringify(answers[0]);
@@ -186,32 +213,29 @@ describe("a tools/call with the 2026-07-28 envelope and no handshake", () => {
   });
 });
 
+describe("the same envelope request on the tools that contact a sender", () => {
+  // Grok's delta review (21 Nov 2026, L1): with only create_filter under test, the call context
+  // could be dropped from either unsubscribe path and the suite stayed green.
+  it.each([
+    ["unsubscribe", { threadId: "t1" }],
+    ["bulk_unsubscribe", { threadIds: ["t1"] }],
+  ])("%s under ask is refused, and nobody is contacted", async (name, args) => {
+    vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
+    newsletter();
+    const answer = await overMemory({ ...FILTER_CALL, params: { name, arguments: args as never, _meta: ENVELOPE } });
+    expect(answer).toMatch(/declined_by_user/);
+    expect(answer).toMatch(/protocol 2026-07-28/);
+    expect(resolved).toEqual([]);
+  });
+
+  it("unsubscribe under off is served and reaches the sender's host, so the refusal above is the dialog's", async () => {
+    newsletter();
+    await overMemory({ ...FILTER_CALL, params: { name: "unsubscribe", arguments: { threadId: "t1" } as never, _meta: ENVELOPE } });
+    expect(resolved).toEqual(["x.example"]);
+  });
+});
+
 describe("a call cancelled while its dialog is open (Grok review of 0.32.0, L1)", () => {
-  function newsletter() {
-    (getAuth as Mock).mockResolvedValue({
-      users: {
-        threads: {
-          get: async () => ({
-            data: {
-              id: "t1",
-              messages: [
-                {
-                  id: "m1",
-                  payload: {
-                    headers: [
-                      { name: "From", value: "News <news@x.example>" },
-                      { name: "List-Unsubscribe", value: "<https://x.example/u/1>" },
-                      { name: "List-Unsubscribe-Post", value: "List-Unsubscribe=One-Click" },
-                    ],
-                  },
-                },
-              ],
-            },
-          }),
-        },
-      },
-    });
-  }
 
   it("withdraws the question: the sender is free again, and a yes that arrives later contacts nobody", async () => {
     vi.stubEnv("MAILWARDEN_CONFIRM", "ask");
