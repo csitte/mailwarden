@@ -104,6 +104,15 @@ describe("protocol era", () => {
     expect(reply.text).not.toMatch(/supportedVersions/);
   });
 
+  // The published package ships without its lockfile, so a caret range would let an install pick a
+  // newer SDK whose `connect()` negotiates differently, untested (Grok review of 0.32.0, L2).
+  it("package.json pins the SDK packages the 2025 wiring rests on to exact versions", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+    for (const name of ["@modelcontextprotocol/server", "@modelcontextprotocol/node"]) {
+      expect(pkg.dependencies[name], name).toMatch(/^\d+\.\d+\.\d+$/);
+    }
+  });
+
   it("src/index.ts and src/http.ts keep the hand-wired 2025 transports", () => {
     const index = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
     const httpSrc = readFileSync(new URL("../src/http.ts", import.meta.url), "utf8");
