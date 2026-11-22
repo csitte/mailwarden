@@ -329,7 +329,7 @@ only this machine can reach.
   which includes a request that failed after it was sent, and held while an `unsubscribe` dialog is
   open or a request is unanswered, so a parallel call cannot send as well, not even with
   `force: true`; a bulk run reads the record per thread; a refusal, or a connection that provably
-  never opened, does not suppress the next thread; a message whose `From` names no address counts by
+  never opened, does not suppress the next thread; a message whose `From` is missing or blank counts by
   the host of the endpoint it would call, so it is deduped and held like any other sender;
   `unsubscribe` reads and writes the
   same record, and `force: true` is the deliberate override), and one 60-second budget for the whole call — 25 × the single-request timeout would stall

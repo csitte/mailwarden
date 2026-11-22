@@ -396,7 +396,7 @@ place mailwarden ever talks to a host that isn't Google, so the rules are tight:
   several lists. **That memory spans calls** for as long as the server runs, and `unsubscribe` shares
   it: a call that times out is safe to repeat, and asking twice for the same newsletter contacts the
   sender once. Pass `force: true` to `unsubscribe` for a deliberate second attempt — after an endpoint
-  answered 500, say. A message whose `From` names no address is matched by the host of the endpoint it
+  answered 500, say. A message whose `From` is missing or blank is matched by the host of the endpoint it
   would call instead, so two such lists at one host count as one sender (the reason says so, and
   `force: true` reaches the second). It is kept in memory only: persisting it would mean a second kind of local state
   beside the token, which this server deliberately does not keep, so a restart forgets.

@@ -1953,4 +1953,23 @@ describe("a message that names no sender is matched by its opt-out host", () => 
     expect(contactedSenderCount()).toBe(0);
     expect(calls).toHaveLength(0);
   });
+
+  // Grok review of 0.32.1, N2: the host key was a text prefix, so a From that spelled it out shared
+  // the key with a sender-less message and the refusal claimed the message named no sender.
+  it("a From that spells out the host key is its own sender, in either order", async () => {
+    for (const order of [["t1", "t2"], ["t2", "t1"]]) {
+      resetContactedSenders();
+      const { gmail } = gmailByThread({
+        t1: [noFrom("https://x.example/u/1")],
+        t2: [oneClickMsg("Opt-Out Host x.example", "https://x.example/u/2")],
+      });
+      const { deps, calls } = fakeDeps([{ status: 200 }, { status: 200 }]);
+      for (const id of order) {
+        const res = await unsubscribeThread(gmail, id, deps);
+        expect(res).toMatchObject({ unsubscribed: true });
+        expect(res.reason ?? "").not.toMatch(/names no sender/);
+      }
+      expect(calls).toHaveLength(2);
+    }
+  });
 });

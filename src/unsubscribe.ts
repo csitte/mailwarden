@@ -739,8 +739,14 @@ function senderKeyOf(from: string): string {
   return parseSender(from).email || from.trim().toLowerCase();
 }
 
-/** Marks a dedupe key that names an opt-out host because the message named no sender. */
-const HOST_KEY = "opt-out host ";
+/**
+ * The two kinds of dedupe key, each in its own namespace. Every key carries one of these prefixes,
+ * so no From header can spell out a host key: with a bare prefix on host keys only, a From of
+ * "opt-out host x.example" collided with a sender-less message at x.example (Grok review of
+ * 0.32.1, N2).
+ */
+const SENDER_KEY = "sender:";
+const HOST_KEY = "host:";
 
 /**
  * Who a request for this thread would reach, for the one-request-per-sender record: the sender's
@@ -753,7 +759,7 @@ const HOST_KEY = "opt-out host ";
  */
 function dedupeKeyOf(info: UnsubscribeInfo): string {
   const sender = senderKeyOf(info.from);
-  if (sender) return sender;
+  if (sender) return SENDER_KEY + sender;
   const endpoint = planUnsubscribe(info).endpoint;
   return endpoint ? HOST_KEY + new URL(endpoint).hostname : "";
 }

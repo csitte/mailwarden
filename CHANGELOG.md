@@ -8,14 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Fixed
-- **A message that names no sender is deduped too.** The one-request-per-sender record keys on the
+- **A message with a missing or blank `From` is deduped too.** The one-request-per-sender record keys on the
   `From` address. A message whose `From` was missing or blank had no key, so `unsubscribe` and
   `bulk_unsubscribe` neither deduped nor held it: a retry, or a second call running at the same
   time, could send its opt-out again. Such a message is now keyed on the host of the endpoint a real
   run would POST to. That is the wider choice on purpose: two lists at one host then count as one
   sender, and the second is refused with a reason that says so, which `force: true` on `unsubscribe`
-  overrides. A message with an address is never matched with one without. Pre-existing, found in the
-  review of 0.32.0.
+  overrides. A message with an address is never matched with one without, and no `From` can spell out
+  a host key. Pre-existing, found in the review of 0.32.0.
 
 ## [0.32.0] - 2026-11-21
 
