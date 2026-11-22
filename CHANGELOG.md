@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.1] - 2026-11-22
+
 ### Fixed
 - **A message with a missing or blank `From` is deduped too.** The one-request-per-sender record keys on the
   `From` address. A message whose `From` was missing or blank had no key, so `unsubscribe` and
@@ -2753,7 +2755,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.32.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.32.1...HEAD
+[0.32.1]: https://github.com/csitte/mailwarden/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/csitte/mailwarden/compare/v0.31.2...v0.32.0
 [0.31.2]: https://github.com/csitte/mailwarden/compare/v0.31.1...v0.31.2
 [0.31.1]: https://github.com/csitte/mailwarden/compare/v0.31.0...v0.31.1
