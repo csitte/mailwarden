@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **The comparison table understated `taylorwilsdon` on token encryption.** In its OAuth 2.1 HTTP
+  mode the FastMCP proxy underneath keeps the Google tokens in a Fernet-encrypted store, with the key
+  derived from the server's JWT signing key or OAuth client secret — since 23 December 2025 (v1.7.0).
+  The plaintext `0600` copy the cell named is written as well, except in the stateless variant, where
+  the encrypted copy is the only one. The reading of 31 August 2026 stopped at the credential store
+  and every round since carried that forward; the cell and the note under the table now name both.
+  Found in the comparison round of 24 November 2026, which also brought the `taylorwilsdon`,
+  `a-bonus`, `aaronsb` and `klodr` columns forward (no other cell moves) and corrected the sentence
+  under the table on `aaronsb`'s draft-only policy, which since v4.9.1 (10 November 2026) lets send,
+  reply and forward through with `draft: true` and saves a draft.
+
 ## [0.32.1] - 2026-11-22
 
 ### Fixed
