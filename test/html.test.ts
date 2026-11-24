@@ -512,3 +512,34 @@ describe("html.ts, sixth review", () => {
     expect(one(html)[0]).toMatchObject({ text: "paypal.example", hiddenText: true });
   });
 });
+
+// Seventh review round.
+describe("html.ts, seventh review", () => {
+  const E = "https://evil.example/";
+  const shownAs = (html: string) => linksOf(html).links.map((l) => [l.text, l.host]);
+
+  it("stays fast on foster-parented text", () => {
+    for (const html of ["<table>" + "a<br>".repeat(120_000), "<table>" + "x<hr>".repeat(200_000)]) {
+      const t = performance.now();
+      hiddenTextLength(html);
+      expect(performance.now() - t, html.slice(0, 12)).toBeLessThan(3000);
+    }
+  });
+
+  it("lets a link inherit a transparent colour when its style says inherit", () => {
+    for (const c of ["inherit", "currentcolor", "unset"]) {
+      expect(shownAs(`<div style="color:transparent"><a href="${E}" style="color:${c}">paypal.com</a></div>`), c).toEqual([]);
+    }
+  });
+
+  it("reads @media not print as a screen query, and @media not screen as none", () => {
+    const html = (q: string) => `<style>@media ${q}{.m{display:block!important}}</style><div class="m" style="display:none"><a href="${E}">x</a></div>`;
+    expect(shownAs(html("not print"))).toEqual([["x", "evil.example"]]);
+    expect(shownAs(html("not screen"))).toEqual([]);
+  });
+
+  it("takes a mail link's host from ?to= and after decoding", () => {
+    expect(shownAs('<a href="mailto:?to=attacker@evil.example">x</a>')).toEqual([["x", "evil.example"]]);
+    expect(shownAs('<a href="mailto:a@evil.example%2C@bank.example">x</a>')).toEqual([["x", "evil.example"]]);
+  });
+});

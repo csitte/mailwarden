@@ -79,8 +79,11 @@ function budgetedAdapter(): TreeAdapter<DefaultTreeAdapterMap> {
       defaultTreeAdapter.insertText(parentNode, text);
     },
     insertTextBefore(parentNode, text, referenceNode) {
-      const at = parentNode.childNodes.indexOf(referenceNode);
-      if (!isText(parentNode.childNodes[at - 1])) count();
+      // The same lookup parse5 makes, last child first: a plain indexOf here made foster-parented
+      // text quadratic (0.6 MB took 4 s, review round seven).
+      const kids = parentNode.childNodes;
+      const at = kids[kids.length - 1] === referenceNode ? kids.length - 1 : kids.indexOf(referenceNode);
+      if (!isText(kids[at - 1])) count();
       defaultTreeAdapter.insertTextBefore(parentNode, text, referenceNode);
     },
   };
@@ -370,6 +373,8 @@ function unhides(body: string): boolean {
 
 /** Whether an `@media` query can match a screen: not one for print alone. */
 function screenQuery(query: string): boolean {
+  const not = /^\s*not\s+(\w+)/.exec(query);
+  if (not) return not[1] !== "screen" && not[1] !== "all";
   return !/\bprint\b/.test(query) || /\b(?:screen|all)\b/.test(query);
 }
 
@@ -517,9 +522,10 @@ function visibleBelow(e: Element, above: Visibility, shown: Set<string>): Visibi
   if (v === "hidden" || v === "collapse") visibility = true;
   else if (v === "visible") visibility = false;
   const color = cssValue(d, "color");
-  // A colour that takes the parent's (inherit, currentcolor, unset) keeps what is above.
-  if (color !== undefined && !/^(?:inherit|currentcolor|unset|revert|revert-layer)$/.test(color)) {
-    transparent = isTransparent(color);
+  // A colour that takes the parent's (inherit, currentcolor, unset) takes it even on a link, whose
+  // own default colour it replaces (review round seven).
+  if (color !== undefined) {
+    transparent = /^(?:inherit|currentcolor|unset)$/.test(color) ? above.transparent : isTransparent(color);
   }
   return { block, font, visibility, transparent, svgNoText, shownAgain: false };
 }
@@ -568,18 +574,24 @@ export function browserTarget(href: string): URL | undefined {
   return SHOWN_PROTOCOLS.has(url.protocol) ? url : undefined;
 }
 
-/** The host of a target, or for `mailto:` the domain of its (first) address. */
+/**
+ * The host of a target, or for `mailto:` the domain of its first address — decoded before the
+ * addresses are split, as a mail client reads them, and taken from `?to=` when the path names none.
+ */
 function hostOf(url: URL): string {
   if (url.protocol !== "mailto:") return url.hostname;
-  const first = url.pathname.split(",")[0] ?? "";
-  let address = first;
-  try {
-    address = decodeURIComponent(first);
-  } catch {
-    // A malformed escape is left as written: a mail client shows it so too (review round six).
-  }
-  const at = address.lastIndexOf("@");
-  return at < 0 ? "" : address.slice(at + 1).trim().toLowerCase();
+  const decode = (v: string) => {
+    try {
+      return decodeURIComponent(v);
+    } catch {
+      return v; // A malformed escape is left as written (review round six).
+    }
+  };
+  let addresses = decode(url.pathname);
+  if (addresses.trim() === "") addresses = url.searchParams.get("to") ?? "";
+  const first = addresses.split(",")[0] ?? "";
+  const at = first.lastIndexOf("@");
+  return at < 0 ? "" : first.slice(at + 1).trim().toLowerCase();
 }
 
 /** A link being read: its target and what the walk found inside it. */

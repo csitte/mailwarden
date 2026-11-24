@@ -198,7 +198,10 @@ Model can't tell quoted mail from a command.
   zero-sized clipped boxes, a zero scale or clip, font size, visibility, transparent colour, closed
   `<details>` and `<dialog>`, SVG text outside `<text>`, image maps no visible image uses — each
   read with CSS's own rules for invalid values, `!important` and which properties apply to inline
-  elements) — positioning off screen, filters or a colour matching the background; relative addresses are not listed (a `<base>` element is not applied); an
+  elements) — positioning off screen, filters or a colour matching the background. Even within those
+  rules this is a reading of CSS, not a rendering: seven review rounds on 24 November 2026 kept
+  finding finer cases (a float making an inline element a box, a global keyword, a vendor display
+  value), so `text` and `hiddenText` are strong hints, while `host` and `url` are exact; relative addresses are not listed (a `<base>` element is not applied); an
   international host is shown in its `xn--` form, which unmasks a homograph and differs from a
   Unicode spelling of the same name. The list is not written into the mail's text on purpose: a
   marker there is something the mail's own text can spell out too.
