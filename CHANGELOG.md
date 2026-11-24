@@ -15,9 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   targets are written (`javascript:`, `data:`, `cid:` and `#` anchors are not); a target is written
   once per message, because a newsletter repeats one link under its logo, headline and button; a
   link whose text is its target, or its target without the scheme, gets nothing added; a link with
-  no text shows its image's `alt` text, or is left out with no `alt`, which drops tracking pixels.
-  Attributes are read with their quoting, so an `href=` written inside another attribute's value
-  is never taken for the target. Opt-in in `get_thread` because it is not cheap: over 107 HTML mails
+  no text shows the first `alt` text of an image inside it, or is left out with none, which drops
+  tracking pixels. Tags and attributes are read as a browser reads them — quoted values whole (a
+  `>` or an `href=` inside another attribute's value changes nothing), an unquoted value to its
+  end, `=` included — and tabs and line breaks are removed from the target, as a browser removes
+  them, so the target shown is the one the link opens. Opt-in in `get_thread` because it is not cheap: over 107 HTML mails
   of one mailbox the text grew 2.8 times in the median and 5.8 times at the 90th percentile.
   `links: true` without `bodies: "text"` or `"new"` is rejected as `invalid_input`. A real text/plain
   part is returned as the sender wrote it, as before. Asked for in
@@ -30,7 +32,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   renderings took visible text with it in real mail (responsive blocks shown on a phone by an
   `@media` rule, among others), so the count is the signal and the text stays. A block an `@media`
   rule selects is not counted, nor a `font-size:0` column wrapper whose inline styles set the size
-  back. Seen in `pylos-mcp` and `mailhub-mcp` in the comparison round of 24 November 2026.
+  back (by `font-size`, the `font` shorthand or `<font size>`). Tags are read as a browser reads
+  them, quoted `>` included, and a `<p>` ends at the next block. Seen in `pylos-mcp` and
+  `mailhub-mcp` in the comparison round of 24 November 2026.
 - **`download_attachment` marks the saved file as downloaded from the Internet, on Windows.** It writes
   the Mark of the Web (`Zone.Identifier` stream, Internet zone), as a browser does for an attachment
   saved from Gmail, so Windows asks before an executable runs and Office opens a macro document in

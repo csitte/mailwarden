@@ -57,6 +57,50 @@ describe("hiddenTextLength", () => {
     expect(hiddenTextLength(html)).toBe(injection.length);
   });
 
+  it("does not count what lies inside a block an @media rule shows, hidden or not (Beefree-style template)", () => {
+    const html =
+      "<style>.desktop_hide,.desktop_hide table{display:none;max-height:0;overflow:hidden}" +
+      "@media (max-width:630px){.desktop_hide,.desktop_hide table{display:table!important;max-height:none!important}}</style>" +
+      '<table class="row desktop_hide" style="display:none;max-height:0;overflow:hidden"><tr><td>' +
+      `<table class="html_block block-6" style="mso-hide:all;display:none;max-height:0;overflow:hidden"><tr><td>${injection}</td></tr></table>` +
+      "</td></tr></table>" +
+      `<div style="display:none">${injection}</div>`;
+    expect(hiddenTextLength(html)).toBe(injection.length);
+  });
+
+  // Second review, 24 Nov 2026: what counted visible text as hidden, or let hidden text go uncounted.
+  it.each([
+    ["an attribute selector", "<style>@media (max-width:600px){*[class=mobile-only]{display:block!important}}</style>", '<div class="mobile-only" style="display:none">'],
+    ["a quoted attribute selector", '<style>@media (max-width:600px){table[class="mobile-show"]{display:table!important}}</style>', '<table class="mobile-show" style="display:none"><tr><td>'],
+    ["a descendant selector on an ancestor", "<style>@media (max-width:600px){.mobile-wrap table{display:block!important}}</style>", '<div class="mobile-wrap"><table style="display:none"><tr><td>'],
+    ["@MEDIA in capitals", "<style>@MEDIA (max-width:600px){.m{display:block!important}}</style>", '<div class="m" style="display:none">'],
+    ["a brace inside a CSS comment", "<style>@media (max-width:600px){/* } */ .m{display:block!important}}</style>", '<div class="m" style="display:none">'],
+  ])("does not count a block an @media rule shows again through %s", (_n, style, open) => {
+    const closer = open.includes("<table") ? (open.includes("mobile-wrap") ? "</td></tr></table></div>" : "</td></tr></table>") : "</div>";
+    expect(hiddenTextLength(`${style}${open}${injection}${closer}`)).toBe(0);
+  });
+
+  it("counts a block that only an @media print rule, or a rule that hides, selects", () => {
+    expect(hiddenTextLength(`<style>@media print{.x{display:block}}</style><div class="x" style="display:none">${injection}</div>`)).toBe(injection.length);
+    expect(hiddenTextLength(`<style>@media (max-width:600px){.x{display:none}}</style><div class="x" style="display:none">${injection}</div>`)).toBe(injection.length);
+  });
+
+  it("does not count a font-size:0 wrapper set back by the font shorthand or by <font size>", () => {
+    expect(hiddenTextLength(`<td style="font-size:0"><div style="font:14px/20px Arial">${injection}</div></td>`)).toBe(0);
+    expect(hiddenTextLength(`<td style="font-size:0"><font size="3">${injection}</font></td>`)).toBe(0);
+    expect(hiddenTextLength(`<td style="font:0/0 a"><b>${injection}</b></td>`)).toBe(injection.length);
+  });
+
+  it("ends a hidden <p> where a browser does, at the next block", () => {
+    expect(hiddenTextLength(`<p style="display:none">pre<div>${injection}</div></p>`)).toBe(3);
+  });
+
+  it("is not blinded by many decoy tag names or by a `>` inside a quoted attribute", () => {
+    const decoys = Array.from({ length: 40 }, (_, i) => `<x${i} hidden></x${i}>`).join("");
+    expect(hiddenTextLength(`${decoys}<div style="display:none">${injection}</div>`)).toBe(injection.length);
+    expect(hiddenTextLength(`<div title=">" style="display:none">${injection}</div>`)).toBe(injection.length);
+  });
+
   it("does not count a font-size:0 wrapper whose columns set the size back inline", () => {
     const html =
       '<div style="font-size:0;text-align:center">' +

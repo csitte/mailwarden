@@ -270,6 +270,33 @@ describe("htmlToText — links", () => {
     );
   });
 
+  // Second review, 24 Nov 2026: the tag ends where a browser ends it, and the target is the one a
+  // browser follows.
+  it("reads the target of a tag whose quoted attribute holds `<` or `>`", () => {
+    expect(links(`<a href="https://a.example" title='<a href="https://b.example">x'>Pay invoice</a>`)).toContain(
+      "Pay invoice <https://a.example>",
+    );
+    expect(links(`<a title=">" href="https://c.example">C</a>`)).toContain("C <https://c.example>");
+  });
+
+  it("reads an unquoted target to its end, `=` included", () => {
+    expect(links("<a href=https://bank.example=@evil.example/login>Your bank</a>")).toBe(
+      "Your bank <https://bank.example=@evil.example/login>",
+    );
+    expect(links("<a href=https://ex.example/?id=42&amp;t=1>open</a>")).toBe("open <https://ex.example/?id=42&t=1>");
+  });
+
+  it("shows the target without the tabs and line breaks a browser drops from it", () => {
+    const nl = String.fromCharCode(10);
+    const tab = String.fromCharCode(9);
+    expect(links(`<a href="https://bank.example${nl}@evil.example/">Login</a>`)).toBe("Login <https://bank.example@evil.example/>");
+    expect(links(`<a href="ht${tab}tps://x.example/">X</a>`)).toBe("X <https://x.example/>");
+  });
+
+  it("names an image link by the first image that has an alt text", () => {
+    expect(links('<a href=https://s.example/><img src=spacer.gif><img alt="Shop"></a>')).toBe("Shop <https://s.example/>");
+  });
+
   // D8: the target goes next to the text, not after the markup the link wraps around it.
   it("puts the target right after the text of a link that wraps a table or a break", () => {
     expect(links('<a href="https://btn.example"><table><tr><td>Buy now</td></tr></table></a><p>Next</p>')).toBe(

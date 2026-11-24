@@ -15,25 +15,45 @@
  * sometimes too high costs a second look; text removed from what a person sees costs the reader
  * the mail. So nothing here changes what is returned.
  *
- * What is not counted: an element whose class or id appears in an `@media` rule (a responsive block
- * a phone shows), and a `font-size:0` or `visibility:hidden` element with an inline style inside it
- * that sets the size or visibility back (an email layout's column wrapper). What is not seen: styles
- * from a class outside `@media`, text coloured like its background, and an element whose closing
- * tag is missing. The count is a fact to weigh, not a verdict: a newsletter's preview text
- * ("preheader") is hidden the same way and for an honest reason, usually under 150 characters.
+ * Not counted: a block that an `@media` rule shows again — a rule whose declarations un-hide
+ * (display other than none, a height or max-height, visibility:visible, a font size, an opacity)
+ * selecting the block's class or id, `[class=...]` included — together with everything inside it,
+ * because such a rule also reaches the block's descendants (`.desktop_hide table`); and a
+ * `font-size:0` or `visibility:hidden` element with an inline style, a `font` shorthand or a
+ * `<font size>` inside that sets the size or visibility back (an email layout's column wrapper).
+ * Not seen: styles from a class outside `@media`, and text coloured like its background. The count
+ * is a fact to weigh, not a verdict: a newsletter's preview text ("preheader") is hidden the same way
+ * and for an honest reason, usually under 150 characters.
  *
- * Pure, and linear in the length of the body: every search walks forward once.
+ * Pure, and linear in the length of the body: tags are read once by `tagsOf`.
  */
 
-import { attributesOf, decodeCharacterReferences, shownMarkup, tidyRenderedText } from "./export.js";
+import { attributesOf, decodeCharacterReferences, shownMarkup, tagsOf, tidyRenderedText, type Tag } from "./export.js";
 
 /** Elements with no content and no closing tag: hiding one hides nothing but itself. */
 const VOID_ELEMENTS = new Set("area base br col embed hr img input link meta param source track wbr".split(" "));
 
-/** The value of the last declaration of `prop` in a style attribute — the one that wins. */
-function cssValue(declarations: string[], prop: string): string | undefined {
+/** Start tags that end an open `<p>` in a browser: a paragraph cannot hold a block. */
+const CLOSES_P = new Set(
+  (
+    "address article aside blockquote details dialog div dl fieldset figcaption figure footer form " +
+    "h1 h2 h3 h4 h5 h6 header hgroup hr main menu nav ol p pre section table ul"
+  ).split(" "),
+);
+
+/** Declarations of one style attribute or rule body: lower-case, no spaces or comments. */
+function declarations(css: string): string[] {
+  return css
+    .toLowerCase()
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\s+/g, "")
+    .split(";");
+}
+
+/** The value of the last declaration of `prop` — the one that wins. */
+function cssValue(decls: string[], prop: string): string | undefined {
   let value: string | undefined;
-  for (const d of declarations) {
+  for (const d of decls) {
     const i = d.indexOf(":");
     if (i > 0 && d.slice(0, i) === prop) value = d.slice(i + 1).replace(/!important$/, "");
   }
@@ -45,10 +65,21 @@ function isZero(v: string | undefined): boolean {
   return v !== undefined && /^(?:0+(?:\.0*)?|\.0+)(?:[a-z]+|%)?$/.test(v);
 }
 
+/** The size inside a `font` shorthand (`bold 14px/20px Arial`), or undefined when it names none. */
+function shorthandSize(font: string | undefined): string | undefined {
+  return font === undefined ? undefined : /(?:^|[^\w.-])((?:\d+(?:\.\d*)?|\.\d+)(?:[a-z]+|%)?)(?=\/|$|[^\w.%])/.exec(font)?.[1];
+}
+
+/** Whether declarations set a non-zero font size, by `font-size` or by the `font` shorthand. */
+function setsFontSize(decls: string[]): boolean {
+  const size = cssValue(decls, "font-size") ?? shorthandSize(cssValue(decls, "font"));
+  return size !== undefined && size !== "" && !isZero(size);
+}
+
 /**
  * How an element hides its content. `always`: display:none, the `hidden` attribute, opacity:0, or a
  * zero height with overflow hidden — nothing inside can undo those. `font` / `visibility`:
- * font-size:0 and visibility:hidden, which an inline style inside can set back.
+ * font-size:0 and visibility:hidden, which a style inside can set back.
  */
 type Hiding = { always: true } | { always: false; font: boolean; visibility: boolean };
 
@@ -56,11 +87,7 @@ function hiding(attrs: Map<string, string>): Hiding | undefined {
   if (attrs.has("hidden")) return { always: true };
   const style = attrs.get("style");
   if (style === undefined) return undefined;
-  const css = style
-    .toLowerCase()
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\s+/g, "")
-    .split(";");
+  const css = declarations(style);
   const height = isZero(cssValue(css, "height")) || isZero(cssValue(css, "max-height"));
   const clipped = ["overflow", "overflow-y"].some((p) => cssValue(css, p) === "hidden");
   if (cssValue(css, "display") === "none" || isZero(cssValue(css, "opacity")) || (height && clipped)) {
@@ -68,38 +95,64 @@ function hiding(attrs: Map<string, string>): Hiding | undefined {
   }
   const v = cssValue(css, "visibility");
   const visibility = v === "hidden" || v === "collapse";
-  const font = isZero(cssValue(css, "font-size"));
+  const font = isZero(cssValue(css, "font-size") ?? shorthandSize(cssValue(css, "font")));
   return visibility || font ? { always: false, font, visibility } : undefined;
 }
 
+/** Whether a rule body shows what an inline style hid. */
+function unhides(body: string): boolean {
+  const d = declarations(body);
+  const display = cssValue(d, "display");
+  const maxHeight = cssValue(d, "max-height");
+  const height = cssValue(d, "height");
+  const opacity = cssValue(d, "opacity");
+  return (
+    (display !== undefined && display !== "none") ||
+    (maxHeight !== undefined && !isZero(maxHeight)) ||
+    (height !== undefined && !isZero(height)) ||
+    cssValue(d, "visibility") === "visible" ||
+    (opacity !== undefined && !isZero(opacity)) ||
+    setsFontSize(d)
+  );
+}
+
 /**
- * The class names and ids an `@media` rule in the mail's `<style>` blocks selects. An element
- * carrying one is a responsive block: hidden inline, shown on a screen the rule matches.
+ * The class names and ids that an `@media` rule in the mail's `<style>` blocks shows again: from
+ * `.name`, `#name` and `[class=name]`-style selectors of rules whose declarations un-hide. A rule
+ * only for print is no screen a reader looks at and is skipped.
  */
-function mediaSelected(html: string): Set<string> {
+function shownByMedia(html: string): Set<string> {
   const names = new Set<string>();
   const lower = html.replace(/[A-Z]+/g, (m) => m.toLowerCase());
   for (let open = lower.indexOf("<style"); open >= 0; ) {
     const start = lower.indexOf(">", open);
     if (start < 0) break;
     const close = lower.indexOf("</style", start);
-    const css = html.slice(start + 1, close < 0 ? html.length : close);
-    for (let at = css.indexOf("@media"); at >= 0; at = css.indexOf("@media", at + 1)) {
+    const css = html.slice(start + 1, close < 0 ? html.length : close).replace(/\/\*[\s\S]*?\*\//g, "");
+    const cssLower = css.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+    for (let at = cssLower.indexOf("@media"); at >= 0; at = cssLower.indexOf("@media", at + 1)) {
       const brace = css.indexOf("{", at);
       if (brace < 0) break;
-      // The rules inside the block: selectors are what stands before each inner `{`.
+      const printOnly = /^\s*print\s*$/.test(cssLower.slice(at + 6, brace));
       let depth = 1;
       let i = brace + 1;
       let selector = i;
+      let bodyStart = -1;
       for (; i < css.length && depth > 0; i++) {
         if (css[i] === "{") {
-          if (depth === 1) {
-            for (const m of css.slice(selector, i).matchAll(/[.#](-?[_a-zA-Z][\w-]*)/g)) names.add(m[1]);
-          }
+          if (depth === 1) bodyStart = i + 1;
           depth++;
         } else if (css[i] === "}") {
           depth--;
-          selector = i + 1;
+          if (depth === 1 && bodyStart >= 0 && !printOnly && unhides(css.slice(bodyStart, i))) {
+            const sel = css.slice(selector, bodyStart - 1);
+            for (const m of sel.matchAll(/[.#](-?[_a-zA-Z][\w-]*)/g)) names.add(m[1]);
+            for (const m of sel.matchAll(/\[\s*(?:class|id)\s*[~|^$*]?=\s*["']?([^"'\]\s]+)/gi)) names.add(m[1]);
+          }
+          if (depth === 1) {
+            selector = i + 1;
+            bodyStart = -1;
+          }
         }
       }
       at = i - 1;
@@ -110,36 +163,36 @@ function mediaSelected(html: string): Set<string> {
   return names;
 }
 
-/** Whether an element's class list or id names something an `@media` rule selects. */
-function isResponsive(attrs: Map<string, string>, selected: Set<string>): boolean {
-  if (selected.size === 0) return false;
+/** Whether an element's class list or id names something an `@media` rule shows again. */
+function shownAgain(attrs: Map<string, string>, shown: Set<string>): boolean {
   const id = attrs.get("id");
-  if (id !== undefined && selected.has(id)) return true;
-  return (attrs.get("class") ?? "").split(/\s+/).some((c) => c !== "" && selected.has(c));
+  if (id !== undefined && shown.has(id)) return true;
+  return (attrs.get("class") ?? "").split(/\s+/).some((c) => c !== "" && shown.has(c));
 }
 
 /**
- * The positions of every inline style inside the body that sets a non-zero font-size, and of every
- * one that sets visibility:visible, in order — read from `style` attributes only, so the same words
- * in the mail's text do not count.
+ * Where every element ends (the index after its closing tag), keyed by where it starts, in one
+ * pass: a closing tag ends the most recent open element of its name, and a block start tag ends an
+ * open `<p>` there, as in a browser. An element with no end found is absent from the map.
  */
-interface SetBacks {
-  font: number[];
-  visible: number[];
-}
-
-function findSetBacks(markup: string, tagPattern: RegExp): SetBacks {
-  const font: number[] = [];
-  const visible: number[] = [];
-  const tags = new RegExp(tagPattern.source, "g");
-  for (let m = tags.exec(markup); m; m = tags.exec(markup)) {
-    if (!/style/i.test(m[0])) continue;
-    const css = (attributesOf(m[0]).get("style") ?? "").toLowerCase().replace(/\s+/g, "").split(";");
-    const size = cssValue(css, "font-size");
-    if (size !== undefined && size !== "" && !isZero(size)) font.push(m.index);
-    if (cssValue(css, "visibility") === "visible") visible.push(m.index);
+function elementEnds(tags: Tag[]): Map<number, number> {
+  const open = new Map<string, number[]>();
+  const ends = new Map<number, number>();
+  for (const t of tags) {
+    if (!t.closing && CLOSES_P.has(t.name)) {
+      const p = open.get("p");
+      if (p !== undefined && p.length > 0) ends.set(p.pop()!, t.start);
+    }
+    if (VOID_ELEMENTS.has(t.name)) continue;
+    let stack = open.get(t.name);
+    if (stack === undefined) {
+      stack = [];
+      open.set(t.name, stack);
+    }
+    if (!t.closing) stack.push(t.start);
+    else if (stack.length > 0) ends.set(stack.pop()!, t.end);
   }
-  return { font, visible };
+  return ends;
 }
 
 /** Whether a sorted list holds a position in `[from, to)`. */
@@ -155,33 +208,19 @@ function anyWithin(sorted: number[], from: number, to: number): boolean {
 }
 
 /**
- * A bound on the walk, so hostile markup costs at most a fixed multiple of its length: separate
- * stack-matching passes for this many tag names. Past it, an element is not counted.
+ * The text of a stretch of markup: tags out (as `tagsOf` reads them, so a quoted `>` is not text),
+ * entities decoded, tidied, invisible characters gone.
  */
-const MAX_HIDDEN_NAMES = 24;
-
-/**
- * For each opening tag of `name`, where its element ends (the index after its closing tag), by
- * stack matching over the whole string: a closing tag ends the most recent open one. An opening
- * tag with no closing tag is absent from the map. One pass per name.
- */
-function closesOf(s: string, name: string): Map<number, number> {
-  const tags = new RegExp(`<(/?)${name}(?=[\\t\\n\\f\\r />])[^<>]*>`, "gi");
-  const open: number[] = [];
-  const ends = new Map<number, number>();
-  for (let m = tags.exec(s); m; m = tags.exec(s)) {
-    if (m[1] === "") open.push(m.index);
-    else if (open.length > 0) ends.set(open.pop()!, m.index + m[0].length);
-  }
-  return ends;
-}
-
-/** The text of a stretch of markup: tags out, entities decoded, tidied, invisible characters gone. */
 function textLength(markup: string): number {
-  return tidyRenderedText(decodeCharacterReferences(markup.replace(/<[^<>]*>/g, " "))).length;
+  const parts: string[] = [];
+  let pos = 0;
+  for (const t of tagsOf(markup)) {
+    parts.push(markup.slice(pos, t.start), " ");
+    pos = t.end;
+  }
+  parts.push(markup.slice(pos));
+  return tidyRenderedText(decodeCharacterReferences(parts.join(""))).length;
 }
-
-const OPENING_TAG = /<([a-zA-Z][a-zA-Z0-9-]*)(?=[\t\n\f\r />])[^<>]*>/g;
 
 /**
  * How many characters of text an HTML body keeps from its reader; 0 for none. See the module
@@ -189,38 +228,49 @@ const OPENING_TAG = /<([a-zA-Z][a-zA-Z0-9-]*)(?=[\t\n\f\r />])[^<>]*>/g;
  */
 export function hiddenTextLength(html: string): number {
   if (html === "") return 0;
-  const selected = mediaSelected(html);
+  const shown = shownByMedia(html);
   const markup = shownMarkup(html);
-  const tags = new RegExp(OPENING_TAG.source, "g");
-  const matched = new Map<string, Map<number, number>>();
-  let setBacks: SetBacks | undefined;
+  const tags = [...tagsOf(markup)];
+  const ends = elementEnds(tags);
+  // Where inline styles inside an element set back a hidden size or visibility, by position.
+  const fontBack: number[] = [];
+  const visibleBack: number[] = [];
+  for (const t of tags) {
+    if (t.closing) continue;
+    if (t.name === "font") {
+      const size = attributesOf(t.raw).get("size");
+      if (size !== undefined && size.trim() !== "" && !/^[+-]?0*$/.test(size.trim())) fontBack.push(t.start);
+    }
+    if (!/style/i.test(t.raw)) continue;
+    const d = declarations(attributesOf(t.raw).get("style") ?? "");
+    if (setsFontSize(d)) fontBack.push(t.start);
+    if (cssValue(d, "visibility") === "visible") visibleBack.push(t.start);
+  }
   let hidden = 0;
-  for (let m = tags.exec(markup); m; m = tags.exec(markup)) {
-    const name = m[1].toLowerCase();
-    if (VOID_ELEMENTS.has(name)) continue;
-    // Cheap test first: most tags carry neither word.
-    if (!/hidden|style/i.test(m[0])) continue;
-    const attrs = attributesOf(m[0]);
-    const how = hiding(attrs);
-    if (how === undefined || isResponsive(attrs, selected)) continue;
-    let ends = matched.get(name);
-    if (ends === undefined) {
-      if (matched.size >= MAX_HIDDEN_NAMES) continue;
-      ends = closesOf(markup, name);
-      matched.set(name, ends);
-    }
-    const end = ends.get(m.index);
+  let skipUntil = 0;
+  for (const t of tags) {
+    if (t.closing || t.start < skipUntil || VOID_ELEMENTS.has(t.name)) continue;
+    // Cheap test first: most tags carry none of these words.
+    if (!/hidden|style|class|id/i.test(t.raw)) continue;
+    const end = ends.get(t.start);
     if (end === undefined) continue;
-    if (!how.always) {
-      setBacks ??= findSetBacks(markup, OPENING_TAG);
-      const from = m.index + m[0].length;
-      const fontBack = !how.font || anyWithin(setBacks.font, from, end);
-      const visibleBack = !how.visibility || anyWithin(setBacks.visible, from, end);
-      if (fontBack && visibleBack) continue;
+    const attrs = attributesOf(t.raw);
+    if (shown.size > 0 && shownAgain(attrs, shown)) {
+      // What a phone shows, it shows with its content: a rule like `.desktop_hide table` re-shows
+      // the hidden tables inside too (a template seen in real mail, 24 Nov 2026).
+      skipUntil = end;
+      continue;
     }
-    hidden += textLength(markup.slice(m.index, end));
+    const how = hiding(attrs);
+    if (how === undefined) continue;
+    if (!how.always) {
+      const font = !how.font || anyWithin(fontBack, t.end, end);
+      const visible = !how.visibility || anyWithin(visibleBack, t.end, end);
+      if (font && visible) continue;
+    }
+    hidden += textLength(markup.slice(t.start, end));
     // Nested hidden elements are inside this one and counted with it.
-    tags.lastIndex = end;
+    skipUntil = end;
   }
   return hidden;
 }
