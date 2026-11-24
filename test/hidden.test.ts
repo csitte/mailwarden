@@ -139,6 +139,9 @@ describe("hiddenTextLength", () => {
       "<div hidden>".repeat(20_000) + "</div>".repeat(20_000),
       "<style>" + "@media x { .a { b: c } ".repeat(20_000) + "</style>",
       "<style>@media x {" + "{".repeat(50_000) + "</style>",
+      // Third review: unclosed CSS comments made the comment removal quadratic (89 s for 1 MB).
+      '<div style="' + '/*a'.repeat(250_000) + '">x</div>',
+      '<style>' + '/*a'.repeat(250_000) + '</style>',
     ]) {
       const t = performance.now();
       hiddenTextLength(html);

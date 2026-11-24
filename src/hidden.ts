@@ -41,11 +41,30 @@ const CLOSES_P = new Set(
   ).split(" "),
 );
 
+/**
+ * CSS with its comments removed, an unclosed one running to the end as in a browser. A forward walk:
+ * the regex it replaces rescanned to the end at every unclosed `/*`, and 1 MB of them took 89 s
+ * (review 24 Nov 2026) in a function every `get_thread` runs.
+ */
+function withoutComments(css: string): string {
+  const out: string[] = [];
+  let pos = 0;
+  for (;;) {
+    const open = css.indexOf("/*", pos);
+    if (open < 0) break;
+    out.push(css.slice(pos, open));
+    const close = css.indexOf("*/", open + 2);
+    if (close < 0) return out.join("");
+    pos = close + 2;
+  }
+  out.push(css.slice(pos));
+  return out.join("");
+}
+
 /** Declarations of one style attribute or rule body: lower-case, no spaces or comments. */
 function declarations(css: string): string[] {
-  return css
+  return withoutComments(css)
     .toLowerCase()
-    .replace(/\/\*[\s\S]*?\*\//g, "")
     .replace(/\s+/g, "")
     .split(";");
 }
@@ -128,7 +147,7 @@ function shownByMedia(html: string): Set<string> {
     const start = lower.indexOf(">", open);
     if (start < 0) break;
     const close = lower.indexOf("</style", start);
-    const css = html.slice(start + 1, close < 0 ? html.length : close).replace(/\/\*[\s\S]*?\*\//g, "");
+    const css = withoutComments(html.slice(start + 1, close < 0 ? html.length : close));
     const cssLower = css.replace(/[A-Z]+/g, (m) => m.toLowerCase());
     for (let at = cssLower.indexOf("@media"); at >= 0; at = cssLower.indexOf("@media", at + 1)) {
       const brace = css.indexOf("{", at);
