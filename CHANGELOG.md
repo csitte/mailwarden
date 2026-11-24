@@ -42,6 +42,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the comparison round of 24 November 2026.
 
 ### Fixed
+- **Six comparison-table cells were short or wrong, found by csitte.at's re-survey of every column on
+  24 November 2026 and checked here at each project's source.** `taylorwilsdon` can be made unable
+  to send — `--read-only` drops `send_gmail_message` since v1.9.0 (1 February 2026), a gmail
+  permission level below `send` since v1.13.1 (28 February 2026) — so the footnote's claim that
+  `aaronsb` was the first other server able to refuse sending was wrong; and its filter tool accepts
+  a forwarding action. `aaronsb` can authorize an account read-only (v4.3.0), and runs over stdio
+  only. `klodr` hides tools by the scopes requested at login, not the ones Google granted, and has an
+  opt-in recipient allowlist. `a-bonus` encrypts its token with AES-256-GCM in remote mode (FastMCP's
+  proxy, v1.5.0). `agentcomms`'s `never` send policy binds an agent only under its `confirm` change
+  policy, and it is stdio only. And our own record dated `taylorwilsdon`'s `--permissions` union to
+  v2.2.0; it shipped in v2.1.2 (21 October 2026), as the 0.24.0 entry below should have said.
 - **The comparison table understated `taylorwilsdon` on token encryption.** In its OAuth 2.1 HTTP
   mode the FastMCP proxy underneath keeps the Google tokens in a Fernet-encrypted store, with the key
   derived from the server's JWT signing key or OAuth client secret — since 23 December 2025 (v1.7.0).

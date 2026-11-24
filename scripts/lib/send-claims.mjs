@@ -94,6 +94,11 @@ export function findScopeAnchoredClaims(text) {
 export const ALLOWED = [
   {
     file: "README.md",
+    excerpt: "an account can be authorized read-only, so that its token cannot send either",
+    why: "About a THIRD PARTY (aaronsb, v4.3.0): a read-only account is authorized with gmail.readonly, the one Gmail scope Google itself refuses for messages.send — the same reason our own read tier is the only tier whose no-send property Google enforces. Checked at aaronsb's source on 24 Nov 2026: SERVICE_SCOPE_MAP_READONLY in src/accounts/oauth.ts:73 (b0aecf1d) requests gmail.readonly alone for gmail. It would be wrong for any account holding gmail.modify; keep 'read-only' in the sentence.",
+  },
+  {
+    file: "README.md",
     excerpt: "it drops `gmail.send` but keeps `gmail.compose`",
     why: "About a THIRD PARTY's scopes (c0webster/hardened-google-workspace-mcp), and it makes this guard's own point rather than breaking it: their code comments gmail.compose as 'NOT sending' while Google documents it as 'Manage drafts and send emails' AND gmail.modify -- which they also keep -- as 'Read, compose, and send emails'. So their token can send twice over, and gmail.modify alone would do it: the same scope this project's manage tier holds, which is why our own row points at the tool surface. Cites Google's scope page for both. Keep the citation with the sentence — without it this is the exact assertion the guard exists to stop.",
   },
