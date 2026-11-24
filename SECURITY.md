@@ -258,6 +258,13 @@ A crafted attachment filename tries to escape the download directory.
   unpacks to gigabytes stops at the cap. Archives inside archives are listed, not opened; entry names
   are only shown, never used as paths, and nothing is written to disk. The text it returns is fenced
   and stripped of hidden characters like any mail body — it is what a stranger put in the file.
+- **A saved attachment is marked as a download, on Windows.** `download_attachment` writes the Mark of
+  the Web (`Zone.Identifier`, Internet zone) next to the file, as a browser does for the same
+  attachment saved from Gmail, so Windows asks before an executable runs and Office opens a macro
+  document in Protected View. `markedAsDownloaded: false` means the file system refused the stream
+  (FAT, exFAT, some network shares) and the file is unmarked. On macOS and Linux no mark is written:
+  the macOS quarantine attribute would need a native module or a call to `xattr`, and the field is
+  absent there. `export_thread` writes Markdown or JSON and is not marked.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, writes — `download_attachment` and
   `export_thread` alike, through one shared path check — are confined to that directory
   (realpath-canonicalized, symlink-aware) and never overwrite an existing file (collisions get a

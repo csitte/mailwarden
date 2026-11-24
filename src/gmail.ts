@@ -26,6 +26,7 @@ import {
   type TrimmedMessage,
 } from "./threadview.js";
 import { sanitizeStructured } from "./sanitize.js";
+import { markAsDownloaded } from "./motw.js";
 
 export interface ThreadSummary {
   threadId: string;
@@ -2178,13 +2179,23 @@ export class Gmail {
     return Buffer.from(res.data.data, "base64url");
   }
 
-  async downloadAttachment(messageId: string, attachmentId: string, destPath: string): Promise<string> {
+  /**
+   * Save an attachment and mark it as downloaded from the Internet (see motw.ts).
+   * `markedAsDownloaded` is absent where the platform has no mark this server writes.
+   */
+  async downloadAttachment(
+    messageId: string,
+    attachmentId: string,
+    destPath: string,
+  ): Promise<{ saved: string; markedAsDownloaded?: boolean }> {
     const dest = await resolveLocalDest(destPath);
     const res = await this.req(() =>
       this.api.users.messages.attachments.get({ userId: "me", messageId, id: attachmentId }),
     );
     if (!res.data.data) throw new Error("Attachment has no data.");
-    return writeUnique(dest, Buffer.from(res.data.data, "base64url"));
+    const saved = await writeUnique(dest, Buffer.from(res.data.data, "base64url"));
+    const marked = await markAsDownloaded(saved);
+    return marked === undefined ? { saved } : { saved, markedAsDownloaded: marked };
   }
 
   /** Write a full thread to a local file, under the same path rules as an attachment. */

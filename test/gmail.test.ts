@@ -2396,7 +2396,7 @@ describe("Gmail.downloadAttachment", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
     const gmail = new Gmail(apiWith(b64url("PDFDATA")));
     const dest = path.join(tmp, "sub", "dir", "file.pdf"); // sub/dir does not exist yet
-    const saved = await gmail.downloadAttachment("m1", "a1", dest);
+    const { saved } = await gmail.downloadAttachment("m1", "a1", dest);
     expect(saved).toBe(path.resolve(dest));
     expect(await fs.readFile(saved, "utf8")).toBe("PDFDATA");
   });
@@ -2405,7 +2405,7 @@ describe("Gmail.downloadAttachment", () => {
     tmp = await fs.mkdtemp(path.join(os.tmpdir(), "mw-dl-"));
     vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
     const gmail = new Gmail(apiWith(b64url("X")));
-    const saved = await gmail.downloadAttachment("m1", "a1", "inbox/file.bin");
+    const { saved } = await gmail.downloadAttachment("m1", "a1", "inbox/file.bin");
     // fence paths are realpath-canonicalized (e.g. /var → /private/var on macOS)
     expect(saved).toBe(path.join(await fs.realpath(tmp), "inbox", "file.bin"));
     expect(await fs.readFile(saved, "utf8")).toBe("X");
@@ -2429,7 +2429,7 @@ describe("Gmail.downloadAttachment", () => {
     // the download folder's own rules still apply around it
     vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", tmp);
     await expect(gmail.downloadAttachment("m1", "a1", "out/a.pdf")).rejects.toThrow(/MAILWARDEN_ATTACH_DIR/);
-    expect(await gmail.downloadAttachment("m1", "a1", "elsewhere/a.pdf")).toBe(path.join(await fs.realpath(tmp), "elsewhere", "a.pdf"));
+    expect((await gmail.downloadAttachment("m1", "a1", "elsewhere/a.pdf")).saved).toBe(path.join(await fs.realpath(tmp), "elsewhere", "a.pdf"));
     expect(await fs.readdir(attach)).toEqual([]);
   });
 
@@ -2438,7 +2438,7 @@ describe("Gmail.downloadAttachment", () => {
     const gmail = new Gmail(apiWith(b64url("NEW")));
     const dest = path.join(tmp, "report.pdf");
     await fs.writeFile(dest, "OLD");
-    const saved = await gmail.downloadAttachment("m1", "a1", dest);
+    const { saved } = await gmail.downloadAttachment("m1", "a1", dest);
     expect(saved).toBe(path.join(tmp, "report-1.pdf"));
     expect(await fs.readFile(dest, "utf8")).toBe("OLD"); // original untouched
     expect(await fs.readFile(saved, "utf8")).toBe("NEW");
@@ -2455,7 +2455,7 @@ describe("Gmail.downloadAttachment", () => {
         vi.stubEnv("MAILWARDEN_DOWNLOAD_DIR", link); // root as configured is a symlink
         const gmail = new Gmail(apiWith(b64url("X")));
         // absolute path spelled via the symlinked root, not the canonical one
-        const saved = await gmail.downloadAttachment("m1", "a1", path.join(link, "file.bin"));
+        const { saved } = await gmail.downloadAttachment("m1", "a1", path.join(link, "file.bin"));
         expect(saved).toBe(path.join(await fs.realpath(target), "file.bin"));
         expect(await fs.readFile(saved, "utf8")).toBe("X");
       } finally {

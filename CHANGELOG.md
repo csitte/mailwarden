@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the attribute are read; an element whose end is not found is left in. A newsletter's preview
   text is hidden the same way, so the count is reported, not judged. Seen in `pylos-mcp` and
   `mailhub-mcp` in the comparison round of 24 November 2026.
+- **`download_attachment` marks the saved file as downloaded from the Internet, on Windows.** It writes
+  the Mark of the Web (`Zone.Identifier` stream, Internet zone), as a browser does for an attachment
+  saved from Gmail, so Windows asks before an executable runs and Office opens a macro document in
+  Protected View. The answer's new `markedAsDownloaded` is `false` where the file system has no such
+  streams (FAT, exFAT, some network shares); the file is saved either way. macOS and Linux get no
+  mark, and the field is absent there. Seen in `a-bonus/google-docs-mcp` (since 17 November 2026) in
+  the comparison round of 24 November 2026.
 
 ### Fixed
 - **The comparison table understated `taylorwilsdon` on token encryption.** In its OAuth 2.1 HTTP

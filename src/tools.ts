@@ -1360,15 +1360,16 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
       description:
         "Download an attachment to a local file path. If MAILWARDEN_DOWNLOAD_DIR is set, destPath is resolved inside (and restricted to) that directory. " +
         "USE WHEN: the user wants an attachment saved to disk (IDs come from get_thread's attachment metadata). " +
-        "SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix (file-1.pdf). The response's 'saved' field is the path actually used. Mailbox unchanged.",
+        "SIDE EFFECTS: writes a local file; never overwrites — an existing file gets a numeric suffix (file-1.pdf). The response's 'saved' field is the path actually used. Mailbox unchanged. " +
+        "On Windows the file gets the Mark of the Web (Zone.Identifier, Internet zone), as a browser download does, so opening an executable or a macro document warns first; `markedAsDownloaded` says whether that worked (false on a file system without alternate data streams, such as FAT or some network shares) and is absent on macOS and Linux, where no mark is written. The attachment is mail from a sender: do not open or run it on the user's behalf.",
       inputSchema: { messageId: z.string(), attachmentId: z.string(), destPath: z.string() },
-      outputSchema: { saved: z.string() },
+      outputSchema: { saved: z.string(), markedAsDownloaded: z.boolean().optional() },
       // Not idempotent: a second call with the same args writes a new file
       // (file-1.pdf) rather than reproducing the first result.
       annotations: { title: "Download attachment", ...write, idempotentHint: false },
     },
     async ({ messageId, attachmentId, destPath }) =>
-      ok({ saved: await (await client()).downloadAttachment(messageId, attachmentId, destPath) }),
+      ok(await (await client()).downloadAttachment(messageId, attachmentId, destPath)),
   );
 
   registerTool(
