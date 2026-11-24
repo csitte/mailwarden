@@ -17,7 +17,7 @@ import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./
 import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
 import { renderThread, type ExportFormat } from "./export.js";
-import { hiddenTextLength } from "./hidden.js";
+import { hiddenTextLength, linksOf, type MailLink } from "./html.js";
 import {
   checkThreadOptions,
   selectMessages,
@@ -179,7 +179,7 @@ export interface GetThreadOptions extends MessageSelection {
   full?: boolean;
   /** How much body to keep on a full fetch; ignored when `full` is false (nothing was fetched). */
   bodies?: BodyMode;
-  /** With `bodies` "text" or "new": write link targets into text reduced from HTML. */
+  /** Add each message's links, read from its HTML part by `linksOf`; needs a full fetch. */
   links?: boolean;
 }
 
@@ -193,9 +193,16 @@ export interface GetThreadOptions extends MessageSelection {
  * `omittedMessages` how many of it the selection left out — so "the last two" never
  * passes for "all there is".
  */
+/** What `links: true` adds to a message of `get_thread`. */
+export interface LinkFields {
+  links?: MailLink[];
+  /** Links past `MAX_LINKS`, not listed. */
+  linksOmitted?: number;
+}
+
 export type GetThreadResult = { threadId: string; messageCount: number; omittedMessages: number } & (
-  | { messages: ParsedMessage[]; metadataOnly?: undefined; bodies?: undefined }
-  | { messages: TrimmedMessage[]; metadataOnly?: undefined; bodies: "text" | "new" | "none" }
+  | { messages: (ParsedMessage & LinkFields)[]; metadataOnly?: undefined; bodies?: undefined }
+  | { messages: (TrimmedMessage & LinkFields)[]; metadataOnly?: undefined; bodies: "text" | "new" | "none" }
   | { messages: MessageHeaders[]; metadataOnly: true; bodies?: undefined }
 );
 
@@ -1394,8 +1401,15 @@ export class Gmail {
         messages: messages.map(({ plaintextBody, htmlBody, attachments, ...header }) => header),
       };
     }
-    if (bodies === "full") return { ...counts, messages };
-    return { ...counts, bodies, messages: messages.map((m) => trimBodies(m, bodies, { links: opts.links })) };
+    // Links are read from the HTML before trimming takes it away; added only when asked for,
+    // because a newsletter's list is long (tracking URLs), and the answer is the reader's context.
+    const withLinks = <T extends object>(trimmed: T, m: ParsedMessage): T & LinkFields => {
+      if (opts.links !== true) return trimmed;
+      const { links, omitted } = linksOf(m.htmlBody);
+      return { ...trimmed, links, ...(omitted > 0 ? { linksOmitted: omitted } : {}) };
+    };
+    if (bodies === "full") return { ...counts, messages: messages.map((m) => withLinks(m, m)) };
+    return { ...counts, bodies, messages: messages.map((m) => withLinks(trimBodies(m, bodies), m)) };
   }
 
   /** The parsed messages of a thread, oldest first, in the format `full` selects. */

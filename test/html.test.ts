@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hiddenTextLength } from "../src/hidden.js";
+import { hiddenTextLength, linksOf, browserTarget, MAX_LINKS } from "../src/html.js";
 import { htmlToText, renderThread } from "../src/export.js";
 import { parseMessage, type ParsedMessage } from "../src/gmail.js";
 
@@ -86,9 +86,9 @@ describe("hiddenTextLength", () => {
   });
 
   it("does not count a font-size:0 wrapper set back by the font shorthand or by <font size>", () => {
-    expect(hiddenTextLength(`<td style="font-size:0"><div style="font:14px/20px Arial">${injection}</div></td>`)).toBe(0);
-    expect(hiddenTextLength(`<td style="font-size:0"><font size="3">${injection}</font></td>`)).toBe(0);
-    expect(hiddenTextLength(`<td style="font:0/0 a"><b>${injection}</b></td>`)).toBe(injection.length);
+    expect(hiddenTextLength(`<div style="font-size:0"><div style="font:14px/20px Arial">${injection}</div></div>`)).toBe(0);
+    expect(hiddenTextLength(`<div style="font-size:0"><font size="3">${injection}</font></div>`)).toBe(0);
+    expect(hiddenTextLength(`<div style="font:0/0 a"><b>${injection}</b></div>`)).toBe(injection.length);
   });
 
   it("ends a hidden <p> where a browser does, at the next block", () => {
@@ -118,8 +118,8 @@ describe("hiddenTextLength", () => {
     expect(hiddenTextLength(`<span style="font-size:0"><b style="font-size:0px">${injection}</b></span>`)).toBe(injection.length);
   });
 
-  it("does not count an element that never closes", () => {
-    expect(hiddenTextLength(`<p>Visible</p><div style="display:none">${injection}`)).toBe(0);
+  it("counts an element that never closes to the end of the body, which a browser hides with it", () => {
+    expect(hiddenTextLength(`<p>Visible</p><div style="display:none">${injection}`)).toBe(injection.length);
   });
 
   it("does not count a preheader's invisible padding", () => {
@@ -172,5 +172,127 @@ describe("hiddenTextChars on a message", () => {
     const out = renderThread("t1", [m], "markdown", new Date("2026-11-24T00:00:00Z"));
     expect(out).toContain(`- **Hidden text:** ${injection.length} characters of the HTML part are styled to be invisible to a reader`);
     expect(out).toContain(injection);
+  });
+});
+
+describe("linksOf", () => {
+  const urls = (html: string) => linksOf(html).links.map((l) => l.url);
+  const NL = String.fromCharCode(10);
+  const TAB = String.fromCharCode(9);
+
+  it("lists each link's text and the address that opens, in document order", () => {
+    const html =
+      '<p>Please <a href="https://x.example/confirm?a=1&amp;b=2">confirm here</a>.</p>' +
+      "<a href='mailto:office@x.example'>write to us</a> <a href=tel:+431234>call</a>";
+    expect(linksOf(html)).toEqual({
+      links: [
+        { text: "confirm here", url: "https://x.example/confirm?a=1&b=2" },
+        { text: "write to us", url: "mailto:office@x.example" },
+        { text: "call", url: "tel:+431234" },
+      ],
+      omitted: 0,
+    });
+  });
+
+  it("lists an address once, under the first link that shows anything", () => {
+    const html =
+      '<a href="https://shop.example/"><img src="spacer.gif"></a>' +
+      '<a href="https://shop.example/sale"><img src="s.gif"><img alt="Sale banner"></a>' +
+      '<a href="https://shop.example/sale">Read more</a>' +
+      '<a href="https://shop.example/">Home</a>';
+    expect(linksOf(html).links).toEqual([
+      { text: "Sale banner", url: "https://shop.example/sale" },
+      { text: "Home", url: "https://shop.example/" },
+    ]);
+  });
+
+  it("lists no address that is not a web, mail or phone address, and no relative one", () => {
+    const html =
+      '<a href="javascript:alert(1)">a</a><a href="#top">b</a><a href="cid:x">c</a>' +
+      '<a href="data:text/html,x">d</a><a>e</a><a href="/path">f</a><a href="www.x.example">g</a>';
+    expect(urls(html)).toEqual([]);
+  });
+
+  // Every case below made a hand-written reader show bank.example while a browser opens
+  // evil.example (review rounds of 24 Nov 2026). The parser and the URL standard decide now.
+  it.each([
+    ["an href inside another attribute's value", `<a title=" href=https://bank.example " href="https://evil.example/">Your bank</a>`],
+    ["an `<a href>` inside a quoted title", `<a href="https://evil.example/" title='<a href="https://bank.example">x'>Your bank</a>`],
+    ["a quote that starts an attribute name", `<a "href="https://bank.example" href="https://evil.example/">Your bank</a>`],
+    ["an equals sign that starts an attribute name", `<a =href="https://bank.example" href="https://evil.example/">Your bank</a>`],
+    ["a quote after an `=` inside an unquoted value", `<a href=https://evil.example/?x="><b>Your bank</b></a>`],
+    ["a comment opener inside a title", `<a title="<!--" href="https://evil.example/"><span title="-->" href="https://bank.example">Your bank</span></a>`],
+    ["a style tag inside a title", `<a title="<style>" href="https://evil.example/"><span title="</style>">Your bank</span></a>`],
+    ["an unknown tag carrying an `<a>` in a title", `<a href="https://evil.example/"><o:p title='<a href="https://bank.example">'></o:p>Your bank</a>`],
+    ["a bogus comment", `<a href="https://evil.example/"><!x <a href="https://bank.example">>Your bank</a>`],
+    ["a raw-text element", `<a href="https://evil.example/"><noembed><a href="https://bank.example"></noembed>Your bank</a>`],
+    ["an unquoted target with `=` in it", "<a href=https://bank.example=@evil.example/>Your bank</a>"],
+    ["a line break before @", `<a href="https://bank.example${NL}@evil.example/">Your bank</a>`],
+    ["a backslash before @", "<a href='https://evil.example\\@bank.example/'>Your bank</a>"],
+  ])("shows the address a browser opens despite %s", (_name, html) => {
+    const link = linksOf(html).links.find((l) => l.text.includes("Your bank"));
+    expect(link, html).toBeDefined();
+    expect(new URL(link!.url).hostname, html).toBe("evil.example");
+  });
+
+  it("takes the first of two href attributes, as the standard does", () => {
+    expect(urls('<a href="https://first.example/" href="https://second.example/">x</a>')).toEqual(["https://first.example/"]);
+  });
+
+  it("resolves an address the way a browser does", () => {
+    expect(browserTarget(` ht${TAB}tps://x.example/a${NL}b `)).toBe("https://x.example/ab");
+    expect(browserTarget("HTTPS://X.Example/AbC")).toBe("https://x.example/AbC");
+    expect(browserTarget("https://bank.example@evil.example/")).toBe("https://bank.example@evil.example/");
+    expect(browserTarget("/relative")).toBeUndefined();
+    expect(browserTarget("javascript:alert(1)")).toBeUndefined();
+  });
+
+  it("ends a link where the parser does: at the next one, and at the end of the body", () => {
+    expect(linksOf('<a href="https://x.example/1">one <a href="https://x.example/2">two</a>').links).toEqual([
+      { text: "one", url: "https://x.example/1" },
+      { text: "two", url: "https://x.example/2" },
+    ]);
+    expect(linksOf('<p>end <a href="https://x.example/3">three').links).toEqual([{ text: "three", url: "https://x.example/3" }]);
+  });
+
+  it("does not take the text of a hidden script or template for a link's text", () => {
+    expect(linksOf('<a href="https://x.example/"><script>var a</script><template>t</template>Go</a>').links).toEqual([
+      { text: "Go", url: "https://x.example/" },
+    ]);
+  });
+
+  it("cuts a long link text and lists at most MAX_LINKS links", () => {
+    const long = linksOf(`<a href="https://x.example/">${"word ".repeat(100)}</a>`).links[0];
+    expect(long.text.length).toBe(200);
+    expect(long.text.endsWith("...")).toBe(true);
+    const many = Array.from({ length: MAX_LINKS + 7 }, (_, i) => `<a href="https://x.example/${i}">l${i}</a>`).join("");
+    const out = linksOf(many);
+    expect(out.links.length).toBe(MAX_LINKS);
+    expect(out.omitted).toBe(7);
+  });
+
+  it("lists the links in the Markdown export, as code, after the body", () => {
+    const html = '<p>Pay <a href="https://bill.example/42">here</a></p>';
+    const m: ParsedMessage = {
+      id: "m1", threadId: "t1", labelIds: [], from: "a@x.example", to: "b@x.example", subject: "s", date: "d",
+      snippet: "", authentication: { unchecked: true }, plaintextBody: "", htmlBody: html, attachments: [],
+    };
+    const out = renderThread("t1", [m], "markdown", new Date("2026-11-24T00:00:00Z"));
+    expect(out).toContain("**Links:**");
+    expect(out).toContain("- ` here `: ` https://bill.example/42 `");
+  });
+
+  it("stays fast on hostile markup and deep nesting", () => {
+    for (const html of [
+      '<a href="https://x.example/">'.repeat(30_000),
+      "<a ".repeat(40_000),
+      "<div>".repeat(50_000) + '<a href="https://x.example/">deep</a>',
+      '<a title="' + "<a ".repeat(40_000) + '" href="https://x.example/">t</a>',
+    ]) {
+      const t = performance.now();
+      linksOf(html);
+      hiddenTextLength(html);
+      expect(performance.now() - t, html.slice(0, 30)).toBeLessThan(2000);
+    }
   });
 });

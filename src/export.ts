@@ -18,6 +18,7 @@
 
 import type { ParsedMessage } from "./gmail.js";
 import { stripHiddenChars } from "./sanitize.js";
+import { linksOf } from "./html.js";
 
 export type ExportFormat = "markdown" | "json";
 
@@ -116,20 +117,11 @@ export function decodeCharacterReferences(text: string): string {
   });
 }
 
-/** How `htmlToText` renders what a reader would otherwise lose with the markup. */
-export interface HtmlToTextOptions {
-  /**
-   * Keep each link's target after its text, as `text <https://...>`. Off by default: a quote in a
-   * draft and the emptiness test in quoted.ts want the text alone. See `keepLinkTargets`.
-   */
-  links?: boolean;
-}
-
 /**
  * The markup a reader's client shows: scripts, styles, the head and comments removed, CDATA
- * unwrapped. The first steps of `htmlToText`, shared with `hiddenTextLength`.
+ * unwrapped. The first steps of `htmlToText`.
  */
-export function shownMarkup(html: string): string {
+function shownMarkup(html: string): string {
   // Repeat until nothing changes, so a removal cannot assemble the next block from its
   // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
   // stays, as a browser shows it. The passes are capped: each is linear, and what a deeper
@@ -148,9 +140,8 @@ export function shownMarkup(html: string): string {
 }
 
 /** Reduce an HTML body to readable text. Not a sanitizer: the output is never rendered. */
-export function htmlToText(html: string, options: HtmlToTextOptions = {}): string {
-  let s = shownMarkup(html);
-  if (options.links) s = keepLinkTargets(s);
+export function htmlToText(html: string): string {
+  const s = shownMarkup(html);
   const text = s
     .replace(/<br\b[^<>]*>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|table|blockquote)\s*>/gi, "\n")
@@ -217,209 +208,6 @@ function removeBlocks(s: string, names: string[]): string {
     out.push(s.slice(pos, open));
     pos = end + 1;
   }
-  out.push(s.slice(pos));
-  return out.join("");
-}
-
-/**
- * The next index of `needle` in `hay` at or after `from`, for a walk whose `from` never goes back.
- * The last answer is kept, so a search that found nothing, or found something further on, is not
- * run again on the next step: without it, markup full of tags that never close made every step
- * scan to the end of the body (the same trap as review grok-mailwarden, round 2).
- */
-function forwardFinder(hay: string, needle: string, accept: (i: number) => boolean = () => true) {
-  let at = -2;
-  return (from: number): number => {
-    if (at === -1 || at >= from) return at;
-    let i = hay.indexOf(needle, from);
-    while (i >= 0 && !accept(i)) i = hay.indexOf(needle, i + 1);
-    at = i;
-    return i;
-  };
-}
-
-/** One tag as `tagsOf` finds it: `[start, end)` in the markup, the name lower-cased. */
-export interface Tag {
-  start: number;
-  end: number;
-  name: string;
-  closing: boolean;
-  /** The tag's own text, `<` to `>`, for `attributesOf`. */
-  raw: string;
-}
-
-const TAG_NAME = /<(\/?)([a-zA-Z][a-zA-Z0-9-]*)(?=[\t\n\f\r />])/y;
-
-/**
- * Every tag in `s`, in order, ended where a browser ends it: at the first `>` outside a quoted
- * attribute value. A `>` or `<` inside quotes — `title=">"`, `title='<a href=...>'` — does not end
- * the tag and starts no other (review 24 Nov 2026: a scan to the first `>` read a forged link target
- * out of a title, and let `title=">"` hide a style from the count). A quote counts as a value quote
- * only after `=`, as in a browser. A tag whose quote never closes swallows the rest of the markup, as
- * a browser's does, so the walk ends there. One forward pass: every search is a `forwardFinder`.
- */
-export function* tagsOf(s: string): Generator<Tag> {
-  const nextLt = forwardFinder(s, "<");
-  const nextGt = forwardFinder(s, ">");
-  const nextDq = forwardFinder(s, '"');
-  const nextSq = forwardFinder(s, "'");
-  let pos = 0;
-  for (;;) {
-    const lt = nextLt(pos);
-    if (lt < 0) return;
-    TAG_NAME.lastIndex = lt;
-    const m = TAG_NAME.exec(s);
-    if (!m) {
-      pos = lt + 1;
-      continue;
-    }
-    let p = lt + m[0].length;
-    let end = -1;
-    for (;;) {
-      const gt = nextGt(p);
-      if (gt < 0) return;
-      const quotes = [nextDq(p), nextSq(p)].filter((i) => i >= 0 && i < gt);
-      if (quotes.length === 0) {
-        end = gt + 1;
-        break;
-      }
-      const q = Math.min(...quotes);
-      let k = q - 1;
-      while (k >= p && /[\t\n\f\r ]/.test(s[k])) k--;
-      if (k >= p && s[k] === "=") {
-        const close = (s[q] === '"' ? nextDq : nextSq)(q + 1);
-        if (close < 0) return;
-        p = close + 1;
-      } else {
-        p = q + 1;
-      }
-    }
-    yield { start: lt, end, name: m[2].toLowerCase(), closing: m[1] === "/", raw: s.slice(lt, end) };
-    pos = end;
-  }
-}
-
-/** Link targets worth showing a reader. `javascript:`, `data:`, `cid:` and `#` anchors are not. */
-const SHOWN_LINK = /^(?:https?:\/\/|mailto:|tel:)/i;
-
-/**
- * The attributes of one opening tag (`<name ...>`): names lower-cased, values entity-decoded, the
- * first of a repeated name kept, as a browser keeps it. Quoted values are read whole, so text inside
- * one attribute — `title=" href=https://elsewhere "` — is never taken for another attribute
- * (review 24 Nov 2026: a regex over the whole tag did exactly that, and showed a forged target). An
- * unquoted value runs to whitespace or `>`, `=` included, as in a browser: `href=https://a=@b`.
- */
-export function attributesOf(tag: string): Map<string, string> {
-  const attrs = new Map<string, string>();
-  const name = /^<\/?[a-zA-Z][^\t\n\f\r />]*/.exec(tag);
-  const re = /([^\t\n\f\r "'<>/=]+)(?:[\t\n\f\r ]*=[\t\n\f\r ]*(?:"([^"]*)"|'([^']*)'|([^\t\n\f\r >]+)))?/g;
-  re.lastIndex = name ? name[0].length : 0;
-  for (let m = re.exec(tag); m; m = re.exec(tag)) {
-    const key = m[1].toLowerCase();
-    if (!attrs.has(key)) attrs.set(key, decodeCharacterReferences(m[2] ?? m[3] ?? m[4] ?? ""));
-  }
-  return attrs;
-}
-
-/**
- * A link target as a browser follows it: tabs and line breaks removed wherever they are, leading
- * and trailing spaces trimmed (the URL standard does both). A target split by a line break before
- * `@evil.example` goes to evil.example, and that is what the reader is shown.
- */
-function linkTarget(href: string): string {
-  return href.replace(/[\t\n\r]/g, "").trim();
-}
-
-/** Text without tags, entities decoded and whitespace collapsed: what a link shows. */
-function shownText(html: string): string {
-  return decodeCharacterReferences(html.replace(/<[^<>]*>/g, " ")).replace(/\s+/g, " ").trim();
-}
-
-/**
- * Whether a link's text already shows its target, so writing it again adds nothing: the same
- * string, or the target without its scheme, a final `/` aside. Nothing looser — a reader told
- * `https://bank.example` while the link goes to `http://` or to another case of the path should
- * see the difference.
- */
-function sameTarget(text: string, target: string): boolean {
-  const bare = (v: string) => v.replace(/\/$/, "");
-  return bare(text) === bare(target) || bare(text) === bare(target.replace(/^(?:https?:\/\/|mailto:|tel:)/i, ""));
-}
-
-/** Encode a value so it survives the tag removal after it and comes back from the entity decoding. */
-function asText(v: string): string {
-  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-/**
- * Where a link's visible text ends inside `inner`: before trailing whitespace and trailing tags,
- * so a button built as a table gets its target next to its text rather than after the table.
- * Walks back from the end, so a long run of tags costs one pass.
- */
-function textEnd(inner: string): number {
-  let i = inner.length;
-  for (;;) {
-    while (i > 0 && /\s/.test(inner[i - 1])) i--;
-    if (i === 0 || inner[i - 1] !== ">") return i;
-    const lt = inner.lastIndexOf("<", i - 1);
-    if (lt < 0 || inner.slice(lt + 1, i - 1).includes(">")) return i;
-    i = lt;
-  }
-}
-
-/** The first non-empty `alt` of an image inside a link: a button made of a spacer and an image. */
-function imageLabel(inner: string): string {
-  for (const t of tagsOf(inner)) {
-    if (t.closing || t.name !== "img") continue;
-    const alt = (attributesOf(t.raw).get("alt") ?? "").trim();
-    if (alt !== "") return alt;
-  }
-  return "";
-}
-
-/**
- * Write each link's target after its text, as `text <url>`, before the tags are removed. Without
- * it an HTML-only mail reduced to text loses every link, and the link is often the point: the
- * confirmation, the invoice, the meeting (taylorwilsdon issue #476 asks for exactly this).
- *
- * Only http(s), mailto and tel targets are written. A target already shown once in the body is not
- * written again — a newsletter repeats one link under its logo, its headline and its button —
- * and neither is one the text already spells out. A link with no text shows the first `alt` text of
- * an image inside it and is left out without one, which drops tracking pixels and spacer images.
- *
- * A link ends at its `</a>` or, as in a browser, where the next one starts, or at the end of the
- * body. Tags are read by `tagsOf`, one forward pass.
- */
-function keepLinkTargets(s: string): string {
-  const seen = new Set<string>();
-  const out: string[] = [];
-  let pos = 0;
-  let open: { innerStart: number; target: string } | undefined;
-  const finish = (innerEnd: number) => {
-    if (open === undefined) return;
-    const { innerStart, target } = open;
-    open = undefined;
-    if (!SHOWN_LINK.test(target) || seen.has(target)) return;
-    const inner = s.slice(innerStart, innerEnd);
-    let label = shownText(inner);
-    let prefix = "";
-    if (label === "") {
-      label = imageLabel(inner);
-      if (label === "") return;
-      prefix = asText(label) + " ";
-    }
-    seen.add(target);
-    if (sameTarget(label, target)) return;
-    const at = innerStart + textEnd(inner);
-    out.push(s.slice(pos, at), " ", prefix, "&lt;", asText(target), "&gt;");
-    pos = at;
-  };
-  for (const t of tagsOf(s)) {
-    if (t.name !== "a") continue;
-    finish(t.start);
-    if (!t.closing) open = { innerStart: t.end, target: linkTarget(attributesOf(t.raw).get("href") ?? "") };
-  }
-  finish(s.length);
   out.push(s.slice(pos));
   return out.join("");
 }
@@ -522,7 +310,7 @@ export function renderThread(
     `Thread \`${threadId}\`, ${messages.length} message${messages.length === 1 ? "" : "s"}, exported ${exportedAt.toISOString()}.`,
   ];
   messages.forEach((m, i) => {
-    const body = m.plaintextBody.trim() !== "" ? m.plaintextBody.trim() : htmlToText(m.htmlBody, { links: true });
+    const body = m.plaintextBody.trim() !== "" ? m.plaintextBody.trim() : htmlToText(m.htmlBody);
     const fence = fenceFor(body);
     out.push(
       "",
@@ -549,6 +337,13 @@ export function renderThread(
       );
     }
     out.push("", fence + "text", body, fence);
+    // The links of the HTML part as the server read them, both halves as code: a preview never
+    // follows one, and the reader sees the address that opens next to the text that names it.
+    const { links, omitted } = linksOf(m.htmlBody);
+    if (links.length > 0) {
+      out.push("", "**Links:**", "", ...links.map((l) => `- ${codeSpan(l.text)}: ${codeSpan(l.url)}`));
+      if (omitted > 0) out.push(`- (${omitted} more not listed)`);
+    }
   });
   return out.join("\n") + "\n";
 }

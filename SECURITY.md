@@ -170,31 +170,36 @@ Model can't tell quoted mail from a command.
   can never change what a human sees: VS15/VS16 stay, because they decide how a legitimate emoji
   renders. The fence itself stays on the text copy — it is a marker for a model reading prose, not
   something to bury inside JSON a client parses.
+- **HTML is read as a browser reads it.** Two features look inside a mail's HTML — the link list and
+  the hidden-text count below — and both read it through parse5, an implementation of the HTML
+  standard's tokenizer and tree construction, not through hand-written scanners. Three review rounds
+  on 24 November 2026 found a new way each time to make a hand-written reader disagree with a
+  browser (a quote, a `>` or a comment opener inside an attribute value, a bogus comment, a raw-text
+  element), and every disagreement about a link showed one target while the browser opened another.
+  The text renderings (`bodies: "text"`, the Markdown export) still reduce HTML with the older
+  scanner; they decide what text is shown, never which address a link opens.
+- **Links are a list the server builds, never text in the mail.** `get_thread` with `links: true`
+  returns each message's links as `{text, url}`, and `url` is resolved by the URL standard — the
+  parser a browser uses — so tabs, line breaks, a backslash or an `@` end up where they really lead,
+  and the host shown is the host that opens. A link whose text names one site and whose `url` is
+  another is the classic phishing shape, and the list puts both side by side. The list is not
+  written into the mail's text on purpose: a marker there is something the mail's own text can spell
+  out too.
 - **Text hidden by HTML is counted, never removed.** A mail can carry text its reader never sees —
-  in an element styled `display:none`, `visibility:hidden`, `font-size:0`, `opacity:0` or a zero
-  height with overflow hidden, or marked `hidden` — and only an AI reader gets it. A message whose
-  HTML part has any carries `hiddenTextChars`, its length, and `export_thread` names the count. The
-  text itself stays in every rendering. That is deliberate and measured: a first version removed
-  such elements from the text renderings, and over 107 HTML mails of one mailbox it took visible text
-  with them — templates hide blocks inline and show them on a phone through an `@media` rule (42 %
-  of the text of a Google Ads mail), a column's font size comes back through a class. A count that
+  under an element styled `display:none`, `opacity:0` or a zero height with overflow hidden, or
+  marked `hidden`, or where the nearest declared font size is zero or the nearest visibility hidden
+  — and only an AI reader gets it. A message whose HTML part has any carries `hiddenTextChars`, its
+  length, and `export_thread` names the count. The text itself stays in every rendering. That is
+  deliberate and measured: a first version removed such elements from the text renderings, and over
+  107 HTML mails of one mailbox it took visible text with them — templates hide blocks inline and
+  show them on a phone through an `@media` rule (42 % of the text of a Google Ads mail). A count that
   is sometimes wrong costs a second look; text missing from what a person sees costs the mail.
-  Tags are read as a browser reads them — quoted attribute values whole, so neither a word inside
-  another attribute's value nor a quoted `>` changes what an element is, and a `<p>` ends at the
-  next block. Limits, stated rather than implied: a block that an `@media` rule (not one for print)
-  shows again by its class or id, `[class=...]` selectors included, is not counted together with
-  everything inside it — which a sender can use as well as a template does; a `font-size:0` or
-  `visibility:hidden` element is not counted when a style inside sets the size or visibility back,
-  however small the part it sets back; styles from a class outside `@media` and text coloured like
-  its background are not seen; an element whose closing tag is missing is not counted. A
+  Limits, stated rather than implied: a block that an `@media` rule (not one for print) shows again
+  by its class or id, `[class=...]` selectors included, is not counted, together with everything
+  inside it — which a sender can use as well as a template does; styles from a class outside
+  `@media`, text coloured like its background and positioning off screen are not seen. A
   newsletter's preview text is hidden the same way for an honest reason, usually under 150
   characters, so the count is a fact to weigh, not a verdict.
-- **A link target in text is a rendering, not a guarantee.** With `links: true` (and in the Markdown
-  export) a link's target follows its text as `text <url>`, read from the `href` as a browser reads
-  it: quoted values whole, an unquoted one to its end, tabs and line breaks removed. The target is
-  what the browser would open, so a link whose text names a bank and whose target does not shows
-  both. The format carries no authority of its own: a mail's text can spell out `<https://...>` in
-  plain characters, and only a target that follows a link's text was put there by this server.
 - **Header text is not header syntax.** Where a header's *structure* matters — the `From` mailbox that
   keys `triage_digest` / `list_subscriptions` grouping and the `bulk_unsubscribe` per-sender dedupe,
   the `Reply-To` domains behind `replyToMismatch` — it is read off the raw wire form with a scanner

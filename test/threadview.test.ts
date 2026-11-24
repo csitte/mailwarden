@@ -16,16 +16,16 @@ describe("checkThreadOptions", () => {
       { full: true, bodies: "full" as const },
       { bodies: "text" as const, links: true },
       { bodies: "new" as const, links: true },
-      { bodies: "full" as const, links: false },
+      { bodies: "full" as const, links: true },
+      { bodies: "none" as const, links: true },
+      { links: true },
     ]) {
       expect(() => checkThreadOptions(o), JSON.stringify(o)).not.toThrow();
     }
   });
 
-  it("rejects links without a text rendering to write them into", () => {
-    for (const o of [{ links: true }, { bodies: "full" as const, links: true }, { bodies: "none" as const, links: true }, { full: false, links: true }]) {
-      expect(() => checkThreadOptions(o), JSON.stringify(o)).toThrow(/links: true/);
-    }
+  it("rejects links on a headers-only fetch, which has no HTML to read them from", () => {
+    expect(() => checkThreadOptions({ full: false, links: true })).toThrow(/no HTML to read links from/);
   });
 
   it("rejects full:false with ANY bodies value, naming both ways out", () => {
@@ -136,20 +136,6 @@ describe("trimBodies", () => {
     const out = trimBodies(msg({ plaintextBody: "", htmlBody: "<p>Hello&nbsp;<b>world</b></p><p>bye</p>" }), "text");
     expect(out.plaintextBody).toBe("Hello world\nbye");
     expect(out.bodyFromHtml).toBe(true);
-  });
-
-  it("text and new keep the links of an HTML-only mail only when asked, with the quote cut after them", () => {
-    const html =
-      '<p>Your invoice is <a href="https://billing.example/inv/42">ready</a>.</p>' +
-      '<br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Mon, A wrote:<br></div>' +
-      '<blockquote class="gmail_quote"><a href="https://old.example/">old</a></blockquote></div>';
-    expect(trimBodies(msg({ plaintextBody: "", htmlBody: html }), "text").plaintextBody).toContain("Your invoice is ready.");
-    expect(trimBodies(msg({ plaintextBody: "", htmlBody: html }), "text", { links: true }).plaintextBody).toContain(
-      "Your invoice is ready <https://billing.example/inv/42>.",
-    );
-    const fresh = trimBodies(msg({ plaintextBody: "", htmlBody: html }), "new", { links: true });
-    expect(fresh.plaintextBody).toBe("Your invoice is ready <https://billing.example/inv/42>.");
-    expect(fresh.quotedStripped).toBe(true);
   });
 
   it("text tidies the layout whitespace of a rendered HTML body, and ONLY of a rendered one", () => {

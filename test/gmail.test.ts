@@ -1572,6 +1572,13 @@ describe("Gmail.getThread / getThreadSubject / listThreadIdsByLabel", () => {
     expect("htmlBody" in m3).toBe(false);
     expect(m3.attachments).toEqual([]); // measured on a full fetch, so it may be stated
 
+    // links: read from the HTML before trimming drops it, and only when asked for.
+    const linked = await gmail.getThread("th-1", { lastN: 1, bodies: "none", links: true });
+    expect(linked.messages[0]).toMatchObject({ id: "m3", links: [] });
+    expect("links" in after.messages[0]).toBe(false);
+    expect(getCalls).toHaveLength(3);
+    getCalls.pop();
+
     // full:false with a `bodies` value is a contradiction: rejected BEFORE any fetch, so the
     // caller never gets `metadataOnly` where they asked for text (reported 2026-10-26).
     await expect(gmail.getThread("th-1", { full: false, bodies: "text", lastN: 1 })).rejects.toMatchObject({
