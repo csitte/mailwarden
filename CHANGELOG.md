@@ -8,26 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **An HTML-only mail reduced to text keeps its links.** `get_thread` with `bodies: "text"` or
-  `"new"`, and the Markdown of `export_thread`, wrote a link's text and dropped its target, so the
-  confirmation, invoice or meeting link of an HTML-only mail was gone from the text. Each link now
-  keeps its target after its text, as `text <https://...>`. Only web, mail and phone targets are
-  written (`javascript:`, `data:`, `cid:` and `#` anchors are not); a target is written once per
-  message, because a newsletter repeats one link under its logo, headline and button; a link whose
-  text already spells out its target gets nothing added; and a link with no text shows its image's
-  `alt` text, or is left out with no `alt`, which drops tracking pixels. A real text/plain part is
-  returned as the sender wrote it, as before. Asked for in taylorwilsdon/google_workspace_mcp#476;
-  found in the comparison round of 24 November 2026.
-- **Text an HTML mail hides from its reader is counted, and left out of text renderings.** Text in an
-  element styled `display:none`, `visibility:hidden`, `font-size:0`, `opacity:0` or a zero height with
-  overflow hidden, or marked `hidden`, is invisible in a mail client and read only by an AI — the
-  place to hide instructions for it. `get_thread` now reports `hiddenTextChars` per message when there
-  is any, the text renderings (`bodies: "text"`/`"new"` on an HTML-only mail, the Markdown export) leave
-  that text out, and the export names the count. A `font-size:0` wrapper whose content sets a size
-  again, which email templates use to lay out columns, is not hidden and is kept. Only inline styles
-  and the attribute are read; an element whose end is not found is left in. A newsletter's preview
-  text is hidden the same way, so the count is reported, not judged. Seen in `pylos-mcp` and
-  `mailhub-mcp` in the comparison round of 24 November 2026.
+- **An HTML-only mail reduced to text can keep its links.** `get_thread` with `bodies: "text"` or
+  `"new"` wrote a link's text and dropped its target, so the confirmation, invoice or meeting link of
+  an HTML-only mail was gone from the text. `links: true` now keeps each link's target after its
+  text, as `text <https://...>`; the Markdown of `export_thread` always does. Only web, mail and phone
+  targets are written (`javascript:`, `data:`, `cid:` and `#` anchors are not); a target is written
+  once per message, because a newsletter repeats one link under its logo, headline and button; a
+  link whose text is its target, or its target without the scheme, gets nothing added; a link with
+  no text shows its image's `alt` text, or is left out with no `alt`, which drops tracking pixels.
+  Attributes are read with their quoting, so an `href=` written inside another attribute's value
+  is never taken for the target. Opt-in in `get_thread` because it is not cheap: over 107 HTML mails
+  of one mailbox the text grew 2.8 times in the median and 5.8 times at the 90th percentile.
+  `links: true` without `bodies: "text"` or `"new"` is rejected as `invalid_input`. A real text/plain
+  part is returned as the sender wrote it, as before. Asked for in
+  taylorwilsdon/google_workspace_mcp#476; found in the comparison round of 24 November 2026.
+- **Text an HTML mail hides from its reader is counted.** Text in an element styled `display:none`,
+  `visibility:hidden`, `font-size:0`, `opacity:0` or a zero height with overflow hidden, or marked
+  `hidden`, is invisible in a mail client and read only by an AI — the place to hide instructions
+  for it. `get_thread` reports `hiddenTextChars` per message when its HTML part has any, and the
+  Markdown export names the count. Nothing is removed: a version that left such text out of the text
+  renderings took visible text with it in real mail (responsive blocks shown on a phone by an
+  `@media` rule, among others), so the count is the signal and the text stays. A block an `@media`
+  rule selects is not counted, nor a `font-size:0` column wrapper whose inline styles set the size
+  back. Seen in `pylos-mcp` and `mailhub-mcp` in the comparison round of 24 November 2026.
 - **`download_attachment` marks the saved file as downloaded from the Internet, on Windows.** It writes
   the Mark of the Web (`Zone.Identifier` stream, Internet zone), as a browser does for an attachment
   saved from Gmail, so Windows asks before an executable runs and Office opens a macro document in

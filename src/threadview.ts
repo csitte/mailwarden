@@ -23,6 +23,16 @@ import { isForwardSubject, stripQuotedHtml, stripQuotedText } from "./quoted.js"
  */
 export type BodyMode = "full" | "text" | "new" | "none";
 
+/** How a body reduced from HTML is rendered. */
+export interface TrimOptions {
+  /**
+   * Write each link's target after its text (`text <https://...>`). Off by default because it is
+   * not cheap: over 107 HTML mails of one mailbox (24 Nov 2026) the text grew 2.8 times in the
+   * median and 5.8 times at the 90th percentile, tracking URLs being long.
+   */
+  links?: boolean;
+}
+
 export interface MessageSelection {
   /** Keep only the last N messages (after `afterMessageId`, when both are given). */
   lastN?: number;
@@ -52,9 +62,17 @@ export type TrimmedMessage = Omit<ParsedMessage, "plaintextBody" | "htmlBody"> &
  * `metadataOnly: true` and no text (reported 2026-10-26). An error is the only answer that cannot
  * be mistaken for the content.
  *
- * @throws ToolError `invalid_input` for `full: false` together with any `bodies`.
+ * @throws ToolError `invalid_input` for `full: false` together with any `bodies`, and for
+ *   `links: true` without `bodies` "text" or "new".
  */
-export function checkThreadOptions(o: { full?: boolean; bodies?: BodyMode }): void {
+export function checkThreadOptions(o: { full?: boolean; bodies?: BodyMode; links?: boolean }): void {
+  if (o.links === true && o.bodies !== "text" && o.bodies !== "new") {
+    throw new ToolError(
+      "invalid_input",
+      `links: true writes link targets into text reduced from HTML, which only bodies: "text" or "new" produce. ` +
+        `With bodies "full" the targets are in htmlBody already. Add bodies: "text", or drop links.`,
+    );
+  }
   if (o.full === false && o.bodies !== undefined) {
     throw new ToolError(
       "invalid_input",
@@ -99,10 +117,10 @@ export function selectMessages<T extends { id: string }>(
  * Trim one message's bodies. `full` returns the message untouched (same object), so a caller
  * that passes the default pays nothing.
  */
-export function trimBodies(message: ParsedMessage, mode: "full"): ParsedMessage;
-export function trimBodies(message: ParsedMessage, mode: "text" | "new" | "none"): TrimmedMessage;
-export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessage | TrimmedMessage;
-export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessage | TrimmedMessage {
+export function trimBodies(message: ParsedMessage, mode: "full", options?: TrimOptions): ParsedMessage;
+export function trimBodies(message: ParsedMessage, mode: "text" | "new" | "none", options?: TrimOptions): TrimmedMessage;
+export function trimBodies(message: ParsedMessage, mode: BodyMode, options?: TrimOptions): ParsedMessage | TrimmedMessage;
+export function trimBodies(message: ParsedMessage, mode: BodyMode, options: TrimOptions = {}): ParsedMessage | TrimmedMessage {
   if (mode === "full") return message;
   const { plaintextBody, htmlBody, ...rest } = message;
   if (mode === "none") return rest;
@@ -117,7 +135,7 @@ export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessag
   // HTML-only: cut the quote in the markup, where the clients mark it, then render; a `>` block
   // that survives as text (a client that quotes in plain style inside HTML) is cut after.
   const h = fresh ? stripQuotedHtml(htmlBody) : { html: htmlBody, stripped: false };
-  let fromHtml = htmlToText(h.html, { links: true });
+  let fromHtml = htmlToText(h.html, { links: options.links === true });
   let cut = h.stripped;
   if (fresh) {
     const s = stripQuotedText(fromHtml);

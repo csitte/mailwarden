@@ -16,7 +16,8 @@ import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
 import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./history.js";
 import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
-import { hiddenTextLength, renderThread, type ExportFormat } from "./export.js";
+import { renderThread, type ExportFormat } from "./export.js";
+import { hiddenTextLength } from "./hidden.js";
 import {
   checkThreadOptions,
   selectMessages,
@@ -178,6 +179,8 @@ export interface GetThreadOptions extends MessageSelection {
   full?: boolean;
   /** How much body to keep on a full fetch; ignored when `full` is false (nothing was fetched). */
   bodies?: BodyMode;
+  /** With `bodies` "text" or "new": write link targets into text reduced from HTML. */
+  links?: boolean;
 }
 
 /**
@@ -1392,7 +1395,7 @@ export class Gmail {
       };
     }
     if (bodies === "full") return { ...counts, messages };
-    return { ...counts, bodies, messages: messages.map((m) => trimBodies(m, bodies)) };
+    return { ...counts, bodies, messages: messages.map((m) => trimBodies(m, bodies, { links: opts.links })) };
   }
 
   /** The parsed messages of a thread, oldest first, in the format `full` selects. */

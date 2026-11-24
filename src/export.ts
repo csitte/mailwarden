@@ -129,7 +129,7 @@ export interface HtmlToTextOptions {
  * The markup a reader's client shows: scripts, styles, the head and comments removed, CDATA
  * unwrapped. The first steps of `htmlToText`, shared with `hiddenTextLength`.
  */
-function shownMarkup(html: string): string {
+export function shownMarkup(html: string): string {
   // Repeat until nothing changes, so a removal cannot assemble the next block from its
   // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
   // stays, as a browser shows it. The passes are capped: each is linear, and what a deeper
@@ -149,7 +149,7 @@ function shownMarkup(html: string): string {
 
 /** Reduce an HTML body to readable text. Not a sanitizer: the output is never rendered. */
 export function htmlToText(html: string, options: HtmlToTextOptions = {}): string {
-  let s = removeHiddenElements(shownMarkup(html)).html;
+  let s = shownMarkup(html);
   if (options.links) s = keepLinkTargets(s);
   const text = s
     .replace(/<br\b[^<>]*>/gi, "\n")
@@ -245,24 +245,60 @@ function forwardFinder(hay: string, needle: string, accept: (i: number) => boole
 
 /** Link targets worth showing a reader. `javascript:`, `data:`, `cid:` and `#` anchors are not. */
 const SHOWN_LINK = /^(?:https?:\/\/|mailto:|tel:)/i;
-const HREF = /[\s"'/]href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
-const ALT = /[\s"'/]alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+
+/**
+ * The attributes of one opening tag (`<name ...>`): names lower-cased, values entity-decoded, the
+ * first of a repeated name kept, as a browser keeps it. Quoted values are read whole, so text inside
+ * one attribute — `title=" href=https://elsewhere "` — is never taken for another attribute
+ * (review 24 Nov 2026: a regex over the whole tag did exactly that, and showed a forged target).
+ */
+export function attributesOf(tag: string): Map<string, string> {
+  const attrs = new Map<string, string>();
+  const name = /^<[a-zA-Z][^\s/>]*/.exec(tag);
+  const re = /([^\s"'<>/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
+  re.lastIndex = name ? name[0].length : 0;
+  for (let m = re.exec(tag); m; m = re.exec(tag)) {
+    const key = m[1].toLowerCase();
+    if (!attrs.has(key)) attrs.set(key, decodeCharacterReferences(m[2] ?? m[3] ?? m[4] ?? ""));
+  }
+  return attrs;
+}
 
 /** Text without tags, entities decoded and whitespace collapsed: what a link shows. */
 function shownText(html: string): string {
   return decodeCharacterReferences(html.replace(/<[^<>]*>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
-/** A link target and a link text compared the way a reader would: scheme, `www.` and a final `/` aside. */
-function sameTarget(a: string, b: string): boolean {
-  const norm = (v: string) =>
-    v.toLowerCase().replace(/^(?:https?:\/\/|mailto:|tel:)/, "").replace(/^www\./, "").replace(/\/$/, "");
-  return norm(a) === norm(b);
+/**
+ * Whether a link's text already shows its target, so writing it again adds nothing: the same
+ * string, or the target without its scheme, a final `/` aside. Nothing looser — a reader told
+ * `https://bank.example` while the link goes to `http://` or to another case of the path should
+ * see the difference.
+ */
+function sameTarget(text: string, target: string): boolean {
+  const bare = (v: string) => v.replace(/\/$/, "");
+  return bare(text) === bare(target) || bare(text) === bare(target.replace(/^(?:https?:\/\/|mailto:|tel:)/i, ""));
 }
 
 /** Encode a value so it survives the tag removal after it and comes back from the entity decoding. */
 function asText(v: string): string {
   return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Where a link's visible text ends inside `inner`: before trailing whitespace and trailing tags,
+ * so a button built as a table gets its target next to its text rather than after the table.
+ * Walks back from the end, so a long run of tags costs one pass.
+ */
+function textEnd(inner: string): number {
+  let i = inner.length;
+  for (;;) {
+    while (i > 0 && /\s/.test(inner[i - 1])) i--;
+    if (i === 0 || inner[i - 1] !== ">") return i;
+    const lt = inner.lastIndexOf("<", i - 1);
+    if (lt < 0 || inner.slice(lt + 1, i - 1).includes(">")) return i;
+    i = lt;
+  }
 }
 
 /**
@@ -306,192 +342,25 @@ function keepLinkTargets(s: string): string {
     const end = ends.length > 0 ? Math.min(...ends) : s.length;
     from = end === following ? end : end + 1;
 
-    const m = HREF.exec(s.slice(open, gt + 1));
-    const target = m ? decodeCharacterReferences(m[1] ?? m[2] ?? m[3] ?? "").trim() : "";
+    const target = (attributesOf(s.slice(open, gt + 1)).get("href") ?? "").trim();
     if (!SHOWN_LINK.test(target) || seen.has(target)) continue;
     const inner = s.slice(gt + 1, end);
     let label = shownText(inner);
     let prefix = "";
     if (label === "") {
-      const alt = ALT.exec(inner);
-      label = alt ? decodeCharacterReferences(alt[1] ?? alt[2] ?? alt[3] ?? "").trim() : "";
+      const img = /<img(?=[\t\n\f\r />])[^<>]*>/i.exec(inner);
+      label = img ? (attributesOf(img[0]).get("alt") ?? "").trim() : "";
       if (label === "") continue;
       prefix = asText(label) + " ";
     }
     seen.add(target);
     if (sameTarget(label, target)) continue;
-    // Right after the text, before any whitespace that separates it from what follows.
-    const at = end - (inner.length - inner.trimEnd().length);
+    const at = gt + 1 + textEnd(inner);
     out.push(s.slice(pos, at), " ", prefix, "&lt;", asText(target), "&gt;");
     pos = at;
   }
   out.push(s.slice(pos));
   return out.join("");
-}
-
-/** Elements with no content and no closing tag: hiding one hides nothing but itself. */
-const VOID_ELEMENTS = new Set(
-  "area base br col embed hr img input link meta param source track wbr".split(" "),
-);
-const STYLE_ATTR = /[\s"'/]style\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
-const HIDDEN_ATTR = /\shidden(?=[\s/>=])/i;
-
-/** The value of the last declaration of `prop` in a style attribute — the one that wins. */
-function cssValue(declarations: string[], prop: string): string | undefined {
-  let value: string | undefined;
-  for (const d of declarations) {
-    const i = d.indexOf(":");
-    if (i > 0 && d.slice(0, i) === prop) value = d.slice(i + 1).replace(/!important$/, "");
-  }
-  return value;
-}
-
-/** `0`, `0px`, `0.0em`, `.0`, `0%`: a length or number that is zero. */
-function isZero(v: string | undefined): boolean {
-  return v !== undefined && /^(?:0+(?:\.0*)?|\.0+)(?:[a-z]+|%)?$/.test(v);
-}
-
-/**
- * How an opening tag hides what it contains from a reader, judged by its inline style and its
- * `hidden` attribute. `always`: display:none, the attribute, opacity:0, a zero height with
- * overflow hidden — nothing inside can undo those. `font` and `visibility`: font-size:0 and
- * visibility:hidden, which an element inside can set back. `undefined` when it hides nothing.
- */
-type Hiding = { always: true } | { always: false; font: boolean; visibility: boolean };
-
-function hiding(tag: string): Hiding | undefined {
-  if (HIDDEN_ATTR.test(tag)) return { always: true };
-  const m = STYLE_ATTR.exec(tag);
-  if (!m) return undefined;
-  const css = decodeCharacterReferences(m[1] ?? m[2] ?? m[3] ?? "")
-    .toLowerCase()
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/\s+/g, "")
-    .split(";");
-  const height = isZero(cssValue(css, "height")) || isZero(cssValue(css, "max-height"));
-  const clipped = ["overflow", "overflow-y"].some((p) => cssValue(css, p) === "hidden");
-  if (cssValue(css, "display") === "none" || isZero(cssValue(css, "opacity")) || (height && clipped)) {
-    return { always: true };
-  }
-  const v = cssValue(css, "visibility");
-  const visibility = v === "hidden" || v === "collapse";
-  const font = isZero(cssValue(css, "font-size"));
-  return visibility || font ? { always: false, font, visibility } : undefined;
-}
-
-/**
- * Where markup sets back what a style hid: the positions of every non-zero font-size and of every
- * visibility:visible, in order, found in one pass over the whole body. Email templates put
- * `font-size:0` on a wrapper to remove the gaps between inline-block columns and set the size
- * again on each column; that wrapper hides nothing, and removing it would remove the mail.
- */
-interface SetBacks {
-  font: number[];
-  visible: number[];
-}
-
-function findSetBacks(markup: string): SetBacks {
-  const font = [...markup.matchAll(/font-size\s*:\s*([^;"'<>!]*)/gi)]
-    .filter((m) => !isZero(m[1].replace(/\s+/g, "").toLowerCase()))
-    .map((m) => m.index);
-  const visible = [...markup.matchAll(/visibility\s*:\s*visible/gi)].map((m) => m.index);
-  return { font, visible };
-}
-
-/** Whether a sorted list holds a position in `[from, to)`. */
-function anyWithin(sorted: number[], from: number, to: number): boolean {
-  let lo = 0;
-  let hi = sorted.length;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (sorted[mid] < from) lo = mid + 1;
-    else hi = mid;
-  }
-  return lo < sorted.length && sorted[lo] < to;
-}
-
-/** Whether the inside of an element, `[from, to)`, sets back each thing its style hid. */
-function setBackInside(sb: SetBacks, from: number, to: number, h: { font: boolean; visibility: boolean }): boolean {
-  return (!h.font || anyWithin(sb.font, from, to)) && (!h.visibility || anyWithin(sb.visible, from, to));
-}
-
-/**
- * A bound on the walk, so hostile markup costs at most a fixed multiple of its length: separate
- * stack-matching passes for this many tag names. Past it, an element is left as it is — the text
- * stays, as before this walk existed.
- */
-const MAX_HIDDEN_NAMES = 24;
-
-/**
- * For each opening tag of `name`, where its element ends (the index after its closing tag), by
- * stack matching over the whole string: a closing tag ends the most recent open one. An opening
- * tag with no closing tag is absent from the map. One pass per name.
- */
-function closesOf(s: string, name: string): Map<number, number> {
-  const tags = new RegExp(`<(/?)${name}(?=[\\t\\n\\f\\r />])[^<>]*>`, "gi");
-  const open: number[] = [];
-  const ends = new Map<number, number>();
-  for (let m = tags.exec(s); m; m = tags.exec(s)) {
-    if (m[1] === "") open.push(m.index);
-    else if (open.length > 0) ends.set(open.pop()!, m.index + m[0].length);
-  }
-  return ends;
-}
-
-/** The text of a stretch of markup, as `htmlToText` would count it: tags out, entities decoded, tidied. */
-function textLength(markup: string): number {
-  return tidyRenderedText(decodeCharacterReferences(markup.replace(/<[^<>]*>/g, " "))).length;
-}
-
-/**
- * Remove the elements an inline style or the `hidden` attribute keeps from a reader, with what
- * they contain, and return how much text that was. Text a person never sees in their mail client
- * is text only an AI reader gets: the hiding place for instructions addressed to it. A newsletter's
- * preview text (the "preheader", usually under 150 characters) is hidden the same way and for an
- * honest reason, which is why the length is reported rather than judged here.
- *
- * Only an element whose closing tag is found is removed. One that never closes is left as it is:
- * a browser ends it where its parent ends, which this walk does not model, and guessing there could
- * remove text the reader does see. Known limits: styles from a `<style>` block or a class are not
- * read, and neither is text coloured like its background.
- */
-export function removeHiddenElements(markup: string): { html: string; hiddenChars: number } {
-  const tags = /<([a-zA-Z][a-zA-Z0-9-]*)(?=[\t\n\f\r />])[^<>]*>/g;
-  const matched = new Map<string, Map<number, number>>();
-  const out: string[] = [];
-  let pos = 0;
-  let hiddenChars = 0;
-  let setBacks: SetBacks | undefined;
-  for (let m = tags.exec(markup); m; m = tags.exec(markup)) {
-    const how = hiding(m[0]);
-    if (how === undefined) continue;
-    const name = m[1].toLowerCase();
-    if (VOID_ELEMENTS.has(name)) continue;
-    let ends = matched.get(name);
-    if (ends === undefined) {
-      if (matched.size >= MAX_HIDDEN_NAMES) continue;
-      ends = closesOf(markup, name);
-      matched.set(name, ends);
-    }
-    const end = ends.get(m.index);
-    if (end === undefined) continue;
-    const element = markup.slice(m.index, end);
-    if (!how.always) {
-      setBacks ??= findSetBacks(markup);
-      if (setBackInside(setBacks, m.index + m[0].length, end, how)) continue;
-    }
-    out.push(markup.slice(pos, m.index));
-    hiddenChars += textLength(element);
-    pos = end;
-    tags.lastIndex = end;
-  }
-  out.push(markup.slice(pos));
-  return { html: out.join(""), hiddenChars };
-}
-
-/** How many characters of an HTML body a reader's client keeps hidden; see `removeHiddenElements`. */
-export function hiddenTextLength(html: string): number {
-  return html === "" ? 0 : removeHiddenElements(shownMarkup(html)).hiddenChars;
 }
 
 /**
@@ -608,8 +477,7 @@ export function renderThread(
     );
     if (m.hiddenTextChars) {
       out.push(
-        `- **Hidden text:** ${m.hiddenTextChars} characters of the HTML part are hidden from a reader by its styles` +
-          (m.plaintextBody.trim() === "" ? " and left out of the text below" : ""),
+        `- **Hidden text:** ${m.hiddenTextChars} characters of the HTML part are styled to be invisible to a reader`,
       );
     }
     if (m.attachments.length > 0) {
