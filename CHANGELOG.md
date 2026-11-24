@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **An HTML-only mail reduced to text keeps its links.** `get_thread` with `bodies: "text"` or
+  `"new"`, and the Markdown of `export_thread`, wrote a link's text and dropped its target, so the
+  confirmation, invoice or meeting link of an HTML-only mail was gone from the text. Each link now
+  keeps its target after its text, as `text <https://...>`. Only web, mail and phone targets are
+  written (`javascript:`, `data:`, `cid:` and `#` anchors are not); a target is written once per
+  message, because a newsletter repeats one link under its logo, headline and button; a link whose
+  text already spells out its target gets nothing added; and a link with no text shows its image's
+  `alt` text, or is left out with no `alt`, which drops tracking pixels. A real text/plain part is
+  returned as the sender wrote it, as before. Asked for in taylorwilsdon/google_workspace_mcp#476;
+  found in the comparison round of 24 November 2026.
+
 ### Fixed
 - **The comparison table understated `taylorwilsdon` on token encryption.** In its OAuth 2.1 HTTP
   mode the FastMCP proxy underneath keeps the Google tokens in a Fernet-encrypted store, with the key

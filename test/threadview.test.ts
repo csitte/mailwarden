@@ -129,6 +129,19 @@ describe("trimBodies", () => {
     expect(out.bodyFromHtml).toBe(true);
   });
 
+  it("text and new keep the links of an HTML-only mail, with the quote cut after them", () => {
+    const html =
+      '<p>Your invoice is <a href="https://billing.example/inv/42">ready</a>.</p>' +
+      '<br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">On Mon, A wrote:<br></div>' +
+      '<blockquote class="gmail_quote"><a href="https://old.example/">old</a></blockquote></div>';
+    expect(trimBodies(msg({ plaintextBody: "", htmlBody: html }), "text").plaintextBody).toContain(
+      "Your invoice is ready <https://billing.example/inv/42>.",
+    );
+    const fresh = trimBodies(msg({ plaintextBody: "", htmlBody: html }), "new");
+    expect(fresh.plaintextBody).toBe("Your invoice is ready <https://billing.example/inv/42>.");
+    expect(fresh.quotedStripped).toBe(true);
+  });
+
   it("text tidies the layout whitespace of a rendered HTML body, and ONLY of a rendered one", () => {
     const layout = "<table>\r\n\t<tr><td>\t\t</td></tr>\r\n\t<tr><td>\r\n\t\t\tTotal:\t\t 12,50&nbsp;EUR\r\n\t</td></tr>\r\n</table>";
     const rendered = trimBodies(msg({ plaintextBody: "", htmlBody: layout }), "text");

@@ -198,6 +198,77 @@ describe("htmlToText", () => {
   });
 });
 
+describe("htmlToText — links", () => {
+  const links = (html: string) => htmlToText(html, { links: true });
+
+  it("drops link targets unless asked, as before", () => {
+    expect(htmlToText('<a href="https://x.example/confirm">Confirm</a>')).toBe("Confirm");
+  });
+
+  it("writes the target after the link text", () => {
+    expect(links('<p>Please <a href="https://x.example/confirm?a=1&amp;b=2">confirm here</a>.</p>')).toBe(
+      "Please confirm here <https://x.example/confirm?a=1&b=2>.",
+    );
+    expect(links("<a href='mailto:office@x.example'>write to us</a> or <a href=tel:+431234>call</a>")).toBe(
+      "write to us <mailto:office@x.example> or call <tel:+431234>",
+    );
+    expect(links('<a\nhref="https://x.example/a"\nclass="btn"><b>Pay</b> <i>now</i></a>')).toBe(
+      "Pay now <https://x.example/a>",
+    );
+  });
+
+  it("writes a target once, and not where the text already shows it", () => {
+    const html =
+      '<a href="https://shop.example/"><img src="logo.png" alt=""></a>' +
+      '<h1><a href="https://shop.example/sale">Sale</a></h1>' +
+      '<p><a href="https://shop.example/sale">Read more</a></p>' +
+      '<p>Visit <a href="https://www.shop.example/">shop.example</a></p>';
+    expect(links(html)).toBe("Sale <https://shop.example/sale>\nRead more\nVisit shop.example");
+  });
+
+  it("names an image link by its alt text and leaves out links with nothing to show", () => {
+    expect(links('<a href="https://x.example/c"><img src="b.png" alt="Confirm booking"></a>')).toBe(
+      "Confirm booking <https://x.example/c>",
+    );
+    expect(links('<p>Hi</p><a href="https://t.example/px"><img src="p.gif" width=1></a>')).toBe("Hi");
+  });
+
+  it("writes no target that is not a web, mail or phone address", () => {
+    const html =
+      '<a href="javascript:alert(1)">a</a> <a href="#top">b</a> <a href="cid:x">c</a> ' +
+      '<a href="data:text/html,x">d</a> <a>e</a> <a name="f">f</a>';
+    expect(links(html)).toBe("a b c d e f");
+  });
+
+  it("ends a link at the next one, as a browser does, and at the end of an unclosed body", () => {
+    expect(links('<a href="https://x.example/1">one <a href="https://x.example/2">two</a>')).toBe(
+      "one <https://x.example/1> two <https://x.example/2>",
+    );
+    expect(links('<p>end <a href="https://x.example/3">three')).toBe("end three <https://x.example/3>");
+  });
+
+  it("keeps a target with markup characters as text, not as a tag", () => {
+    expect(links('<a href="https://x.example/?q=&lt;b&gt;">q</a>')).toBe("q <https://x.example/?q=<b>>");
+  });
+
+  it("does not mistake other tags that start with `a` for links", () => {
+    expect(links('<abbr title="x">HTML</abbr> <address>Main St</address>')).toBe("HTML Main St");
+  });
+
+  it("stays linear on links that never close", () => {
+    for (const html of [
+      '<a href="https://x.example/">'.repeat(30_000),
+      "<a ".repeat(40_000),
+      '<a href="https://x.example/"'.repeat(30_000),
+      "<p>x</p>" + "</a".repeat(40_000),
+    ]) {
+      const t = performance.now();
+      links(html);
+      expect(performance.now() - t).toBeLessThan(500);
+    }
+  });
+});
+
 describe("tidyRenderedText", () => {
   it("trims each line, collapses inner runs and keeps at most one blank line", () => {
     expect(tidyRenderedText("  a \t b  \n\n\n\n  c  d \r\n\r\n\r\n e\rf")).toBe("a b\n\nc d\n\ne\nf");

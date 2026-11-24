@@ -116,8 +116,17 @@ export function decodeCharacterReferences(text: string): string {
   });
 }
 
+/** How `htmlToText` renders what a reader would otherwise lose with the markup. */
+export interface HtmlToTextOptions {
+  /**
+   * Keep each link's target after its text, as `text <https://...>`. Off by default: a quote in a
+   * draft and the emptiness test in quoted.ts want the text alone. See `keepLinkTargets`.
+   */
+  links?: boolean;
+}
+
 /** Reduce an HTML body to readable text. Not a sanitizer: the output is never rendered. */
-export function htmlToText(html: string): string {
+export function htmlToText(html: string, options: HtmlToTextOptions = {}): string {
   // Repeat until nothing changes, so a removal cannot assemble the next block from its
   // remains (`<scr<script></script>ipt>…</script>`). Text after a script's first `</script>`
   // stays, as a browser shows it. The passes are capped: each is linear, and what a deeper
@@ -133,6 +142,7 @@ export function htmlToText(html: string): string {
   // A comment that never closes hides the rest of the body in a browser, so it does here.
   s = cutBetween(s, "<!--", "-->", () => "", true);
   s = cutBetween(s, "<![CDATA[", "]]>", (inner) => inner);
+  if (options.links) s = keepLinkTargets(s);
   const text = s
     .replace(/<br\b[^<>]*>/gi, "\n")
     .replace(/<\/(p|div|li|tr|h[1-6]|table|blockquote)\s*>/gi, "\n")
@@ -198,6 +208,114 @@ function removeBlocks(s: string, names: string[]): string {
     }
     out.push(s.slice(pos, open));
     pos = end + 1;
+  }
+  out.push(s.slice(pos));
+  return out.join("");
+}
+
+/** ASCII lower case only: a full toLowerCase can change the length ("İ" becomes two characters). */
+function asciiLower(s: string): string {
+  return s.replace(/[A-Z]+/g, (m) => m.toLowerCase());
+}
+
+/**
+ * The next index of `needle` in `hay` at or after `from`, for a walk whose `from` never goes back.
+ * The last answer is kept, so a search that found nothing, or found something further on, is not
+ * run again on the next step: without it, markup full of tags that never close made every step
+ * scan to the end of the body (the same trap as review grok-mailwarden, round 2).
+ */
+function forwardFinder(hay: string, needle: string, accept: (i: number) => boolean = () => true) {
+  let at = -2;
+  return (from: number): number => {
+    if (at === -1 || at >= from) return at;
+    let i = hay.indexOf(needle, from);
+    while (i >= 0 && !accept(i)) i = hay.indexOf(needle, i + 1);
+    at = i;
+    return i;
+  };
+}
+
+/** Link targets worth showing a reader. `javascript:`, `data:`, `cid:` and `#` anchors are not. */
+const SHOWN_LINK = /^(?:https?:\/\/|mailto:|tel:)/i;
+const HREF = /[\s"'/]href\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+const ALT = /[\s"'/]alt\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i;
+
+/** Text without tags, entities decoded and whitespace collapsed: what a link shows. */
+function shownText(html: string): string {
+  return decodeCharacterReferences(html.replace(/<[^<>]*>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+/** A link target and a link text compared the way a reader would: scheme, `www.` and a final `/` aside. */
+function sameTarget(a: string, b: string): boolean {
+  const norm = (v: string) =>
+    v.toLowerCase().replace(/^(?:https?:\/\/|mailto:|tel:)/, "").replace(/^www\./, "").replace(/\/$/, "");
+  return norm(a) === norm(b);
+}
+
+/** Encode a value so it survives the tag removal after it and comes back from the entity decoding. */
+function asText(v: string): string {
+  return v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+/**
+ * Write each link's target after its text, as `text <url>`, before the tags are removed. Without
+ * it an HTML-only mail reduced to text loses every link, and the link is often the point: the
+ * confirmation, the invoice, the meeting (taylorwilsdon issue #476 asks for exactly this).
+ *
+ * Only http(s), mailto and tel targets are written. A target already shown once in the body is not
+ * written again — a newsletter repeats one link under its logo, its headline and its button —
+ * and neither is one the text already spells out. A link with no text shows its image's `alt`
+ * text if it has one and is left out otherwise, which drops tracking pixels and spacer images.
+ *
+ * A link ends at its `</a>` or, as in a browser, where the next one starts. One forward walk;
+ * every search is a `forwardFinder`, so tags that never close cost no rescans.
+ */
+function keepLinkTargets(s: string): string {
+  const lower = asciiLower(s);
+  const nameEnds = (i: number) => /[\t\n\f\r />]/.test(lower[i] ?? "");
+  const nextOpen = forwardFinder(lower, "<a", (i) => nameEnds(i + 2));
+  const nextClose = forwardFinder(lower, "</a", (i) => nameEnds(i + 3));
+  const nextGt = forwardFinder(s, ">");
+  const nextLt = forwardFinder(s, "<");
+  const seen = new Set<string>();
+  const out: string[] = [];
+  let pos = 0;
+  let from = 0;
+  for (;;) {
+    const open = nextOpen(from);
+    if (open < 0) break;
+    const gt = nextGt(open);
+    if (gt < 0) break;
+    const lt = nextLt(open + 1);
+    if (lt >= 0 && lt < gt) {
+      // `<a` without its `>` before the next tag is no tag a browser would open.
+      from = open + 1;
+      continue;
+    }
+    const close = nextClose(gt + 1);
+    const following = nextOpen(gt + 1);
+    const ends = [close, following].filter((i) => i >= 0);
+    const end = ends.length > 0 ? Math.min(...ends) : s.length;
+    from = end === following ? end : end + 1;
+
+    const m = HREF.exec(s.slice(open, gt + 1));
+    const target = m ? decodeCharacterReferences(m[1] ?? m[2] ?? m[3] ?? "").trim() : "";
+    if (!SHOWN_LINK.test(target) || seen.has(target)) continue;
+    const inner = s.slice(gt + 1, end);
+    let label = shownText(inner);
+    let prefix = "";
+    if (label === "") {
+      const alt = ALT.exec(inner);
+      label = alt ? decodeCharacterReferences(alt[1] ?? alt[2] ?? alt[3] ?? "").trim() : "";
+      if (label === "") continue;
+      prefix = asText(label) + " ";
+    }
+    seen.add(target);
+    if (sameTarget(label, target)) continue;
+    // Right after the text, before any whitespace that separates it from what follows.
+    const at = end - (inner.length - inner.trimEnd().length);
+    out.push(s.slice(pos, at), " ", prefix, "&lt;", asText(target), "&gt;");
+    pos = at;
   }
   out.push(s.slice(pos));
   return out.join("");
@@ -301,7 +419,7 @@ export function renderThread(
     `Thread \`${threadId}\`, ${messages.length} message${messages.length === 1 ? "" : "s"}, exported ${exportedAt.toISOString()}.`,
   ];
   messages.forEach((m, i) => {
-    const body = m.plaintextBody.trim() !== "" ? m.plaintextBody.trim() : htmlToText(m.htmlBody);
+    const body = m.plaintextBody.trim() !== "" ? m.plaintextBody.trim() : htmlToText(m.htmlBody, { links: true });
     const fence = fenceFor(body);
     out.push(
       "",

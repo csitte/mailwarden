@@ -117,7 +117,7 @@ export function trimBodies(message: ParsedMessage, mode: BodyMode): ParsedMessag
   // HTML-only: cut the quote in the markup, where the clients mark it, then render; a `>` block
   // that survives as text (a client that quotes in plain style inside HTML) is cut after.
   const h = fresh ? stripQuotedHtml(htmlBody) : { html: htmlBody, stripped: false };
-  let fromHtml = htmlToText(h.html);
+  let fromHtml = htmlToText(h.html, { links: true });
   let cut = h.stripped;
   if (fresh) {
     const s = stripQuotedText(fromHtml);
