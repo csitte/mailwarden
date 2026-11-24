@@ -21,15 +21,21 @@ const CRLF = String.fromCharCode(13, 10);
 export const ZONE_IDENTIFIER = ["[ZoneTransfer]", "ZoneId=3", ""].join(CRLF);
 
 /**
- * Mark `file` as downloaded from the Internet. `true` when the mark was written, `false` when the
- * file system refused it (FAT, exFAT and some network shares have no alternate data streams), and
- * `undefined` on a platform that has no such mark here. Never throws: the file is saved either way,
- * and a missing mark must not turn a saved attachment into a failed call.
+ * Mark `file` as downloaded from the Internet. `true` when the mark was written, `false` when it
+ * could not be — a file system without alternate data streams (FAT, exFAT, some network shares), or
+ * the file already gone — and `undefined` on a platform that has no such mark here. Never throws: the
+ * file is saved either way, and a missing mark must not turn a saved attachment into a failed call.
+ *
+ * The file is looked for first: writing a stream to a path whose file a virus scanner has just
+ * removed would create an empty file there, marked (grok-mailwarden, 0.33.0 round, L7).
  */
 export async function markAsDownloaded(
   file: string,
   platform: NodeJS.Platform = process.platform,
-  write: (target: string, data: string) => Promise<void> = (target, data) => fs.writeFile(target, data),
+  write: (target: string, data: string) => Promise<void> = async (target, data) => {
+    await fs.stat(file);
+    await fs.writeFile(target, data);
+  },
 ): Promise<boolean | undefined> {
   if (platform !== "win32") return undefined;
   try {

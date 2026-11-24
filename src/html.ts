@@ -49,13 +49,34 @@ const XLINK_NS = "http://www.w3.org/1999/xlink";
  */
 export const NODE_BUDGET = 250_000;
 
+/**
+ * At most this long per parse, in milliseconds. A real 1 MB mail parses in 115 to 182 ms (measured
+ * by grok-mailwarden for 0.33.0); the limit leaves room for a slower machine and stops markup built
+ * to make the parser's own bookkeeping quadratic.
+ */
+export const TIME_BUDGET_MS = 1000;
+
 class TooComplex extends Error {}
 
+/** The budgets a parse runs under; tests pass smaller ones to pin the boundaries exactly. */
+export interface ParseLimits {
+  nodes: number;
+  ms: number;
+}
+
+const LIMITS: ParseLimits = { nodes: NODE_BUDGET, ms: TIME_BUDGET_MS };
+
 /** parse5's own tree adapter, counting every node it creates and stopping at `NODE_BUDGET`. */
-function budgetedAdapter(): TreeAdapter<DefaultTreeAdapterMap> {
+function budgetedAdapter(limits: ParseLimits): TreeAdapter<DefaultTreeAdapterMap> {
   let made = 0;
+  const started = performance.now();
   const count = () => {
-    if (++made > NODE_BUDGET) throw new TooComplex();
+    if (++made > limits.nodes) throw new TooComplex();
+    // Nodes alone do not bound the time: parse5 indexes open formatting elements, and with
+    // thousands of them each new node costs time in proportion (grok-mailwarden, 0.33.0 round: 1 MB
+    // took 38 s at a linear node count). So the clock is read every 256 nodes as well; a real
+    // 1 MB mail parses in under 0.2 s.
+    if ((made & 0xff) === 0 && performance.now() - started > limits.ms) throw new TooComplex();
   };
   const isText = (n: Node | undefined) => n !== undefined && defaultTreeAdapter.isTextNode(n);
   return {
@@ -90,9 +111,9 @@ function budgetedAdapter(): TreeAdapter<DefaultTreeAdapterMap> {
 }
 
 /** Parse as a mail client renders — no scripts — within the node budget; undefined past it. */
-function parseMail(html: string): DefaultTreeAdapterTypes.Document | undefined {
+function parseMail(html: string, limits: ParseLimits): DefaultTreeAdapterTypes.Document | undefined {
   try {
-    return parse(html, { scriptingEnabled: false, treeAdapter: budgetedAdapter() });
+    return parse(html, { scriptingEnabled: false, treeAdapter: budgetedAdapter(limits) });
   } catch (e) {
     if (e instanceof TooComplex) return undefined;
     throw e;
@@ -565,6 +586,11 @@ const SHOWN_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
  * the way a browser does.
  */
 export function browserTarget(href: string): URL | undefined {
+  // `https:/x` or `https:x` names a host only without a base address; a page served over the same
+  // scheme — Gmail's web client is one — resolves it against its own host. Relative, so not listed
+  // (grok-mailwarden, 0.33.0 round, N10).
+  const scheme = /^[\s\x00-\x1f]*h[\t\n\r]*t[\t\n\r]*t[\t\n\r]*p[\t\n\r]*s?[\t\n\r]*:([\s\S]*)$/i.exec(href);
+  if (scheme && !/^[\t\n\r]*[/\\][\t\n\r]*[/\\]/.test(scheme[1])) return undefined;
   let url: URL;
   try {
     url = new URL(href);
@@ -591,7 +617,27 @@ function hostOf(url: URL): string {
   if (addresses.trim() === "") addresses = url.searchParams.get("to") ?? "";
   const first = addresses.split(",")[0] ?? "";
   const at = first.lastIndexOf("@");
-  return at < 0 ? "" : first.slice(at + 1).trim().toLowerCase();
+  if (at < 0) return "";
+  // The domain ends where characters a domain cannot hold begin: `evil.example>` is evil.example.
+  return (/^[a-z0-9.[\]:-]*/.exec(first.slice(at + 1).trim().toLowerCase())?.[0] ?? "").replace(/\.$/, "");
+}
+
+/** Domain-like words in a link's text: `paypal.com`, `www.bank.example`, `https://x.example/`. */
+const DOMAIN_WORD = /(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}/gi;
+
+/**
+ * Whether a link deserves to be seen first: hidden text inside it, or text that names a domain the
+ * link does not go to (`www.paypal.com` over evil.example). Ordering only; nothing is judged.
+ */
+function standsOut(link: MailLink): boolean {
+  if (link.hiddenText) return true;
+  if (link.host === "") return false;
+  const bare = (d: string) => d.toLowerCase().replace(/^www\./, "");
+  const host = bare(link.host);
+  return [...link.text.matchAll(DOMAIN_WORD)].some((m) => {
+    const named = bare(m[0]);
+    return named !== host && !host.endsWith("." + named) && !named.endsWith("." + host);
+  });
 }
 
 /** A link being read: its target and what the walk found inside it. */
@@ -636,8 +682,8 @@ interface WalkResult {
 }
 
 /** One walk over the parsed mail: hidden text counted, links collected with their visible content. */
-function walk(html: string, collectLinks: boolean): WalkResult | undefined {
-  const doc = parseMail(html);
+function walk(html: string, collectLinks: boolean, limits: ParseLimits): WalkResult | undefined {
+  const doc = parseMail(html, limits);
   if (doc === undefined) return undefined;
   const shown = shownByMedia(styleTexts(doc));
   const links: OpenLink[] = [];
@@ -709,20 +755,21 @@ function walk(html: string, collectLinks: boolean): WalkResult | undefined {
 }
 
 /**
- * The links of an HTML body a reader can see, in document order, each as `{text, url, host}`:
+ * The links of an HTML body a reader can see, each as `{text, url, host}`, in document order except
+ * that links that stand out (`standsOut`) come first:
  * web, mail and phone addresses; an `<a>`, an image map's `<area>` (when a visible image uses the
  * map), or an SVG link. A link shows when visible text or a visible image inside it does; `text` is
  * that text (or the image's alt text), and a link with hidden text inside says `hiddenText`. Each pair
  * of text and address once. At most `MAX_LINKS`; `omitted` counts the rest. `tooComplex` when the
  * parse ran past `NODE_BUDGET`.
  */
-export function linksOf(html: string): { links: MailLink[]; omitted: number; tooComplex?: true } {
+export function linksOf(html: string, limits: ParseLimits = LIMITS): { links: MailLink[]; omitted: number; tooComplex?: true } {
   const out: MailLink[] = [];
   if (html === "") return { links: out, omitted: 0 };
-  const result = walk(html, true);
+  const result = walk(html, true, limits);
   if (result === undefined) return { links: out, omitted: 0, tooComplex: true };
   const seen = new Set<string>();
-  let omitted = 0;
+  const all: MailLink[] = [];
   for (const l of result.links) {
     if (l.map !== undefined && !result.shownMaps.has(l.map)) continue;
     if (!l.shownText && !l.image) continue;
@@ -730,11 +777,7 @@ export function linksOf(html: string): { links: MailLink[]; omitted: number; too
     const key = `${l.url.href} ${text}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    if (out.length >= MAX_LINKS) {
-      omitted++;
-      continue;
-    }
-    out.push({
+    all.push({
       text,
       url: l.url.href,
       host: hostOf(l.url),
@@ -742,7 +785,10 @@ export function linksOf(html: string): { links: MailLink[]; omitted: number; too
       ...(l.hiddenText ? { hiddenText: true as const } : {}),
     });
   }
-  return { links: out, omitted };
+  // The links that stand out come first, so a hundred harmless ones cannot push the one that
+  // matters past the cap (grok-mailwarden, 0.33.0 round, M3); each group keeps document order.
+  const ordered = [...all.filter(standsOut), ...all.filter((l) => !standsOut(l))];
+  return { links: ordered.slice(0, MAX_LINKS), omitted: Math.max(0, ordered.length - MAX_LINKS) };
 }
 
 /**
@@ -762,6 +808,6 @@ export function linksOf(html: string): { links: MailLink[]; omitted: number; too
  * preview text is hidden the same way for an honest reason, usually under 150 characters: the count
  * is a fact to weigh, not a verdict.
  */
-export function hiddenTextLength(html: string): number | undefined {
-  return html === "" ? 0 : walk(html, false)?.hiddenChars;
+export function hiddenTextLength(html: string, limits: ParseLimits = LIMITS): number | undefined {
+  return html === "" ? 0 : walk(html, false, limits)?.hiddenChars;
 }

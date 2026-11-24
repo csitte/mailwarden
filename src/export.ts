@@ -324,6 +324,11 @@ export function renderThread(
       `- **Subject:** ${codeSpan(m.subject)}`,
       `- **Sender authentication:** ${authLine(m)}`,
     );
+    if (m.htmlTooComplex) {
+      out.push(
+        "- **HTML not read:** the HTML part would make the parser build more than any real mail does; its links and hidden text were not checked",
+      );
+    }
     if (m.hiddenTextChars) {
       out.push(
         `- **Hidden text:** ${m.hiddenTextChars} characters of the HTML part are styled to be invisible to a reader`,
@@ -339,7 +344,9 @@ export function renderThread(
     out.push("", fence + "text", body, fence);
     // The links of the HTML part as the server read them, both halves as code: a preview never
     // follows one, and the reader sees the address that opens next to the text that names it.
-    const { links, omitted } = linksOf(m.htmlBody);
+    // Not parsed twice when the first parse already gave up (htmlTooComplex).
+    const { links, omitted, tooComplex } = m.htmlTooComplex ? { links: [], omitted: 0, tooComplex: undefined } : linksOf(m.htmlBody);
+    if (tooComplex) out.push("", "**Links:** not read, the HTML part is too complex to parse safely.");
     if (links.length > 0) {
       const note = (l: MailLink) => [l.image ? "image" : "", l.hiddenText ? "hidden text inside" : ""].filter(Boolean).join(", ");
       out.push(

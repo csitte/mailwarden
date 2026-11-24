@@ -13,7 +13,7 @@ everyone doing it the first time, and for the two traps that cost real hours
 - a stored refresh token (`~/.mailwarden/token.json`) created by a one-time browser consent,
 - mailwarden connected to your MCP client.
 
-**Prerequisites:** Node.js ≥ 20 and a Google account. Nothing else — no server, no domain,
+**Prerequisites:** Node.js ≥ 20.19 and a Google account. Nothing else — no server, no domain,
 no billing.
 
 ---

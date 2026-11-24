@@ -170,18 +170,25 @@ Model can't tell quoted mail from a command.
   can never change what a human sees: VS15/VS16 stay, because they decide how a legitimate emoji
   renders. The fence itself stays on the text copy — it is a marker for a model reading prose, not
   something to bury inside JSON a client parses.
-- **HTML is read as a browser reads it.** Two features look inside a mail's HTML — the link list and
+- **HTML is read as the HTML standard reads it.** Two features look inside a mail's HTML — the link list and
   the hidden-text count below — and both read it through parse5, an implementation of the HTML
   standard's tokenizer and tree construction, not through hand-written scanners. Three review rounds
   on 24 November 2026 found a new way each time to make a hand-written reader disagree with a
   browser (a quote, a `>` or a comment opener inside an attribute value, a bogus comment, a raw-text
   element), and every disagreement about a link showed one target while the browser opened another.
+  parse5 and a browser can still differ where browsers depart from the standard: measured by
+  grok-mailwarden against Chrome on 20,000 tag soups for 0.33.0, 330 differed, 325 of them an `<a>`
+  inside a `<select>`, which Chrome keeps and parse5 drops; the target URLs themselves resolved the
+  same in 30,000 cases.
   The text renderings (`bodies: "text"`, the Markdown export) still reduce HTML with the older
   scanner; they decide what text is shown, never which address a link opens. The parse runs under a
   node budget: the standard's tree construction rebuilds every open formatting element at each new
   block, so 87 KB of unclosed `<b a=1><b a=2>...` built millions of nodes (13 s, 4.2 GB) in a review
-  round on 24 November 2026 — in a function every `get_thread` runs. Past the budget the message is
-  marked `htmlTooComplex` and neither its links nor its hidden text are read.
+  round on 24 November 2026 — in a function every `get_thread` runs. A time budget of one second
+  stands next to it, because parse5's own index of open formatting elements can grow quadratic
+  while the node count stays linear (38 s for 1 MB, found by grok-mailwarden); a real 1 MB mail
+  parses in under 0.2 s. Past either budget the message is marked `htmlTooComplex` and neither its
+  links nor its hidden text are read.
 - **Links are a list the server builds, never text in the mail.** `get_thread` with `links: true`
   returns each message's visible links as `{text, url, host}`. `url` is resolved by the URL standard
   — the parser a browser uses — so tabs, line breaks, a backslash or an `@` end up where they really
@@ -300,8 +307,9 @@ A crafted attachment filename tries to escape the download directory.
 - **A saved attachment is marked as a download, on Windows.** `download_attachment` writes the Mark of
   the Web (`Zone.Identifier`, Internet zone) next to the file, as a browser does for the same
   attachment saved from Gmail, so Windows asks before an executable runs and Office opens a macro
-  document in Protected View. `markedAsDownloaded: false` means the file system refused the stream
-  (FAT, exFAT, some network shares) and the file is unmarked. On macOS and Linux no mark is written:
+  document in Protected View. `markedAsDownloaded: false` means the mark could not be written — a
+  file system without streams (FAT, exFAT, some network shares), or the file already removed — and
+  the file is unmarked. The mark is tested on Windows only; CI runs on Linux and does not exercise it. On macOS and Linux no mark is written:
   the macOS quarantine attribute would need a native module or a call to `xattr`, and the field is
   absent there. `export_thread` writes Markdown or JSON and is not marked.
 - **Fenced downloads.** With `MAILWARDEN_DOWNLOAD_DIR` set, writes — `download_attachment` and

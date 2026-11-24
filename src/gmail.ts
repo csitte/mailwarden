@@ -1411,6 +1411,8 @@ export class Gmail {
     // because a newsletter's list is long (tracking URLs), and the answer is the reader's context.
     const withLinks = <T extends object>(trimmed: T, m: ParsedMessage): T & LinkFields => {
       if (opts.links !== true) return trimmed;
+      // The first parse already gave up: not again (it says htmlTooComplex).
+      if (m.htmlTooComplex) return { ...trimmed, links: [] };
       const { links, omitted } = linksOf(m.htmlBody);
       return { ...trimmed, links, ...(omitted > 0 ? { linksOmitted: omitted } : {}) };
     };

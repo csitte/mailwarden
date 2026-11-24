@@ -58,3 +58,11 @@ describe("Gmail.downloadAttachment marks what it saves", () => {
     expect("markedAsDownloaded" in out).toBe(false);
   });
 });
+
+describe("markAsDownloaded, grok round 0.33.0 (L7)", () => {
+  it("writes no mark where the file is already gone, so it creates no empty file", async () => {
+    const gone = path.join(os.tmpdir(), `mw-motw-gone-${process.pid}-${Date.now()}.exe`);
+    expect(await markAsDownloaded(gone, "win32")).toBe(false);
+    await expect(fs.stat(gone)).rejects.toThrow();
+  });
+});

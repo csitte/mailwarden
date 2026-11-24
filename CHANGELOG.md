@@ -23,9 +23,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   by a hand-written scanner; six review rounds found ways to show one address while a browser opens
   another, or to show a text the reader does not see, and a marker in the text is something the
   mail's own text can imitate — so it became a list the server builds from a standard parser's tree.
-  A mailto link's `host` is the domain of its address. The parse runs under a node budget: HTML
-  built so the standard's tree construction does quadratic work (87 KB took 13 s and 4.2 GB in a
-  review round) is not read, and the message says `htmlTooComplex: true`. New dependency: `parse5`
+  A mailto link's `host` is the domain of its address. Links whose text names another domain than
+  their host, or that hide text, come first, so a hundred filler links cannot push the one that
+  matters past the cap; `https:/x` (one slash, which a page resolves against its own host) is not
+  listed. The parse runs under a node budget and a one-second time budget: HTML built so the
+  standard's tree construction does quadratic work (87 KB took 13 s and 4.2 GB in a review round;
+  1 MB took 38 s in parse5's formatting index at a linear node count, found by grok-mailwarden) is
+  not read, and the message says `htmlTooComplex: true`; the Markdown export says so too. New dependency: `parse5`
   8.1.1 (MIT, with `entities`), pinned exactly.
 - **Text an HTML mail hides from its reader is counted.** Text under an element styled
   `display:none`, `opacity:0` or a zero height or width with overflow hidden, or marked `hidden`, or
@@ -41,10 +45,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`download_attachment` marks the saved file as downloaded from the Internet, on Windows.** It writes
   the Mark of the Web (`Zone.Identifier` stream, Internet zone), as a browser does for an attachment
   saved from Gmail, so Windows asks before an executable runs and Office opens a macro document in
-  Protected View. The answer's new `markedAsDownloaded` is `false` where the file system has no such
-  streams (FAT, exFAT, some network shares); the file is saved either way. macOS and Linux get no
-  mark, and the field is absent there. Seen in `a-bonus/google-docs-mcp` (since 17 November 2026) in
+  Protected View. The answer's new `markedAsDownloaded` is `false` where the mark could not be
+  written — a file system without such streams (FAT, exFAT, some network shares), or the file already
+  removed, by a virus scanner for instance, in which case no empty marked file is created in its
+  place; the file is saved either way. macOS and Linux get no mark, and the field is absent there. Seen in `a-bonus/google-docs-mcp` (since 17 November 2026) in
   the comparison round of 24 November 2026.
+
+### Changed
+- **Node.js 20.19 or later.** `parse5`'s `entities` 9 requires it; `engines` said `>=20` and now says
+  `>=20.19.0`. Found by grok-mailwarden in the review round for 0.33.0.
 
 ### Fixed
 - **Six comparison-table cells were short or wrong, found by csitte.at's re-survey of every column on

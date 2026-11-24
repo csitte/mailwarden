@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { hiddenTextLength, linksOf, browserTarget, MAX_LINKS } from "../src/html.js";
+import { hiddenTextLength, linksOf, browserTarget, MAX_LINKS, NODE_BUDGET, TIME_BUDGET_MS } from "../src/html.js";
 import { htmlToText, renderThread } from "../src/export.js";
 import { parseMessage, type ParsedMessage } from "../src/gmail.js";
 
@@ -541,5 +541,78 @@ describe("html.ts, seventh review", () => {
   it("takes a mail link's host from ?to= and after decoding", () => {
     expect(shownAs('<a href="mailto:?to=attacker@evil.example">x</a>')).toEqual([["x", "evil.example"]]);
     expect(shownAs('<a href="mailto:a@evil.example%2C@bank.example">x</a>')).toEqual([["x", "evil.example"]]);
+  });
+});
+
+// grok-mailwarden, review round for 0.33.0.
+describe("html.ts, grok round 0.33.0", () => {
+  const E = "https://evil.example/";
+
+  it("H1: stops markup that makes parse5's formatting index quadratic, by time", () => {
+    const html = Array.from({ length: 3000 }, (_, i) => `<b a=${i}>`).join("") + "<a>".repeat(323_000);
+    const t = performance.now();
+    expect(hiddenTextLength(html)).toBeUndefined();
+    expect(performance.now() - t).toBeLessThan(TIME_BUDGET_MS * 2.5);
+  });
+
+  it("M4: pins the budgets and where they bite, nodes exactly", () => {
+    expect(NODE_BUDGET).toBe(250_000);
+    expect(TIME_BUDGET_MS).toBe(1000);
+    const generous = 60_000;
+    // html, head and body are three nodes; each <i></i> is one more.
+    expect(hiddenTextLength("<i></i>".repeat(7), { nodes: 10, ms: generous })).toBe(0);
+    expect(hiddenTextLength("<i></i>".repeat(8), { nodes: 10, ms: generous })).toBeUndefined();
+    // Text that creates a node counts, text appended to one does not; comments count.
+    expect(hiddenTextLength("a<br>".repeat(3) + "a", { nodes: 10, ms: generous })).toBe(0);
+    expect(hiddenTextLength("a<br>".repeat(4), { nodes: 10, ms: generous })).toBeUndefined();
+    expect(hiddenTextLength("word ".repeat(10_000), { nodes: 10, ms: generous })).toBe(0);
+    expect(hiddenTextLength("<!--c-->".repeat(8), { nodes: 10, ms: generous })).toBeUndefined();
+    expect(linksOf("<i></i>".repeat(8), { nodes: 10, ms: generous })).toEqual({ links: [], omitted: 0, tooComplex: true });
+  });
+
+  it("M4: a 1 MB newsletter of tables stays under half the node budget", () => {
+    const row = '<tr><td style="padding:8px"><a href="https://shop.example/p">Product name</a></td><td style="padding:8px">12,50 EUR</td></tr>\n';
+    const html = "<table>" + row.repeat(Math.ceil(1_000_000 / row.length)) + "</table>";
+    expect(hiddenTextLength(html, { nodes: NODE_BUDGET / 2, ms: 60_000 })).toBe(0);
+  });
+
+  it("M4: lists two links with the same text and different targets", () => {
+    expect(linksOf('<a href="https://a.example/">Pay</a><a href="https://b.example/">Pay</a>').links.map((l) => l.host)).toEqual(["a.example", "b.example"]);
+  });
+
+  it("M3: puts links that stand out first, so filler cannot push them past the cap", () => {
+    const filler = Array.from({ length: 150 }, (_, i) => `<a href="https://shop.example/${i}">Item ${i}</a>`).join("");
+    const out = linksOf(filler + `<a href="${E}">www.paypal.com</a>` + `<a href="https://x.example/">pay<span style="display:none">zz</span>pal</a>`);
+    expect(out.links.slice(0, 2).map((l) => l.host)).toEqual(["evil.example", "x.example"]);
+    expect(out.links.length).toBe(MAX_LINKS);
+    expect(out.omitted).toBe(52);
+    // Text naming the link's own domain, a subdomain or a parent does not stand out.
+    const own = linksOf(filler + '<a href="https://www.shop.example/x">shop.example</a>');
+    expect(own.links[0].text).toBe("Item 0");
+  });
+
+  it("N9: ends a mail link's domain where a domain cannot go on", () => {
+    expect(linksOf('<a href="mailto:x@evil.example%3E">x</a>').links[0].host).toBe("evil.example");
+  });
+
+  it("N10: does not list https:/x or https:x, which a page resolves against its own host", () => {
+    expect(linksOf('<a href="https:/x.example/">a</a><a href="http:x.example">b</a>').links).toEqual([]);
+    const bs = String.fromCharCode(92);
+    // Two backslashes are an authority, as two slashes are; one is a relative path.
+    expect(linksOf(`<a href="https:${bs}${bs}x.example/">c</a>`).links.map((l) => l.host)).toEqual(["x.example"]);
+    expect(linksOf(`<a href="https:${bs}x.example/">d</a>`).links).toEqual([]);
+  });
+});
+
+describe("export, grok round 0.33.0 (M2)", () => {
+  it("says in the Markdown export when the HTML was not read, and parses it no second time", () => {
+    const m: ParsedMessage = {
+      id: "m1", threadId: "t1", labelIds: [], from: "a@x.example", to: "b@x.example", subject: "s", date: "d",
+      snippet: "", authentication: { unchecked: true }, plaintextBody: "", htmlBody: '<a href="https://x.example/">x</a>',
+      attachments: [], htmlTooComplex: true,
+    };
+    const out = renderThread("t1", [m], "markdown", new Date("2026-11-24T00:00:00Z"));
+    expect(out).toContain("- **HTML not read:**");
+    expect(out).not.toContain("**Links:**");
   });
 });
