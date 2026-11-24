@@ -8,30 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- **`get_thread` can list a message's links, with the address each one really opens.** `links: true`
-  adds `links`, the links of each message's HTML part as `{text, url}`: web, mail and phone
-  addresses only, each once, in document order, at most 100 (`linksOmitted` counts the rest). A link
-  that shows nothing (a tracking pixel) is left out, an image link is named by its `alt` text. The
-  HTML is read by parse5, an implementation of the HTML standard, and `url` is resolved by the URL
-  standard, so the address shown is the one a browser opens, whatever quotes, comments, line breaks,
-  backslashes or `@` the markup holds — which is what makes it safe to compare `text` with `url` for
-  phishing. The Markdown of `export_thread` lists the same links after each body, as inline code.
-  Opt-in because a newsletter's list is long. Before: an HTML-only mail reduced to text by `bodies:
-  "text"` lost every link target. Asked for in taylorwilsdon/google_workspace_mcp#476. Built first as
-  `text <url>` markers written into the text by a hand-written scanner; three review rounds found
-  ways to make it show one address while a browser opens another, and a marker in the text is
-  something the mail's own text can imitate, so it became a list the server builds, read by a
-  standard parser. New dependency: `parse5` 8.1.1 (MIT, with `entities`), pinned exactly.
+- **`get_thread` can list a message's links, with the host each one really opens.** `links: true`
+  adds `links`, the visible links of each message's HTML part as `{text, url, host}`: `<a>`,
+  image-map `<area>` and SVG links to web, mail and phone addresses, each pair of text and address
+  once, in document order, at most 100 (`linksOmitted` counts the rest). The HTML is read by parse5,
+  an implementation of the HTML standard, with scripting off as in a mail client; `url` is resolved
+  by the URL standard and `host` is the host that opens, the field to compare with `text`, since a
+  url can carry a name before an `@`. `text` is the link's visible text as inline styles show it
+  (an image's `alt` text, or empty with `image: true`); hidden text inside a link is left out and
+  marked `hiddenText: true`, and a hidden link is not listed. The Markdown of `export_thread` lists
+  the same links after each body, as inline code. Opt-in because a newsletter's list is long. Before:
+  an HTML-only mail reduced to text by `bodies: "text"` lost every link target. Asked for in
+  taylorwilsdon/google_workspace_mcp#476. Built first as `text <url>` markers written into the text
+  by a hand-written scanner; four review rounds found ways to show one address while a browser opens
+  another, or to show a text the reader does not see, and a marker in the text is something the
+  mail's own text can imitate — so it became a list the server builds from a standard parser's tree.
+  New dependency: `parse5` 8.1.1 (MIT, with `entities`), pinned exactly.
 - **Text an HTML mail hides from its reader is counted.** Text under an element styled
-  `display:none`, `opacity:0` or a zero height with overflow hidden, or marked `hidden`, or whose
-  nearest declared font size is zero or visibility hidden, is invisible in a mail client and read
+  `display:none`, `opacity:0` or a zero height or width with overflow hidden, or marked `hidden`, or
+  whose font size in effect is zero, visibility hidden or colour transparent, is invisible in a mail client and read
   only by an AI — the place to hide instructions for it. `get_thread` reports `hiddenTextChars` per
   message when its HTML part has any, and the Markdown export names the count. Nothing is removed: a
   version that left such text out of the text renderings took visible text with it in real mail
   (responsive blocks shown on a phone by an `@media` rule, among others), so the count is the signal
-  and the text stays. Read from the parse5 tree, with font size and visibility inherited as CSS
-  inherits them; a block an `@media` rule shows again (not a print rule) is not counted, with
-  everything inside it. Seen in `pylos-mcp` and `mailhub-mcp` in the comparison round of
+  and the text stays. Read from the parse5 tree, with font size (relative sizes included),
+  visibility and colour inherited as CSS inherits them; a block an `@media` rule for a screen shows
+  again with `!important` is not counted, with everything inside it. Seen in `pylos-mcp` and `mailhub-mcp` in the comparison round of
   24 November 2026.
 - **`download_attachment` marks the saved file as downloaded from the Internet, on Windows.** It writes
   the Mark of the Web (`Zone.Identifier` stream, Internet zone), as a browser does for an attachment

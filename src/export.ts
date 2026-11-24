@@ -18,7 +18,7 @@
 
 import type { ParsedMessage } from "./gmail.js";
 import { stripHiddenChars } from "./sanitize.js";
-import { linksOf } from "./html.js";
+import { linksOf, type MailLink } from "./html.js";
 
 export type ExportFormat = "markdown" | "json";
 
@@ -341,7 +341,13 @@ export function renderThread(
     // follows one, and the reader sees the address that opens next to the text that names it.
     const { links, omitted } = linksOf(m.htmlBody);
     if (links.length > 0) {
-      out.push("", "**Links:**", "", ...links.map((l) => `- ${codeSpan(l.text)}: ${codeSpan(l.url)}`));
+      const note = (l: MailLink) => [l.image ? "image" : "", l.hiddenText ? "hidden text inside" : ""].filter(Boolean).join(", ");
+      out.push(
+        "",
+        "**Links:**",
+        "",
+        ...links.map((l) => `- ${codeSpan(l.text) || "(no text)"}: ${codeSpan(l.url)}${note(l) ? ` (${note(l)})` : ""}`),
+      );
       if (omitted > 0) out.push(`- (${omitted} more not listed)`);
     }
   });

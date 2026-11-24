@@ -50,7 +50,7 @@ describe("hiddenTextLength", () => {
 
   it("does not count a block an @media rule shows on a phone (measured: Google Ads mails)", () => {
     const html =
-      "<style>@media only screen and (max-width:451px) { .mobile_only { display: block !important; } #m2 { max-height: none } }</style>" +
+      "<style>@media only screen and (max-width:451px) { .mobile_only { display: block !important; } #m2 { max-height: none !important } }</style>" +
       `<td class="x mobile_only" style="display:none">${injection}</td>` +
       `<div id="m2" style="max-height:0;overflow:hidden">${injection}</div>` +
       `<div class="desktop" style="display:none">${injection}</div>`;
@@ -180,36 +180,40 @@ describe("linksOf", () => {
   const NL = String.fromCharCode(10);
   const TAB = String.fromCharCode(9);
 
-  it("lists each link's text and the address that opens, in document order", () => {
+  it("lists each link's text, the address that opens and its host, in document order", () => {
     const html =
       '<p>Please <a href="https://x.example/confirm?a=1&amp;b=2">confirm here</a>.</p>' +
       "<a href='mailto:office@x.example'>write to us</a> <a href=tel:+431234>call</a>";
     expect(linksOf(html)).toEqual({
       links: [
-        { text: "confirm here", url: "https://x.example/confirm?a=1&b=2" },
-        { text: "write to us", url: "mailto:office@x.example" },
-        { text: "call", url: "tel:+431234" },
+        { text: "confirm here", url: "https://x.example/confirm?a=1&b=2", host: "x.example" },
+        { text: "write to us", url: "mailto:office@x.example", host: "" },
+        { text: "call", url: "tel:+431234", host: "" },
       ],
       omitted: 0,
     });
   });
 
-  it("lists an address once, under the first link that shows anything", () => {
+  it("lists each pair of text and address once, image links included", () => {
     const html =
-      '<a href="https://shop.example/"><img src="spacer.gif"></a>' +
+      '<a href="https://shop.example/"><img src="logo.png"></a>' +
       '<a href="https://shop.example/sale"><img src="s.gif"><img alt="Sale banner"></a>' +
+      '<a href="https://shop.example/sale">Read more</a>' +
       '<a href="https://shop.example/sale">Read more</a>' +
       '<a href="https://shop.example/">Home</a>';
     expect(linksOf(html).links).toEqual([
-      { text: "Sale banner", url: "https://shop.example/sale" },
-      { text: "Home", url: "https://shop.example/" },
+      { text: "", url: "https://shop.example/", host: "shop.example", image: true },
+      { text: "Sale banner", url: "https://shop.example/sale", host: "shop.example", image: true },
+      { text: "Read more", url: "https://shop.example/sale", host: "shop.example" },
+      { text: "Home", url: "https://shop.example/", host: "shop.example" },
     ]);
   });
 
   it("lists no address that is not a web, mail or phone address, and no relative one", () => {
     const html =
       '<a href="javascript:alert(1)">a</a><a href="#top">b</a><a href="cid:x">c</a>' +
-      '<a href="data:text/html,x">d</a><a>e</a><a href="/path">f</a><a href="www.x.example">g</a>';
+      '<a href="data:text/html,x">d</a><a>e</a><a href="/path">f</a><a href="www.x.example">g</a>' +
+      '<base href="https://evil.example/"><a href="relative">h</a>';
     expect(urls(html)).toEqual([]);
   });
 
@@ -229,10 +233,50 @@ describe("linksOf", () => {
     ["an unquoted target with `=` in it", "<a href=https://bank.example=@evil.example/>Your bank</a>"],
     ["a line break before @", `<a href="https://bank.example${NL}@evil.example/">Your bank</a>`],
     ["a backslash before @", "<a href='https://evil.example\\@bank.example/'>Your bank</a>"],
-  ])("shows the address a browser opens despite %s", (_name, html) => {
+    ["a user part that names the bank", "<a href='https://www.bank.example@evil.example/'>Your bank</a>"],
+    ["an encoded slash in the user part", "<a href='https://www.bank.example%2F@evil.example/'>Your bank</a>"],
+  ])("gives the host a browser opens despite %s", (_name, html) => {
     const link = linksOf(html).links.find((l) => l.text.includes("Your bank"));
     expect(link, html).toBeDefined();
+    expect(link!.host, html).toBe("evil.example");
     expect(new URL(link!.url).hostname, html).toBe("evil.example");
+  });
+
+  // Fourth review round: the TEXT half has to be what the reader sees.
+  it("leaves hidden text out of a link's text, and says that it did", () => {
+    const html = '<a href="https://paypal-secure-evil.example/login">paypal<span style="display:none">-secure-evil</span>.com</a>';
+    expect(linksOf(html).links).toEqual([
+      { text: "paypal.com", url: "https://paypal-secure-evil.example/login", host: "paypal-secure-evil.example", hiddenText: true },
+    ]);
+    const zero = '<a href="https://evil.example/"><span style="font-size:0">' + "x".repeat(300) + "</span>www.paypal.com</a>";
+    expect(linksOf(zero).links[0]).toMatchObject({ text: "www.paypal.com", hiddenText: true });
+  });
+
+  it("does not let a hidden link speak for a visible one, nor fill the list", () => {
+    const decoy = '<a href="https://evil.example/" style="display:none">evil.example</a>';
+    const shown = '<a href="https://evil.example/">www.paypal.com</a>';
+    expect(linksOf(decoy + shown).links).toEqual([{ text: "www.paypal.com", url: "https://evil.example/", host: "evil.example" }]);
+    const decoys = Array.from({ length: 150 }, (_, i) => `<a href="https://d${i}.example/" style="display:none">d</a>`).join("");
+    expect(linksOf(decoys + shown)).toEqual({ links: [{ text: "www.paypal.com", url: "https://evil.example/", host: "evil.example" }], omitted: 0 });
+  });
+
+  it("lists image-map areas and SVG links, and reads <noscript> as a mail client shows it", () => {
+    const html =
+      '<img usemap="#m"><map name="m"><area href="https://a.example/" alt="Area"></map>' +
+      '<svg><a href="https://s.example/"><text>SVG</text></a><a xlink:href="https://x.example/"><text>Old SVG</text></a></svg>' +
+      '<noscript><a href="https://n.example/">No script</a></noscript>';
+    expect(linksOf(html).links.map((l) => [l.text, l.host])).toEqual([
+      ["Area", "a.example"],
+      ["SVG", "s.example"],
+      ["Old SVG", "x.example"],
+      ["No script", "n.example"],
+    ]);
+  });
+
+  it("puts a space between blocks inside a link, and gives a nested link's text to the inner one only", () => {
+    expect(linksOf('<a href="https://x.example/"><div>Visit</div><div>paypal.com</div></a>').links[0].text).toBe("Visit paypal.com");
+    const nested = linksOf('<a href="https://o.example/">outer <table><tr><td><a href="https://i.example/">inner</a></td></tr></table></a>');
+    expect(nested.links.find((l) => l.host === "i.example")?.text).toBe("inner");
   });
 
   it("takes the first of two href attributes, as the standard does", () => {
@@ -240,31 +284,29 @@ describe("linksOf", () => {
   });
 
   it("resolves an address the way a browser does", () => {
-    expect(browserTarget(` ht${TAB}tps://x.example/a${NL}b `)).toBe("https://x.example/ab");
-    expect(browserTarget("HTTPS://X.Example/AbC")).toBe("https://x.example/AbC");
-    expect(browserTarget("https://bank.example@evil.example/")).toBe("https://bank.example@evil.example/");
+    expect(browserTarget(` ht${TAB}tps://x.example/a${NL}b `)?.href).toBe("https://x.example/ab");
+    expect(browserTarget("HTTPS://X.Example/AbC")?.href).toBe("https://x.example/AbC");
+    expect(browserTarget("https://bank.example@evil.example/")?.hostname).toBe("evil.example");
+    expect(browserTarget("https://xn--mnchen-3ya.example/")?.hostname).toBe("xn--mnchen-3ya.example");
     expect(browserTarget("/relative")).toBeUndefined();
     expect(browserTarget("javascript:alert(1)")).toBeUndefined();
   });
 
   it("ends a link where the parser does: at the next one, and at the end of the body", () => {
-    expect(linksOf('<a href="https://x.example/1">one <a href="https://x.example/2">two</a>').links).toEqual([
-      { text: "one", url: "https://x.example/1" },
-      { text: "two", url: "https://x.example/2" },
-    ]);
-    expect(linksOf('<p>end <a href="https://x.example/3">three').links).toEqual([{ text: "three", url: "https://x.example/3" }]);
+    expect(linksOf('<a href="https://x.example/1">one <a href="https://x.example/2">two</a>').links.map((l) => l.text)).toEqual(["one", "two"]);
+    expect(linksOf('<p>end <a href="https://x.example/3">three').links.map((l) => l.text)).toEqual(["three"]);
   });
 
-  it("does not take the text of a hidden script or template for a link's text", () => {
-    expect(linksOf('<a href="https://x.example/"><script>var a</script><template>t</template>Go</a>').links).toEqual([
-      { text: "Go", url: "https://x.example/" },
-    ]);
+  it("does not take the text of a script or template for a link's text", () => {
+    expect(linksOf('<a href="https://x.example/"><script>var a</script><template>t</template>Go</a>').links[0].text).toBe("Go");
   });
 
-  it("cuts a long link text and lists at most MAX_LINKS links", () => {
-    const long = linksOf(`<a href="https://x.example/">${"word ".repeat(100)}</a>`).links[0];
-    expect(long.text.length).toBe(200);
+  it("cuts a long link text by characters, never inside a surrogate pair, and lists at most MAX_LINKS links", () => {
+    const face = String.fromCodePoint(0x1f600);
+    const long = linksOf(`<a href="https://x.example/">${("a" + face).repeat(150)}</a>`).links[0];
+    expect(Array.from(long.text).length).toBe(200);
     expect(long.text.endsWith("...")).toBe(true);
+    expect(long.text.slice(0, -3)).toBe(Array.from(long.text.slice(0, -3)).join(""));
     const many = Array.from({ length: MAX_LINKS + 7 }, (_, i) => `<a href="https://x.example/${i}">l${i}</a>`).join("");
     const out = linksOf(many);
     expect(out.links.length).toBe(MAX_LINKS);
@@ -282,17 +324,47 @@ describe("linksOf", () => {
     expect(out).toContain("- ` here `: ` https://bill.example/42 `");
   });
 
-  it("stays fast on hostile markup and deep nesting", () => {
+  it("stays fast on hostile markup, nested links and deep nesting", () => {
     for (const html of [
       '<a href="https://x.example/">'.repeat(30_000),
       "<a ".repeat(40_000),
       "<div>".repeat(50_000) + '<a href="https://x.example/">deep</a>',
       '<a title="' + "<a ".repeat(40_000) + '" href="https://x.example/">t</a>',
+      // Fourth review: parse5 nests these, and a per-link walk over each subtree was quadratic.
+      '<a href="https://x.example/"><table><tr><td>'.repeat(20_000),
+      Array.from({ length: 20_000 }, (_, i) => `<a href="https://x.example/${i}"><table><tr><td>t`).join(""),
     ]) {
       const t = performance.now();
       linksOf(html);
       hiddenTextLength(html);
-      expect(performance.now() - t, html.slice(0, 30)).toBeLessThan(2000);
+      expect(performance.now() - t, html.slice(0, 30)).toBeLessThan(3000);
     }
+  });
+});
+
+// Fourth review round, the count: what a browser shows or hides, from inline styles.
+describe("hiddenTextLength, fourth review", () => {
+  const t = "Visible column text";
+  it.each([
+    ["a font shorthand with a weight before the size", `<div style="font-size:0"><div style="font: bold 14px Arial">${t}</div></div>`],
+    ["the hidden attribute overridden by an inline display", `<div hidden style="display:block">${t}</div>`],
+  ])("counts nothing for %s", (_n, html) => {
+    expect(hiddenTextLength(html)).toBe(0);
+  });
+
+  it.each([
+    ["an @media rule without !important, which cannot beat an inline style", `<style>@media screen{.x{display:block}}</style><div class="x" style="display:none">${t}</div>`],
+    ["an @media rule only for print", `<style>@media only print{.x{display:block!important}}</style><div class="x" style="display:none">${t}</div>`],
+    ["a relative font size under a zero one", `<div style="font-size:0"><span style="font-size:1em">${t}</span></div>`],
+    ["font-size:inherit under a zero one", `<div style="font-size:0"><span style="font-size:inherit">${t}</span></div>`],
+    ["a zero width with overflow hidden", `<div style="width:0;overflow:hidden">${t}</div>`],
+    ["transparent text", `<span style="color:transparent">${t}</span>`],
+    ["text with alpha zero", `<span style="color: rgba(0,0,0,0)">${t}</span>`],
+  ])("counts text hidden by %s", (_n, html) => {
+    expect(hiddenTextLength(html)).toBe(t.length);
+  });
+
+  it("does not count text a child colours again", () => {
+    expect(hiddenTextLength(`<div style="color:transparent"><span style="color:#000">${t}</span></div>`)).toBe(0);
   });
 });

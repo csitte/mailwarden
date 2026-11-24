@@ -179,25 +179,35 @@ Model can't tell quoted mail from a command.
   The text renderings (`bodies: "text"`, the Markdown export) still reduce HTML with the older
   scanner; they decide what text is shown, never which address a link opens.
 - **Links are a list the server builds, never text in the mail.** `get_thread` with `links: true`
-  returns each message's links as `{text, url}`, and `url` is resolved by the URL standard — the
-  parser a browser uses — so tabs, line breaks, a backslash or an `@` end up where they really lead,
-  and the host shown is the host that opens. A link whose text names one site and whose `url` is
-  another is the classic phishing shape, and the list puts both side by side. The list is not
-  written into the mail's text on purpose: a marker there is something the mail's own text can spell
-  out too.
+  returns each message's visible links as `{text, url, host}`. `url` is resolved by the URL standard
+  — the parser a browser uses — so tabs, line breaks, a backslash or an `@` end up where they really
+  lead, and `host` is the host that opens; it is the field to compare, because `url` can carry a
+  name before an `@` (`https://www.bank.example@evil.example/` opens evil.example). `text` is the
+  link's visible text as inline styles show it: a fourth review round found text hidden inside a link
+  (`paypal<span style="display:none">-secure-evil</span>.com`) making a link read as the address it
+  pointed to, so hidden text is left out of `text` and the link carries `hiddenText: true`, itself a
+  warning sign. A hidden link is not listed, so hidden decoys cannot speak for a visible link or
+  push it out of the list. A link whose text names one site and whose `host` is another is the
+  classic phishing shape. Limits: styles from a class are not read, so `text` can include text a
+  stylesheet hides; relative addresses are not listed (a `<base>` element is not applied); an
+  international host is shown in its `xn--` form, which unmasks a homograph and differs from a
+  Unicode spelling of the same name. The list is not written into the mail's text on purpose: a
+  marker there is something the mail's own text can spell out too.
 - **Text hidden by HTML is counted, never removed.** A mail can carry text its reader never sees —
-  under an element styled `display:none`, `opacity:0` or a zero height with overflow hidden, or
-  marked `hidden`, or where the nearest declared font size is zero or the nearest visibility hidden
-  — and only an AI reader gets it. A message whose HTML part has any carries `hiddenTextChars`, its
+  under an element styled `display:none`, `opacity:0` or a zero height or width with overflow
+  hidden, or marked `hidden`, or where the font size in effect is zero, the visibility hidden or the
+  colour transparent — and only an AI reader gets it. A message whose HTML part has any carries `hiddenTextChars`, its
   length, and `export_thread` names the count. The text itself stays in every rendering. That is
   deliberate and measured: a first version removed such elements from the text renderings, and over
   107 HTML mails of one mailbox it took visible text with them — templates hide blocks inline and
   show them on a phone through an `@media` rule (42 % of the text of a Google Ads mail). A count that
   is sometimes wrong costs a second look; text missing from what a person sees costs the mail.
-  Limits, stated rather than implied: a block that an `@media` rule (not one for print) shows again
-  by its class or id, `[class=...]` selectors included, is not counted, together with everything
-  inside it — which a sender can use as well as a template does; styles from a class outside
-  `@media`, text coloured like its background and positioning off screen are not seen. A
+  Limits, stated rather than implied: a block that an `@media` rule for a screen shows again with
+  `!important` (the only way a stylesheet beats an inline style) by its class or id, `[class=...]`
+  selectors included, is not counted, together with everything inside it — which a sender can use as
+  well as a template does, and a query that never matches counts the same; styles from a class
+  outside such a rule, text coloured like its background, positioning off screen and CSS escapes are
+  not seen. A
   newsletter's preview text is hidden the same way for an honest reason, usually under 150
   characters, so the count is a fact to weigh, not a verdict.
 - **Header text is not header syntax.** Where a header's *structure* matters — the `From` mailbox that
