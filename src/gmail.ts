@@ -16,7 +16,7 @@ import { canCarryColor, labelColorHint, type LabelColor } from "./labels.js";
 import { summarizeHistory, type HistorySummary, type RawHistoryRecord } from "./history.js";
 import { buildUndo, type UndoPlan } from "./undo.js";
 import type { ThreadTail } from "./followups.js";
-import { renderThread, type ExportFormat } from "./export.js";
+import { hiddenTextLength, renderThread, type ExportFormat } from "./export.js";
 import {
   checkThreadOptions,
   selectMessages,
@@ -160,10 +160,16 @@ export interface ParsedMessage {
   plaintextBody: string;
   htmlBody: string;
   attachments: Attachment[];
+  /**
+   * Characters of text the HTML body keeps from a reader by inline styles or the `hidden`
+   * attribute (display:none, font-size:0, ...). Present only when there is some. A newsletter's
+   * preview text is hidden this way; a long stretch is where instructions to an AI reader hide.
+   */
+  hiddenTextChars?: number;
 }
 
 /** A message as Gmail's `metadata` format can answer for it: headers and labels, no content. */
-export type MessageHeaders = Omit<ParsedMessage, "plaintextBody" | "htmlBody" | "attachments">;
+export type MessageHeaders = Omit<ParsedMessage, "plaintextBody" | "htmlBody" | "attachments" | "hiddenTextChars">;
 
 /** What `getThread` may be asked for beyond the thread id. */
 export interface GetThreadOptions extends MessageSelection {
@@ -824,6 +830,7 @@ export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
   const raw = (n: string) => headers.find((x) => x.name?.toLowerCase() === n.toLowerCase())?.value ?? "";
   const h = (n: string) => decodeRfc2047(raw(n));
   const { text, html } = collectBodies(m.payload ?? undefined);
+  const hidden = hiddenTextLength(html);
   return {
     id: m.id!,
     threadId: m.threadId!,
@@ -837,6 +844,7 @@ export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
     plaintextBody: text,
     htmlBody: html,
     attachments: collectAttachments(m),
+    ...(hidden > 0 ? { hiddenTextChars: hidden } : {}),
   };
 }
 

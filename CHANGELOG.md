@@ -18,6 +18,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `alt` text, or is left out with no `alt`, which drops tracking pixels. A real text/plain part is
   returned as the sender wrote it, as before. Asked for in taylorwilsdon/google_workspace_mcp#476;
   found in the comparison round of 24 November 2026.
+- **Text an HTML mail hides from its reader is counted, and left out of text renderings.** Text in an
+  element styled `display:none`, `visibility:hidden`, `font-size:0`, `opacity:0` or a zero height with
+  overflow hidden, or marked `hidden`, is invisible in a mail client and read only by an AI — the
+  place to hide instructions for it. `get_thread` now reports `hiddenTextChars` per message when there
+  is any, the text renderings (`bodies: "text"`/`"new"` on an HTML-only mail, the Markdown export) leave
+  that text out, and the export names the count. A `font-size:0` wrapper whose content sets a size
+  again, which email templates use to lay out columns, is not hidden and is kept. Only inline styles
+  and the attribute are read; an element whose end is not found is left in. A newsletter's preview
+  text is hidden the same way, so the count is reported, not judged. Seen in `pylos-mcp` and
+  `mailhub-mcp` in the comparison round of 24 November 2026.
 
 ### Fixed
 - **The comparison table understated `taylorwilsdon` on token encryption.** In its OAuth 2.1 HTTP

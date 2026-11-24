@@ -170,6 +170,19 @@ Model can't tell quoted mail from a command.
   can never change what a human sees: VS15/VS16 stay, because they decide how a legitimate emoji
   renders. The fence itself stays on the text copy — it is a marker for a model reading prose, not
   something to bury inside JSON a client parses.
+- **Text hidden by HTML is counted, and left out of text renderings.** A mail can carry text its
+  reader never sees — in an element styled `display:none`, `visibility:hidden`, `font-size:0`,
+  `opacity:0` or a zero height with overflow hidden, or marked `hidden` — and only an AI reader gets
+  it. Every message's `hiddenTextChars` says how much there is, and the text renderings
+  (`get_thread` with `bodies: "text"`/`"new"` on an HTML-only mail, `export_thread`'s Markdown) leave
+  it out, as the reader's client does. In `bodies: "full"` it is still inside `htmlBody`,
+  with the count beside it. Limits, stated rather than implied: only inline styles and the attribute
+  are read, not a `<style>` block or a class, nor text coloured like its background; an element whose
+  end is not found is left in, because guessing where a browser ends it could remove text the reader
+  does see; and a newsletter's preview text is hidden the same way for an honest reason, so a count
+  is a fact to weigh, not a verdict. A text/plain part is never shown next to an HTML one in Gmail's
+  web client, and its content is not compared with the HTML: text only that part carries reaches
+  `bodies: "text"` unmarked.
 - **Header text is not header syntax.** Where a header's *structure* matters — the `From` mailbox that
   keys `triage_digest` / `list_subscriptions` grouping and the `bulk_unsubscribe` per-sender dedupe,
   the `Reply-To` domains behind `replyToMismatch` — it is read off the raw wire form with a scanner
