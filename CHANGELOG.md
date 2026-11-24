@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.33.0] - 2026-11-24
+
 ### Added
 - **`get_thread` can list a message's links, with the host each one really opens.** `links: true`
   adds `links`, the visible links of each message's HTML part as `{text, url, host}`: `<a>`,
@@ -2826,7 +2828,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.32.1...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/csitte/mailwarden/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/csitte/mailwarden/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/csitte/mailwarden/compare/v0.31.2...v0.32.0
 [0.31.2]: https://github.com/csitte/mailwarden/compare/v0.31.1...v0.31.2
