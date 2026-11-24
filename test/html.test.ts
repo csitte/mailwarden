@@ -421,7 +421,7 @@ describe("html.ts, fifth review", () => {
     ["an eight-digit hex colour with alpha zero", '<span style="color:#ff000000">'],
     ["rgba with spaces and a slash", '<span style="color:rgba(0 0 0 / 0)">'],
     ["a negative opacity", '<span style="opacity:-1">'],
-    ["transform:scale(0)", '<span style="transform:scale(0)">'],
+    ["transform:scale(0) on an inline-block", '<span style="display:inline-block;transform:scale(0)">'],
     ["clip-path:inset(50%)", '<span style="clip-path:inset(50%)">'],
     ["the visually-hidden clip", '<span style="position:absolute;clip:rect(0 0 0 0)">'],
   ])("leaves text hidden by %s out of a link's text", (_n, open) => {
@@ -436,5 +436,79 @@ describe("html.ts, fifth review", () => {
   it("gives a mail link the domain of its address, and a phone link no host", () => {
     expect(one('<a href="mailto:attacker@evil.example?subject=x">support@paypal.com</a>')[0]).toMatchObject({ host: "evil.example" });
     expect(one('<a href="tel:+43123">call</a>')[0]).toMatchObject({ host: "" });
+  });
+});
+
+// Sixth review round.
+describe("html.ts, sixth review", () => {
+  const E = "https://evil.example/";
+  const one = (html: string) => linksOf(html).links;
+  const shownAs = (html: string) => one(html).map((l) => [l.text, l.host]);
+
+  it("counts nodes, not words: long plain text and paragraphs stay inside the budget", () => {
+    const words = "lorem ipsum dolor sit amet, ".repeat(32_000);
+    expect(hiddenTextLength(`<div>${words}</div>`)).toBe(0);
+    expect(hiddenTextLength("<p>A short paragraph of an ordinary letter.</p>".repeat(20_000))).toBe(0);
+  });
+
+  it("does not throw on a malformed escape in a mail address", () => {
+    expect(shownAs('<a href="mailto:a%ZZ@evil.example">x</a><a href="mailto:a%@evil.example">y</a>')).toEqual([
+      ["x", "evil.example"],
+      ["y", "evil.example"],
+    ]);
+  });
+
+  it("lists an area only when a visible image uses its map, by #name", () => {
+    const area = (map: string, img: string) => `${img}<map ${map}><area href="${E}" alt="Area"></map>`;
+    expect(shownAs(`<area href="${E}" alt="x">`)).toEqual([]);
+    expect(shownAs(area('name="m"', '<img src=a usemap="#m" style="display:none">'))).toEqual([]);
+    expect(shownAs(area('name="m"', '<img src=a usemap="m">'))).toEqual([]);
+    expect(shownAs(area('name="m"', '<img src=a usemap="#m">'))).toEqual([["Area", "evil.example"]]);
+    expect(shownAs(area('id="m"', '<img src=a usemap="#m">'))).toEqual([["Area", "evil.example"]]);
+    expect(shownAs(`<map name="u"><a href="${E}">Plain link in a map</a></map>`)).toEqual([["Plain link in a map", "evil.example"]]);
+  });
+
+  it("does not list SVG text that SVG does not draw", () => {
+    expect(shownAs(`<svg><a href="${E}">bare text<desc>desc</desc></a></svg>`)).toEqual([]);
+    expect(shownAs(`<svg><a href="${E}"><text>drawn</text></a></svg>`)).toEqual([["drawn", "evil.example"]]);
+    expect(shownAs(`<svg><text><a href="${E}">in text</a></text></svg>`)).toEqual([["in text", "evil.example"]]);
+    expect(shownAs(`<svg><foreignObject><a href="${E}">html again</a></foreignObject></svg>`)).toEqual([["html again", "evil.example"]]);
+  });
+
+  it.each([
+    ["opacity:0px", "opacity:0px"],
+    ["opacity:0.5;opacity:0px", "opacity:0.5;opacity:0px"],
+    ["opacity:0 garbage", "opacity:0 garbage"],
+    ["font-size:0zz", "font-size:0zz"],
+    ["height:0zz;overflow:hidden", "display:block;height:0zz;overflow:hidden"],
+    ["a later font shorthand", "font-size:0;font:14px arial"],
+    ["a scale on an inline link", "transform:scale(0)"],
+  ])("keeps a link visible under %s, which CSS drops or does not apply", (_n, style) => {
+    expect(shownAs(`<a href="${E}" style="${style}">paypal.com</a>`)).toEqual([["paypal.com", "evil.example"]]);
+  });
+
+  it.each([
+    ["display:inline", '<div style="display:inline;height:0;overflow:hidden">'],
+    ["display:contents", '<div style="display:contents;height:0;overflow:hidden;opacity:0">'],
+    ["display:table-cell", '<div style="display:table-cell;height:0;overflow:hidden">'],
+    ["a min-height", '<div style="min-height:20px;height:0;overflow:hidden">'],
+    ["an open dialog by its style", '<dialog style="display:block">'],
+  ])("does not hide a block under %s", (_n, open) => {
+    const close = open.startsWith("<dialog") ? "</dialog>" : "</div>";
+    expect(shownAs(`${open}<a href="${E}">paypal.com</a>${close}`)).toEqual([["paypal.com", "evil.example"]]);
+  });
+
+  it.each([
+    ["color:inherit", "color:inherit"],
+    ["color:currentcolor", "color:currentcolor"],
+    ["an invalid colour", "color:bogus"],
+  ])("keeps text transparent under %s", (_n, child) => {
+    const html = `<a href="https://paypal-secure-evil.example/">paypal<span style="color:transparent"><b style="${child}">-secure-evil</b></span>.example</a>`;
+    expect(one(html)).toEqual([{ text: "paypal.example", url: "https://paypal-secure-evil.example/", host: "paypal-secure-evil.example", hiddenText: true }]);
+  });
+
+  it.each(["larger", "unset", "calc(1em)", "bogus"])("keeps a zero size zero under font-size:%s", (size) => {
+    const html = `<a href="https://paypal-secure-evil.example/">paypal<span style="font-size:0"><b style="font-size:${size}">-secure-evil</b></span>.example</a>`;
+    expect(one(html)[0]).toMatchObject({ text: "paypal.example", hiddenText: true });
   });
 });

@@ -16,10 +16,11 @@
  * read at any price; `parseMessage` runs this on every message of every thread.
  *
  * Which text a reader sees is a question of CSS, answered here from inline styles only, with
- * inheritance (`visibleBelow`). A fourth review round showed why that matters for links: text hidden
- * inside a link made `paypal<hidden>-secure-evil</hidden>.com` read as the address it pointed to. So a
- * link's text is its visible text, a link that hides some says so, and a link shows only if something
- * in it does.
+ * inheritance (`visibleBelow`) and CSS's own rules for what it drops: an invalid value is ignored,
+ * the later of two declarations wins unless the earlier is `!important`. A fourth review round
+ * showed why that matters for links: text hidden inside a link made
+ * `paypal<hidden>-secure-evil</hidden>.com` read as the address it pointed to. So a link's text is its
+ * visible text, a link that hides some says so, and a link shows only if something in it does.
  *
  * Links are returned as a list the server builds, never written into the mail's text: a marker in
  * the text is something the mail's own text can spell out too. A target is resolved with the URL
@@ -40,17 +41,23 @@ const HTML_NS = "http://www.w3.org/1999/xhtml";
 const SVG_NS = "http://www.w3.org/2000/svg";
 const XLINK_NS = "http://www.w3.org/1999/xlink";
 
-/** At most this many nodes per parse; a real mail of 1 MB builds well under a tenth of it. */
+/**
+ * At most this many nodes per parse. Counted are nodes the parser creates — elements, comments and
+ * new text nodes; text appended to an existing text node is not a node. A 1 MB newsletter of tables
+ * builds well under half of it, 1 MB of plain paragraphs about a tenth (review round six measured
+ * both, after a first count that took every word for a node).
+ */
 export const NODE_BUDGET = 250_000;
 
 class TooComplex extends Error {}
 
-/** parse5's own tree adapter, counting every node it makes and stopping at `NODE_BUDGET`. */
+/** parse5's own tree adapter, counting every node it creates and stopping at `NODE_BUDGET`. */
 function budgetedAdapter(): TreeAdapter<DefaultTreeAdapterMap> {
   let made = 0;
   const count = () => {
     if (++made > NODE_BUDGET) throw new TooComplex();
   };
+  const isText = (n: Node | undefined) => n !== undefined && defaultTreeAdapter.isTextNode(n);
   return {
     ...defaultTreeAdapter,
     createElement(tagName, namespaceURI, attrs) {
@@ -65,12 +72,15 @@ function budgetedAdapter(): TreeAdapter<DefaultTreeAdapterMap> {
       count();
       return defaultTreeAdapter.createCommentNode(data);
     },
+    // The default adapter appends to a text node already there and creates one otherwise; only the
+    // second is a node.
     insertText(parentNode, text) {
-      count();
+      if (!isText(parentNode.childNodes[parentNode.childNodes.length - 1])) count();
       defaultTreeAdapter.insertText(parentNode, text);
     },
     insertTextBefore(parentNode, text, referenceNode) {
-      count();
+      const at = parentNode.childNodes.indexOf(referenceNode);
+      if (!isText(parentNode.childNodes[at - 1])) count();
       defaultTreeAdapter.insertTextBefore(parentNode, text, referenceNode);
     },
   };
@@ -88,21 +98,24 @@ function parseMail(html: string): DefaultTreeAdapterTypes.Document | undefined {
 
 /**
  * Elements whose content a reader does not see as text: scripts, styles, the head, templates, the
- * fallback content of embeds, frames and media, ruby's fallback parentheses and a datalist's options.
- * An `<object>` with `data` shows the object, without it its content (handled in the walk).
+ * fallback content of embeds, frames and media, ruby's fallback parentheses, a datalist's options,
+ * and SVG's descriptions. An `<object>` with `data` shows the object, without it its content.
  */
 const NOT_SHOWN = new Set([
   "script", "style", "head", "title", "template", "noembed", "noframes", "iframe",
-  "video", "audio", "rp", "datalist",
+  "video", "audio", "rp", "datalist", "desc", "metadata",
 ]);
+
+/** SVG elements whose text SVG renders; text anywhere else in an SVG is not drawn. */
+const SVG_TEXT = new Set(["text", "tspan", "textPath"]);
 
 /** Elements that start a new line: their text is not glued to the text before it. */
 const BLOCKS = new Set(
   "address article aside blockquote br dd div dl dt figcaption figure footer form h1 h2 h3 h4 h5 h6 header hr li main nav ol p pre section table tbody td th thead tr ul".split(" "),
 );
 
-/** Elements whose box a width or height does not size: a zero there clips nothing. */
-const UNSIZED = new Set(
+/** Elements that are inline or table parts unless a style says otherwise: no box to size or scale. */
+const INLINE_BY_DEFAULT = new Set(
   "a abbr b bdi bdo big cite code data dfn em font i kbd label mark q s samp small span strike strong sub sup time tt u var td th tr tbody thead tfoot".split(" "),
 );
 
@@ -173,7 +186,71 @@ function splitDeclarations(css: string): string[] {
   return out;
 }
 
-/** The declarations of a style attribute or rule body, in order. */
+const GLOBAL_VALUES = new Set(["inherit", "initial", "unset", "revert", "revert-layer"]);
+const NUMBER = String.raw`[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?`;
+const LENGTH = new RegExp(`^(?:${NUMBER}(?:px|pt|pc|cm|mm|in|q|em|rem|ex|ch|vw|vh|vmin|vmax|%)|[+-]?0+(?:\\.0*)?)$`);
+const NUMBER_OR_PERCENT = new RegExp(`^${NUMBER}%?$`);
+const FONT_SIZE_WORDS = new Set("xx-small x-small small medium large x-large xx-large xxx-large larger smaller math".split(" "));
+const DISPLAY_VALUES = new Set(
+  ("none block inline inline-block flex inline-flex grid inline-grid flow-root contents list-item table " +
+    "inline-table table-row table-cell table-row-group table-header-group table-footer-group table-column " +
+    "table-column-group table-caption ruby run-in").split(" "),
+);
+/** CSS's named colours, so that a word that is not one is dropped as CSS drops it. */
+const NAMED_COLORS = new Set(
+  ("aliceblue antiquewhite aqua aquamarine azure beige bisque black blanchedalmond blue blueviolet brown burlywood " +
+    "cadetblue chartreuse chocolate coral cornflowerblue cornsilk crimson cyan darkblue darkcyan darkgoldenrod darkgray " +
+    "darkgreen darkgrey darkkhaki darkmagenta darkolivegreen darkorange darkorchid darkred darksalmon darkseagreen " +
+    "darkslateblue darkslategray darkslategrey darkturquoise darkviolet deeppink deepskyblue dimgray dimgrey dodgerblue " +
+    "firebrick floralwhite forestgreen fuchsia gainsboro ghostwhite gold goldenrod gray green greenyellow grey honeydew " +
+    "hotpink indianred indigo ivory khaki lavender lavenderblush lawngreen lemonchiffon lightblue lightcoral lightcyan " +
+    "lightgoldenrodyellow lightgray lightgreen lightgrey lightpink lightsalmon lightseagreen lightskyblue lightslategray " +
+    "lightslategrey lightsteelblue lightyellow lime limegreen linen magenta maroon mediumaquamarine mediumblue " +
+    "mediumorchid mediumpurple mediumseagreen mediumslateblue mediumspringgreen mediumturquoise mediumvioletred " +
+    "midnightblue mintcream mistyrose moccasin navajowhite navy oldlace olive olivedrab orange orangered orchid " +
+    "palegoldenrod palegreen paleturquoise palevioletred papayawhip peachpuff peru pink plum powderblue purple " +
+    "rebeccapurple red rosybrown royalblue saddlebrown salmon sandybrown seagreen seashell sienna silver skyblue " +
+    "slateblue slategray slategrey snow springgreen steelblue tan teal thistle tomato turquoise violet wheat white " +
+    "whitesmoke yellow yellowgreen transparent currentcolor canvastext linktext visitedtext activetext buttontext " +
+    "fieldtext graytext highlighttext marktext accentcolortext canvas buttonface field highlight mark accentcolor"
+  ).split(" "),
+);
+
+/**
+ * Whether a value is one a browser would keep for `prop`. An invalid one is dropped, as CSS drops it:
+ * `opacity:0px` or `font-size:0zz` hide nothing (review round six), `display:none;display:bogus`
+ * stays none. Properties this module does not read are kept as written.
+ */
+function valid(prop: string, value: string): boolean {
+  if (GLOBAL_VALUES.has(value)) return true;
+  switch (prop) {
+    case "display":
+      return DISPLAY_VALUES.has(value) || /^(?:block|inline) (?:flow|flow-root|flex|grid|table)$/.test(value);
+    case "opacity":
+      return NUMBER_OR_PERCENT.test(value);
+    case "font-size":
+      return LENGTH.test(value) || FONT_SIZE_WORDS.has(value) || /^(?:calc|min|max|clamp)\(.*\)$/.test(value);
+    case "height":
+    case "max-height":
+    case "width":
+    case "max-width":
+    case "min-height":
+    case "min-width":
+      return LENGTH.test(value) || /^(?:auto|none|fit-content|min-content|max-content)$/.test(value) || /^(?:calc|min|max|clamp)\(.*\)$/.test(value);
+    case "visibility":
+      return value === "visible" || value === "hidden" || value === "collapse";
+    case "overflow":
+    case "overflow-x":
+    case "overflow-y":
+      return /^(?:visible|hidden|clip|scroll|auto)(?: (?:visible|hidden|clip|scroll|auto))?$/.test(value);
+    case "color":
+      return NAMED_COLORS.has(value) || /^#(?:[0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/.test(value) || /^(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color|color-mix|light-dark)\(.*\)$/.test(value);
+    default:
+      return true;
+  }
+}
+
+/** The declarations of a style attribute or rule body, in order, the invalid ones dropped. */
 function declarations(css: string): Declaration[] {
   const out: Declaration[] = [];
   for (const part of splitDeclarations(withoutComments(css).toLowerCase())) {
@@ -182,35 +259,27 @@ function declarations(css: string): Declaration[] {
     let value = part.slice(i + 1).replace(/\s+/g, " ").trim();
     const important = /!\s*important$/.test(value);
     if (important) value = value.replace(/\s*!\s*important$/, "");
-    out.push({ prop: part.slice(0, i).trim(), value, important });
+    const prop = part.slice(0, i).trim();
+    if (valid(prop, value)) out.push({ prop, value, important });
   }
   return out;
 }
 
-const DISPLAY_VALUES = new Set(
-  ("none block inline inline-block flex inline-flex grid inline-grid flow-root contents list-item table " +
-    "inline-table table-row table-cell table-row-group table-header-group table-footer-group table-column " +
-    "table-column-group table-caption run-in initial inherit unset revert").split(" "),
-);
-
-/** Whether a value is one a browser would keep for `prop` (an invalid one is dropped, as CSS drops it). */
-function valid(prop: string, value: string): boolean {
-  return prop !== "display" || DISPLAY_VALUES.has(value) || /^(?:block|inline) (?:flow|flow-root|flex|grid|table)$/.test(value);
-}
-
-/**
- * The value of `prop` that wins: the last valid `!important` declaration, else the last valid one.
- * An invalid value is dropped, as CSS drops it (`display:none;display:bogus` stays none).
- */
-function cssValue(decls: Declaration[], prop: string): string | undefined {
-  let normal: string | undefined;
-  let important: string | undefined;
+/** The declaration among `props` that wins: the last `!important` one, else the last one. */
+function winning(decls: Declaration[], ...props: string[]): Declaration | undefined {
+  let normal: Declaration | undefined;
+  let important: Declaration | undefined;
   for (const d of decls) {
-    if (d.prop !== prop || !valid(prop, d.value)) continue;
-    if (d.important) important = d.value;
-    else normal = d.value;
+    if (!props.includes(d.prop)) continue;
+    if (d.important) important = d;
+    else normal = d;
   }
   return important ?? normal;
+}
+
+/** The value of `prop` that wins. */
+function cssValue(decls: Declaration[], prop: string): string | undefined {
+  return winning(decls, prop)?.value;
 }
 
 /** `0`, `0px`, `0.0em`, `.0`, `0%`: a length or number that is zero. */
@@ -220,36 +289,40 @@ function isZero(v: string | undefined): boolean {
 
 /** An opacity a browser clamps to zero: zero or negative. */
 function noOpacity(v: string | undefined): boolean {
-  if (v === undefined) return false;
+  if (v === undefined || GLOBAL_VALUES.has(v)) return false;
   const n = v.endsWith("%") ? parseFloat(v) / 100 : parseFloat(v);
   return !Number.isNaN(n) && n <= 0;
 }
 
 /** The size inside a `font` shorthand (`bold 14px/20px arial`), or undefined when it names none. */
-function shorthandSize(font: string | undefined): string | undefined {
-  if (font === undefined) return undefined;
+function shorthandSize(font: string): string | undefined {
   for (const token of font.split(" ")) {
     const size = token.split("/")[0];
-    if (/^(?:\d+(?:\.\d*)?|\.\d+)(?:[a-z]+|%)?$/.test(size) && !/^\d+$/.test(size)) return size;
-    if (/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(size) && isZero(size)) return size;
+    if (LENGTH.test(size) || FONT_SIZE_WORDS.has(size)) return size;
   }
   return undefined;
 }
 
-/** The font size declarations set, by `font-size` or the `font` shorthand; undefined when none. */
+/**
+ * The font size the winning declaration sets — `font-size` or the `font` shorthand, whichever
+ * comes last (or is `!important`) — or undefined when none does.
+ */
 function fontSize(decls: Declaration[]): string | undefined {
-  const size = cssValue(decls, "font-size") ?? shorthandSize(cssValue(decls, "font"));
-  return size === "" ? undefined : size;
+  const d = winning(decls, "font-size", "font");
+  if (d === undefined) return undefined;
+  return d.prop === "font-size" ? d.value : shorthandSize(d.value);
 }
 
-/** A size relative to the parent's: zero under a zero parent, whatever its factor. */
-function isRelative(size: string): boolean {
-  return size === "inherit" || size === "smaller" || /(?:em|ex|ch|%)$/.test(size);
+/** Whether a font size leaves a zero size above it at zero: anything relative to the parent's. */
+function keepsParentZero(size: string): boolean {
+  return (
+    size === "inherit" || size === "unset" || size === "larger" || size === "smaller" ||
+    /(?:em|ex|ch|%)$/.test(size) || (/^(?:calc|min|max|clamp)\(/.test(size) && /em|%|ex|ch/.test(size))
+  );
 }
 
 /** `transparent`, a hex colour with alpha zero, or an rgb/rgba/hsl/hsla colour with alpha zero. */
-function isTransparent(color: string | undefined): boolean {
-  if (color === undefined) return false;
+function isTransparent(color: string): boolean {
   if (color === "transparent") return true;
   const hex = /^#([0-9a-f]{4}|[0-9a-f]{8})$/.exec(color);
   if (hex) return /^0+$/.test(hex[1].length === 4 ? hex[1].slice(3) : hex[1].slice(6));
@@ -259,10 +332,10 @@ function isTransparent(color: string | undefined): boolean {
   return parts.length === 4 && isZero(parts[3]);
 }
 
-/** A transform that scales to nothing, a clip path that leaves nothing, or the "visually hidden" clip. */
-function clipsAway(d: Declaration[]): boolean {
+/** A transform that scales to nothing (boxes only), a clip path that leaves nothing, or the visually-hidden clip. */
+function clipsAway(d: Declaration[], box: boolean): boolean {
   const transform = cssValue(d, "transform") ?? "";
-  if (/scale[xy]?\(\s*0(?:\.0*)?\s*(?:[,)])/.test(transform)) return true;
+  if (box && /scale[xy]?\(\s*0(?:\.0*)?\s*(?:[,)])/.test(transform)) return true;
   const clipPath = cssValue(d, "clip-path") ?? "";
   if (/inset\(\s*50%/.test(clipPath) || /circle\(\s*0/.test(clipPath)) return true;
   const clip = (cssValue(d, "clip") ?? "").replace(/\s+/g, "");
@@ -341,25 +414,20 @@ function shownByMedia(styleTexts: string[]): Set<string> {
   return names;
 }
 
-/** What one pass over the document finds before the walk: style sheets and the image maps in use. */
-function survey(doc: Node): { styles: string[]; usedMaps: Set<string> } {
-  const styles: string[] = [];
-  const usedMaps = new Set<string>();
+/** The text of every `<style>` element, wherever the parser put it. */
+function styleTexts(doc: Node): string[] {
+  const out: string[] = [];
   const stack: Node[] = [doc];
   while (stack.length > 0) {
     const n = stack.pop()!;
-    if (isElement(n)) {
-      if (n.tagName === "style") {
-        styles.push(n.childNodes.map((c) => (c.nodeName === "#text" ? (c as DefaultTreeAdapterTypes.TextNode).value : "")).join(""));
-        continue;
-      }
-      const usemap = attr(n, "usemap");
-      if (usemap !== undefined) usedMaps.add(usemap.trim().replace(/^#/, ""));
+    if (isElement(n) && n.tagName === "style") {
+      out.push(n.childNodes.map((c) => (c.nodeName === "#text" ? (c as DefaultTreeAdapterTypes.TextNode).value : "")).join(""));
+      continue;
     }
     const kids = childrenOf(n);
     for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
   }
-  return { styles, usedMaps };
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -375,16 +443,17 @@ interface Visibility {
   font: boolean;
   /** The text colour in effect is transparent. Hides text only. */
   transparent: boolean;
+  /** Inside SVG but outside `<text>`: SVG draws no text here. */
+  svgNoText: boolean;
   /** A block above is one an `@media` rule shows again: nothing below it is hidden by its inline style. */
   shownAgain: boolean;
 }
 
-const VISIBLE: Visibility = { block: false, visibility: false, font: false, transparent: false, shownAgain: false };
-const SHOWN_AGAIN: Visibility = { ...VISIBLE, shownAgain: true };
+const VISIBLE: Visibility = { block: false, visibility: false, font: false, transparent: false, svgNoText: false, shownAgain: false };
 
 /** Whether text under this state is hidden. */
 function hidesText(v: Visibility): boolean {
-  return v.block || v.visibility || v.font || v.transparent;
+  return v.block || v.visibility || v.font || v.transparent || v.svgNoText;
 }
 
 /** Whether an image under this state is hidden: font size and colour do not hide an image. */
@@ -393,48 +462,66 @@ function hidesImage(v: Visibility): boolean {
 }
 
 /** The visibility below `e`, given the one above it. */
-function visibleBelow(e: Element, above: Visibility, shown: Set<string>, usedMaps: Set<string>): Visibility {
-  if (above.shownAgain) return above;
+function visibleBelow(e: Element, above: Visibility, shown: Set<string>): Visibility {
+  // Where SVG draws text, and where HTML content inside it (foreignObject) starts again.
+  // An <svg> draws no text of its own; a <text> (and what is inside it) does; HTML inside an SVG
+  // (<foreignObject>) is HTML again.
+  let svgNoText = above.svgNoText;
+  if (e.namespaceURI === SVG_NS) {
+    if (SVG_TEXT.has(e.tagName)) svgNoText = false;
+    else if (e.tagName === "svg") svgNoText = true;
+  } else if (e.namespaceURI === HTML_NS) {
+    svgNoText = false;
+  }
+  if (above.shownAgain) return { ...above, svgNoText };
   const id = attr(e, "id");
   const classes = (attr(e, "class") ?? "").split(/\s+/);
   // A block an @media rule shows again shows its content with it: `.desktop_hide table` re-shows
   // the tables inside too (a template seen in real mail, 24 Nov 2026). It cannot show what an
   // ancestor does not render, so a hidden ancestor still hides it (review round five).
   if (!above.block && ((id !== undefined && shown.has(id)) || classes.some((c) => c !== "" && shown.has(c)))) {
-    return SHOWN_AGAIN;
+    return { ...VISIBLE, svgNoText, shownAgain: true };
   }
   let { block, font, visibility, transparent } = above;
-  if (e.namespaceURI === HTML_NS) {
-    if (e.tagName === "font" && (attr(e, "size") ?? "").trim() !== "") font = false;
-    // A link has a colour of its own in every browser's default style.
-    if ((e.tagName === "a" || e.tagName === "area") && attr(e, "href") !== undefined) transparent = false;
-    if (e.tagName === "dialog" && attr(e, "open") === undefined) block = true;
-    if (e.tagName === "map") {
-      const name = attr(e, "name") ?? attr(e, "id");
-      if (name === undefined || !usedMaps.has(name)) block = true;
-    }
-  }
   const style = attr(e, "style");
   const d = style === undefined ? [] : declarations(style);
   const display = cssValue(d, "display");
-  // The `hidden` attribute is a default display:none, which an inline display overrides.
-  if (attr(e, "hidden") !== undefined && (display === undefined || display === "none")) block = true;
-  if (style !== undefined) {
-    const clipped = ["overflow", "overflow-x", "overflow-y"].some((p) => cssValue(d, p) === "hidden");
-    // A width or height sizes a block, not an inline element or a table cell, unless the style
-    // makes it a box (`display:block`, `inline-block`, ...).
-    const unsized = UNSIZED.has(e.tagName) && (display === undefined || (/^(?:inline|contents|table-)/.test(display) && display !== "inline-block"));
-    const zeroBox = !unsized && ["height", "max-height", "width", "max-width"].some((p) => isZero(cssValue(d, p)));
-    if (display === "none" || noOpacity(cssValue(d, "opacity")) || (zeroBox && clipped) || clipsAway(d)) block = true;
-    const size = fontSize(d);
-    if (size !== undefined && !(font && isRelative(size))) font = isZero(size);
-    const v = cssValue(d, "visibility");
-    if (v === "hidden" || v === "collapse") visibility = true;
-    else if (v === "visible") visibility = false;
-    const color = cssValue(d, "color");
-    if (color !== undefined) transparent = isTransparent(color);
+  const html = e.namespaceURI === HTML_NS;
+  if (html) {
+    if (e.tagName === "font" && (attr(e, "size") ?? "").trim() !== "") font = false;
+    // A link has a colour of its own in every browser's default style.
+    if ((e.tagName === "a" || e.tagName === "area") && attr(e, "href") !== undefined) transparent = false;
   }
-  return { block, font, visibility, transparent, shownAgain: false };
+  // The `hidden` attribute and a closed <dialog> are a default display:none, which an inline
+  // display overrides.
+  const hiddenByDefault = attr(e, "hidden") !== undefined || (html && e.tagName === "dialog" && attr(e, "open") === undefined);
+  if (hiddenByDefault && (display === undefined || display === "none")) block = true;
+  if (style !== undefined && display !== "contents") {
+    // A width, height or transform acts on a box, not on an inline element or a table part, unless
+    // the style makes one (`display:block`, `inline-block`, ...).
+    const effective = display ?? (INLINE_BY_DEFAULT.has(e.tagName) ? "inline" : "block");
+    const box = !/^(?:inline|table-cell|table-row|table-row-group|table-header-group|table-footer-group)$/.test(effective);
+    const clipped = ["overflow", "overflow-x", "overflow-y"].some((p) => /hidden|clip/.test(cssValue(d, p) ?? ""));
+    const minimum = ["min-height", "min-width"].some((p) => {
+      const v = cssValue(d, p);
+      return v !== undefined && !isZero(v) && v !== "auto" && !GLOBAL_VALUES.has(v);
+    });
+    const zeroBox = box && !minimum && ["height", "max-height", "width", "max-width"].some((p) => isZero(cssValue(d, p)));
+    if (display === "none" || noOpacity(cssValue(d, "opacity")) || (zeroBox && clipped) || clipsAway(d, box)) block = true;
+  } else if (display === "none") {
+    block = true;
+  }
+  const size = fontSize(d);
+  if (size !== undefined && !(font && keepsParentZero(size))) font = isZero(size);
+  const v = cssValue(d, "visibility");
+  if (v === "hidden" || v === "collapse") visibility = true;
+  else if (v === "visible") visibility = false;
+  const color = cssValue(d, "color");
+  // A colour that takes the parent's (inherit, currentcolor, unset) keeps what is above.
+  if (color !== undefined && !/^(?:inherit|currentcolor|unset|revert|revert-layer)$/.test(color)) {
+    transparent = isTransparent(color);
+  }
+  return { block, font, visibility, transparent, svgNoText, shownAgain: false };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -484,9 +571,15 @@ export function browserTarget(href: string): URL | undefined {
 /** The host of a target, or for `mailto:` the domain of its (first) address. */
 function hostOf(url: URL): string {
   if (url.protocol !== "mailto:") return url.hostname;
-  const address = decodeURIComponent(url.pathname.split(",")[0] ?? "");
+  const first = url.pathname.split(",")[0] ?? "";
+  let address = first;
+  try {
+    address = decodeURIComponent(first);
+  } catch {
+    // A malformed escape is left as written: a mail client shows it so too (review round six).
+  }
   const at = address.lastIndexOf("@");
-  return at < 0 ? "" : address.slice(at + 1).toLowerCase();
+  return at < 0 ? "" : address.slice(at + 1).trim().toLowerCase();
 }
 
 /** A link being read: its target and what the walk found inside it. */
@@ -497,6 +590,8 @@ interface OpenLink {
   alt: string;
   image: boolean;
   hiddenText: boolean;
+  /** For an image map's area: the map it belongs to, which a visible image has to use. */
+  map?: string;
 }
 
 /** The target of a link element, or undefined for an element that is not a link. */
@@ -509,6 +604,12 @@ function linkTargetOf(e: Element): string | undefined {
   return undefined;
 }
 
+/** The name a `usemap` refers to: it must start with `#`, as the standard's hash-name reference does. */
+function usemapName(usemap: string | undefined): string | undefined {
+  const v = usemap?.trim();
+  return v !== undefined && v.startsWith("#") && v.length > 1 ? v.slice(1) : undefined;
+}
+
 /** Text cut to `max` characters by code point, never inside a surrogate pair. */
 function cut(s: string, max: number): string {
   const chars = Array.from(s);
@@ -518,20 +619,23 @@ function cut(s: string, max: number): string {
 interface WalkResult {
   hiddenChars: number;
   links: OpenLink[];
+  /** Image maps a visible image uses, by name. */
+  shownMaps: Set<string>;
 }
 
 /** One walk over the parsed mail: hidden text counted, links collected with their visible content. */
 function walk(html: string, collectLinks: boolean): WalkResult | undefined {
   const doc = parseMail(html);
   if (doc === undefined) return undefined;
-  const { styles, usedMaps } = survey(doc);
-  const shown = shownByMedia(styles);
+  const shown = shownByMedia(styleTexts(doc));
   const links: OpenLink[] = [];
+  const shownMaps = new Set<string>();
   let hiddenChars = 0;
-  // Each entry: node, visibility above it, the innermost link it is inside (index or -1).
-  const stack: Array<[Node, Visibility, number]> = [[doc, VISIBLE, -1]];
+  // Each entry: node, visibility above it, the innermost link it is inside (index or -1), and the
+  // name of the image map it is inside.
+  const stack: Array<[Node, Visibility, number, string | undefined]> = [[doc, VISIBLE, -1, undefined]];
   while (stack.length > 0) {
-    const [n, above, link] = stack.pop()!;
+    const [n, above, link, map] = stack.pop()!;
     if (n.nodeName === "#text") {
       const text = (n as DefaultTreeAdapterTypes.TextNode).value;
       const length = tidyRenderedText(text).length;
@@ -546,23 +650,32 @@ function walk(html: string, collectLinks: boolean): WalkResult | undefined {
     }
     let state = above;
     let inside = link;
+    let inMap = map;
     if (isElement(n)) {
       if (NOT_SHOWN.has(n.tagName)) continue;
       if (n.tagName === "object" && attr(n, "data") !== undefined) continue;
-      state = visibleBelow(n, above, shown, usedMaps);
-      if (link >= 0 && BLOCKS.has(n.tagName)) links[link].parts.push(" ");
-      if (link >= 0 && n.tagName === "img" && !hidesImage(state)) {
-        links[link].image = true;
-        if (links[link].alt === "") links[link].alt = tidyRenderedText(attr(n, "alt") ?? "").trim();
+      state = visibleBelow(n, above, shown);
+      if (n.namespaceURI === HTML_NS && n.tagName === "map") inMap = attr(n, "name") ?? attr(n, "id");
+      if (n.namespaceURI === HTML_NS && n.tagName === "img" && !hidesImage(state)) {
+        const used = usemapName(attr(n, "usemap"));
+        if (used !== undefined) shownMaps.add(used);
+        if (link >= 0) {
+          links[link].image = true;
+          if (links[link].alt === "") links[link].alt = tidyRenderedText(attr(n, "alt") ?? "").trim();
+        }
       }
+      if (link >= 0 && BLOCKS.has(n.tagName)) links[link].parts.push(" ");
       const href = collectLinks ? linkTargetOf(n) : undefined;
       const url = href === undefined ? undefined : browserTarget(href);
       if (url !== undefined) {
         const open: OpenLink = { url, parts: [], shownText: false, alt: "", image: false, hiddenText: false };
-        // An image map's area is as visible as the image that uses its map.
-        if (n.tagName === "area" && !hidesImage(state)) {
-          open.image = true;
-          open.alt = tidyRenderedText(attr(n, "alt") ?? "").trim();
+        // An image map's area is as visible as an image that uses its map; checked after the walk.
+        if (n.tagName === "area") {
+          open.map = inMap ?? "";
+          if (!hidesImage(state)) {
+            open.image = true;
+            open.alt = tidyRenderedText(attr(n, "alt") ?? "").trim();
+          }
         }
         links.push(open);
         inside = links.length - 1;
@@ -571,22 +684,25 @@ function walk(html: string, collectLinks: boolean): WalkResult | undefined {
       if (n.tagName === "details" && n.namespaceURI === HTML_NS && attr(n, "open") === undefined) {
         const kids = childrenOf(n);
         const summary = kids.find((k) => isElement(k) && k.tagName === "summary");
-        for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], kids[i] === summary ? state : { ...state, block: true, shownAgain: false }, inside]);
+        for (let i = kids.length - 1; i >= 0; i--) {
+          stack.push([kids[i], kids[i] === summary ? state : { ...state, block: true, shownAgain: false }, inside, inMap]);
+        }
         continue;
       }
     }
     const kids = childrenOf(n);
-    for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], state, inside]);
+    for (let i = kids.length - 1; i >= 0; i--) stack.push([kids[i], state, inside, inMap]);
   }
-  return { hiddenChars, links };
+  return { hiddenChars, links, shownMaps };
 }
 
 /**
  * The links of an HTML body a reader can see, in document order, each as `{text, url, host}`:
- * web, mail and phone addresses; an `<a>`, an image map's `<area>`, or an SVG link. A link shows
- * when visible text or a visible image does; `text` is that text (or the image's alt text), and a
- * link with hidden text inside says `hiddenText`. Each pair of text and address once. At most
- * `MAX_LINKS`; `omitted` counts the rest. `tooComplex` when the parse ran past `NODE_BUDGET`.
+ * web, mail and phone addresses; an `<a>`, an image map's `<area>` (when a visible image uses the
+ * map), or an SVG link. A link shows when visible text or a visible image inside it does; `text` is
+ * that text (or the image's alt text), and a link with hidden text inside says `hiddenText`. Each pair
+ * of text and address once. At most `MAX_LINKS`; `omitted` counts the rest. `tooComplex` when the
+ * parse ran past `NODE_BUDGET`.
  */
 export function linksOf(html: string): { links: MailLink[]; omitted: number; tooComplex?: true } {
   const out: MailLink[] = [];
@@ -596,6 +712,7 @@ export function linksOf(html: string): { links: MailLink[]; omitted: number; too
   const seen = new Set<string>();
   let omitted = 0;
   for (const l of result.links) {
+    if (l.map !== undefined && !result.shownMaps.has(l.map)) continue;
     if (!l.shownText && !l.image) continue;
     const text = (l.shownText ? cut(tidyRenderedText(l.parts.join("")).replace(/\s+/g, " ").trim(), MAX_LINK_TEXT) : "") || l.alt;
     const key = `${l.url.href} ${text}`;

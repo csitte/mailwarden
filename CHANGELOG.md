@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same links after each body, as inline code. Opt-in because a newsletter's list is long. Before:
   an HTML-only mail reduced to text by `bodies: "text"` lost every link target. Asked for in
   taylorwilsdon/google_workspace_mcp#476. Built first as `text <url>` markers written into the text
-  by a hand-written scanner; five review rounds found ways to show one address while a browser opens
+  by a hand-written scanner; six review rounds found ways to show one address while a browser opens
   another, or to show a text the reader does not see, and a marker in the text is something the
   mail's own text can imitate — so it became a list the server builds from a standard parser's tree.
   A mailto link's `host` is the domain of its address. The parse runs under a node budget: HTML
