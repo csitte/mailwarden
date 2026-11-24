@@ -177,7 +177,11 @@ Model can't tell quoted mail from a command.
   browser (a quote, a `>` or a comment opener inside an attribute value, a bogus comment, a raw-text
   element), and every disagreement about a link showed one target while the browser opened another.
   The text renderings (`bodies: "text"`, the Markdown export) still reduce HTML with the older
-  scanner; they decide what text is shown, never which address a link opens.
+  scanner; they decide what text is shown, never which address a link opens. The parse runs under a
+  node budget: the standard's tree construction rebuilds every open formatting element at each new
+  block, so 87 KB of unclosed `<b a=1><b a=2>...` built millions of nodes (13 s, 4.2 GB) in a review
+  round on 24 November 2026 — in a function every `get_thread` runs. Past the budget the message is
+  marked `htmlTooComplex` and neither its links nor its hidden text are read.
 - **Links are a list the server builds, never text in the mail.** `get_thread` with `links: true`
   returns each message's visible links as `{text, url, host}`. `url` is resolved by the URL standard
   — the parser a browser uses — so tabs, line breaks, a backslash or an `@` end up where they really
@@ -186,10 +190,13 @@ Model can't tell quoted mail from a command.
   link's visible text as inline styles show it: a fourth review round found text hidden inside a link
   (`paypal<span style="display:none">-secure-evil</span>.com`) making a link read as the address it
   pointed to, so hidden text is left out of `text` and the link carries `hiddenText: true`, itself a
-  warning sign. A hidden link is not listed, so hidden decoys cannot speak for a visible link or
-  push it out of the list. A link whose text names one site and whose `host` is another is the
-  classic phishing shape. Limits: styles from a class are not read, so `text` can include text a
-  stylesheet hides; relative addresses are not listed (a `<base>` element is not applied); an
+  warning sign. A link is listed when visible text or a visible image inside it shows, so hidden
+  decoys cannot speak for a visible link or push it out of the list. A link whose text names one site and whose `host` is another is the
+  classic phishing shape. For a `mailto:` link `host` is the domain of the address; a `tel:` link
+  has none. Limits: styles from a class are not read, so `text` can include text a stylesheet hides,
+  and so can CSS beyond the inline rules this server knows (display, the `hidden` attribute, opacity,
+  zero-sized clipped boxes, a zero scale or clip, font size, visibility, transparent colour, closed
+  `<details>` and `<dialog>`) — positioning off screen, filters or a colour matching the background; relative addresses are not listed (a `<base>` element is not applied); an
   international host is shown in its `xn--` form, which unmasks a homograph and differs from a
   Unicode spelling of the same name. The list is not written into the mail's text on purpose: a
   marker there is something the mail's own text can spell out too.

@@ -168,10 +168,16 @@ export interface ParsedMessage {
    * preview text is hidden this way; a long stretch is where instructions to an AI reader hide.
    */
   hiddenTextChars?: number;
+  /**
+   * The HTML part builds more nodes than the reader will (`NODE_BUDGET` in html.ts): hidden text
+   * and links were not read. A mail built to make an HTML parser do quadratic work is a warning
+   * sign of its own.
+   */
+  htmlTooComplex?: true;
 }
 
 /** A message as Gmail's `metadata` format can answer for it: headers and labels, no content. */
-export type MessageHeaders = Omit<ParsedMessage, "plaintextBody" | "htmlBody" | "attachments" | "hiddenTextChars">;
+export type MessageHeaders = Omit<ParsedMessage, "plaintextBody" | "htmlBody" | "attachments" | "hiddenTextChars" | "htmlTooComplex">;
 
 /** What `getThread` may be asked for beyond the thread id. */
 export interface GetThreadOptions extends MessageSelection {
@@ -855,7 +861,7 @@ export function parseMessage(m: gmail_v1.Schema$Message): ParsedMessage {
     plaintextBody: text,
     htmlBody: html,
     attachments: collectAttachments(m),
-    ...(hidden > 0 ? { hiddenTextChars: hidden } : {}),
+    ...(hidden === undefined ? { htmlTooComplex: true as const } : hidden > 0 ? { hiddenTextChars: hidden } : {}),
   };
 }
 

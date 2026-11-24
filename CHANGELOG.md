@@ -20,10 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the same links after each body, as inline code. Opt-in because a newsletter's list is long. Before:
   an HTML-only mail reduced to text by `bodies: "text"` lost every link target. Asked for in
   taylorwilsdon/google_workspace_mcp#476. Built first as `text <url>` markers written into the text
-  by a hand-written scanner; four review rounds found ways to show one address while a browser opens
+  by a hand-written scanner; five review rounds found ways to show one address while a browser opens
   another, or to show a text the reader does not see, and a marker in the text is something the
   mail's own text can imitate — so it became a list the server builds from a standard parser's tree.
-  New dependency: `parse5` 8.1.1 (MIT, with `entities`), pinned exactly.
+  A mailto link's `host` is the domain of its address. The parse runs under a node budget: HTML
+  built so the standard's tree construction does quadratic work (87 KB took 13 s and 4.2 GB in a
+  review round) is not read, and the message says `htmlTooComplex: true`. New dependency: `parse5`
+  8.1.1 (MIT, with `entities`), pinned exactly.
 - **Text an HTML mail hides from its reader is counted.** Text under an element styled
   `display:none`, `opacity:0` or a zero height or width with overflow hidden, or marked `hidden`, or
   whose font size in effect is zero, visibility hidden or colour transparent, is invisible in a mail client and read

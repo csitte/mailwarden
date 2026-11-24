@@ -187,7 +187,7 @@ describe("linksOf", () => {
     expect(linksOf(html)).toEqual({
       links: [
         { text: "confirm here", url: "https://x.example/confirm?a=1&b=2", host: "x.example" },
-        { text: "write to us", url: "mailto:office@x.example", host: "" },
+        { text: "write to us", url: "mailto:office@x.example", host: "x.example" },
         { text: "call", url: "tel:+431234", host: "" },
       ],
       omitted: 0,
@@ -366,5 +366,75 @@ describe("hiddenTextLength, fourth review", () => {
 
   it("does not count text a child colours again", () => {
     expect(hiddenTextLength(`<div style="color:transparent"><span style="color:#000">${t}</span></div>`)).toBe(0);
+  });
+});
+
+// Fifth review round.
+describe("html.ts, fifth review", () => {
+  const E = "https://evil.example/";
+  const one = (html: string) => linksOf(html).links;
+
+  it("stops a parse that builds too many nodes and says so, quickly", () => {
+    const n = 4000;
+    let html = "<div>";
+    for (let i = 0; i < n; i++) html += `<b a=${i}>`;
+    html += "</div>" + "<div>x</div>".repeat(n);
+    const t = performance.now();
+    expect(hiddenTextLength(html)).toBeUndefined();
+    expect(linksOf(html)).toEqual({ links: [], omitted: 0, tooComplex: true });
+    expect(performance.now() - t).toBeLessThan(5000);
+    const part = { id: "m1", threadId: "t1", payload: { mimeType: "text/html", headers: [], body: { data: Buffer.from(html).toString("base64url") } } };
+    expect(parseMessage(part)).toMatchObject({ htmlTooComplex: true });
+  });
+
+  it.each([
+    ["an image link in a font-size:0 cell", `<table><tr><td style="font-size:0px"><a href="${E}"><img src="x.png" alt="Summer sale"></a></td></tr></table>`, "Summer sale"],
+    ["a link whose size a child sets back", `<a href="${E}" style="font-size:0"><span style="font-size:16px">Shop now</span></a>`, "Shop now"],
+    ["a link whose visibility a child sets back", `<a href="${E}" style="visibility:hidden"><span style="visibility:visible">paypal.com</span></a>`, "paypal.com"],
+    ["a link under transparent text, which a browser colours anyway", `<div style="color:transparent"><a href="${E}">paypal.com</a></div>`, "paypal.com"],
+    ["an inline link with max-width:0 and overflow hidden", `<a href="${E}" style="max-width:0;overflow:hidden">paypal.com</a>`, "paypal.com"],
+    ["a semicolon inside a quoted font name", `<a href="${E}" style='font-family:"a;display:none;b"'>Click</a>`, "Click"],
+    ["an !important inline display", `<a href="${E}" style="display:inline!important;display:none">Click</a>`, "Click"],
+    ["an object without data, which shows its content", `<object><a href="${E}">paypal.com</a></object>`, "paypal.com"],
+  ])("lists a visible link: %s", (_n, html, text) => {
+    expect(one(html).map((l) => [l.text, l.host])).toEqual([[text, "evil.example"]]);
+  });
+
+  it.each([
+    ["display:none!important", `<a href="${E}" style="display:none!important;display:inline">x</a>`],
+    ["an invalid later display", `<a href="${E}" style="display:none;display:bogus">x</a>`],
+    ["a closed details", `<details><summary>More</summary><a href="${E}">x</a></details>`],
+    ["a closed dialog", `<dialog><a href="${E}">x</a></dialog>`],
+    ["an area of a map no image uses", `<map name="m"><area href="${E}" alt="x"></map>`],
+    ["a block @media shows again under a hidden ancestor", `<style>@media screen{.m{display:block!important}}</style><div style="display:none"><div class="m"><a href="${E}">x</a></div></div>`],
+  ])("does not list a hidden link: %s", (_n, html) => {
+    expect(one(html)).toEqual([]);
+  });
+
+  it("lists the summary of a closed details, and takes SVG 2's href over xlink:href", () => {
+    expect(one(`<details><summary><a href="${E}">More</a></summary>x</details>`).map((l) => l.text)).toEqual(["More"]);
+    expect(one(`<svg><a xlink:href="https://decoy.example/" href="${E}"><text>t</text></a></svg>`)[0].host).toBe("evil.example");
+  });
+
+  it.each([
+    ["a hex colour with alpha zero", '<span style="color:#0000">'],
+    ["an eight-digit hex colour with alpha zero", '<span style="color:#ff000000">'],
+    ["rgba with spaces and a slash", '<span style="color:rgba(0 0 0 / 0)">'],
+    ["a negative opacity", '<span style="opacity:-1">'],
+    ["transform:scale(0)", '<span style="transform:scale(0)">'],
+    ["clip-path:inset(50%)", '<span style="clip-path:inset(50%)">'],
+    ["the visually-hidden clip", '<span style="position:absolute;clip:rect(0 0 0 0)">'],
+  ])("leaves text hidden by %s out of a link's text", (_n, open) => {
+    const html = `<a href="https://paypal-secure-evil.example/">paypal${open}-secure-evil</span>.com</a>`;
+    expect(one(html)).toEqual([{ text: "paypal.com", url: "https://paypal-secure-evil.example/", host: "paypal-secure-evil.example", hiddenText: true }]);
+  });
+
+  it("does not take ruby fallback, datalist options or video fallback for link text", () => {
+    expect(one(`<a href="${E}">pay<rp>-evil</rp>pal<datalist><option>x</option></datalist><video>fallback</video>.com</a>`)[0].text).toBe("paypal.com");
+  });
+
+  it("gives a mail link the domain of its address, and a phone link no host", () => {
+    expect(one('<a href="mailto:attacker@evil.example?subject=x">support@paypal.com</a>')[0]).toMatchObject({ host: "evil.example" });
+    expect(one('<a href="tel:+43123">call</a>')[0]).toMatchObject({ host: "" });
   });
 });
