@@ -98,6 +98,19 @@ describe("matchesQuery", () => {
     expect(matchesQuery("is:unread)", m(), ctx)).toBe(true);
   });
 
+  it("survives deep nesting without running out of stack, and still reads shallow nesting", () => {
+    for (const q of [
+      "(".repeat(5000) + "is:unread" + ")".repeat(5000),
+      "{".repeat(3000) + "is:unread" + "}".repeat(3000),
+      "-".repeat(100_000) + "statement",
+      "(-{".repeat(2000) + "x",
+    ]) {
+      expect(() => matchesQuery(q, m(), ctx), q.slice(0, 12)).not.toThrow();
+    }
+    expect(matchesQuery("((((is:unread))))", m(), ctx)).toBe(true);
+    expect(matchesQuery("-(-(-(is:unread)))", m(), ctx)).toBe(false);
+  });
+
   it("takes a quoted operator value", () => {
     expect(matchesQuery('subject:"October statement"', m(), ctx)).toBe(true);
     expect(matchesQuery('subject:"statement October"', m(), ctx)).toBe(false);

@@ -101,21 +101,28 @@ function tokenize(q: string): Token[] {
   return out;
 }
 
+/**
+ * How deep brackets and negations may nest. Below it the parser recurses; at it an opener or a `-`
+ * stands for nothing, and what follows is read one level up, so a query of thousands of `(` costs
+ * linear time and no stack.
+ */
+const MAX_DEPTH = 100;
+
 /** Parse a query. Never throws: a stray bracket is skipped, an empty query matches everything. */
 export function parseQuery(q: string): Node {
   const toks = tokenize(q);
   let pos = 0;
   const peek = () => toks[pos];
 
-  function parseOr(close?: ")" | "}"): Node {
-    const items = [parseAnd(close)];
+  function parseOr(depth: number, close?: ")" | "}"): Node {
+    const items = [parseAnd(depth, close)];
     while (peek()?.t === "OR") {
       pos++;
-      items.push(parseAnd(close));
+      items.push(parseAnd(depth, close));
     }
     return items.length === 1 ? items[0] : { kind: "or", items };
   }
-  function parseAnd(close?: ")" | "}"): Node {
+  function parseAnd(depth: number, close?: ")" | "}"): Node {
     const items: Node[] = [];
     for (;;) {
       const tok = peek();
@@ -124,18 +131,19 @@ export function parseQuery(q: string): Node {
         pos++; // a closer with no opener: skipped
         continue;
       }
-      items.push(parseUnary());
+      items.push(parseUnary(depth));
     }
     return items.length === 1 ? items[0] : { kind: "and", items };
   }
-  function parseUnary(): Node {
+  function parseUnary(depth: number): Node {
     const tok = toks[pos++];
+    if (depth >= MAX_DEPTH && (tok.t === "-" || tok.t === "(" || tok.t === "{")) return { kind: "and", items: [] };
     if (tok.t === "-") {
       if (!peek()) return { kind: "and", items: [] };
-      return { kind: "not", item: parseUnary() };
+      return { kind: "not", item: parseUnary(depth + 1) };
     }
     if (tok.t === "(") {
-      const inner = parseOr(")");
+      const inner = parseOr(depth + 1, ")");
       if (peek()?.t === ")") pos++;
       return inner;
     }
@@ -146,7 +154,7 @@ export function parseQuery(q: string): Node {
           pos++;
           continue;
         }
-        items.push(parseUnary());
+        items.push(parseUnary(depth + 1));
       }
       if (peek()?.t === "}") pos++;
       return { kind: "or", items };
@@ -154,7 +162,7 @@ export function parseQuery(q: string): Node {
     if (tok.t === "word") return { kind: "term", op: tok.op, value: tok.value };
     return { kind: "and", items: [] }; // `)` `}` `OR` cannot reach here; an empty AND matches all
   }
-  return parseOr();
+  return parseOr(0);
 }
 
 const CATEGORY: Record<string, string> = {
