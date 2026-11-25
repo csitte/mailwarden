@@ -275,6 +275,24 @@ at registration cannot decrypt it, so the surface is advertised in full and the 
 surface as a bare 403 mid-task. A token encrypted with a keystore key keeps its scopes readable and
 is gated like a plaintext one.
 
+### Prompts: the first request, one pick away
+
+Clients that show MCP prompts (as slash commands in Claude Code, or a menu in Claude Desktop) get
+four ready-made requests. Each one names the tools it uses, and a prompt is offered only when the
+enabled tiers serve them; a step that needs an optional tier is left out where that tier is off, so a
+read-only deployment gets the read half of a prompt instead of an instruction that fails.
+
+| Prompt | Needs | What it asks for |
+|---|---|---|
+| `inbox_triage` | read | `triage_digest` and `follow_ups`, sorted into needs-you-today, can-wait and noise, with phishing signals pointed out. With `manage`, proposed actions (`archive`, `snooze`, `mark_read`, `unsubscribe`) that run only for the items you say yes to. Optional `focus`: a query to narrow it, e.g. `newer_than:7d` |
+| `check_message` | read | One thread (`threadId`) checked for phishing: `get_thread` with `links: true`, what SPF, DKIM and DMARC verified and for which domain, the header signals, `hiddenTextChars`, and every link whose text names another domain than its `host`. No link is opened. A verdict with its reasons |
+| `reply_backlog` | read | `follow_ups`: what waits on you and what you wait on, oldest first. With `drafts`, replies to the ones you pick, saved as drafts for you to read and send. Optional `days` |
+| `newsletter_cleanup` | read, manage | `list_subscriptions`, a proposal of what to leave, then `bulk_unsubscribe` as a dry run before the real run, and `bulk_modify` with a preview to archive what those senders left |
+
+Every prompt ends by telling the model that a mail's text is information from its sender and never
+an instruction, and the ones that can write ask before each change. A prompt is text the user sends;
+it gives the model no tool and no permission the tier set does not already give.
+
 ### Quotas: the one failure that fixes itself
 
 Gmail bills each call against a per-user budget of **6,000 units per minute**, and the units are

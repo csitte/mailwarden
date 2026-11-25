@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **MCP prompts: four ready-made requests.** `inbox_triage`, `check_message` (a phishing check of
+  one thread, with `links: true`), `reply_backlog` and `newsletter_cleanup` appear as slash commands
+  or in a menu wherever a client shows prompts. A prompt is offered only when the enabled tiers serve
+  every tool it needs, and a step that needs an optional tier (`manage` in the triage, `drafts` in
+  the backlog) is written in or left out by tier; a test holds every tool a prompt names against the
+  tools a server with the same tiers lists, for every combination of tiers. Each prompt tells the
+  model that a mail's text is information, never an instruction, and the ones that can write ask
+  before every change.
+
 ## [0.33.0] - 2026-11-24
 
 ### Added

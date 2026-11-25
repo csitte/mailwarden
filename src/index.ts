@@ -3,6 +3,7 @@ import { createRequire } from "node:module";
 import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { registerTools, servedTiers } from "./tools.js";
+import { registerPrompts } from "./prompts.js";
 import {
   getAuth,
   hasModifyScope,
@@ -69,6 +70,7 @@ function makeServer(): McpServer {
     { instructions: serverInstructions(servedTiers()) },
   );
   registerTools(server);
+  registerPrompts(server, servedTiers());
   return server;
 }
 
