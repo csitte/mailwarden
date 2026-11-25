@@ -210,6 +210,35 @@ describe("the demo API's Gmail behaviour", () => {
     await expect(
       api.users.threads.modify({ userId: "me", id: "t20-hike", requestBody: { addLabelIds: ["Label_999"] } }),
     ).rejects.toMatchObject({ code: 400 });
+    await expect(api.users.threads.list({ userId: "me", q: "", pageToken: "abc" })).rejects.toMatchObject({ code: 400 });
+    const ids = Array.from({ length: 1001 }, (_, i) => `m${i}`);
+    await expect(
+      api.users.messages.batchModify({ userId: "me", requestBody: { ids, addLabelIds: ["STARRED"] } }),
+    ).rejects.toMatchObject({ code: 400 });
+  });
+
+  it("reads a broken RFC 2231 file name as written instead of throwing", () => {
+    const raw = [
+      "From: you@example.com",
+      "To: maya.chen@northpeak.example",
+      "Subject: x",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="B"',
+      "",
+      "--B",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "hi",
+      "--B",
+      "Content-Type: application/pdf; name*=UTF-8''%zz.pdf",
+      "Content-Disposition: attachment; filename*=UTF-8''%zz.pdf",
+      "Content-Transfer-Encoding: base64",
+      "",
+      "aGk=",
+      "--B--",
+      "",
+    ].join(String.fromCharCode(13, 10));
+    expect(() => parseRawMessage(raw)).not.toThrow();
   });
 
   it("leaves trash and spam out of a search that does not name them", async () => {

@@ -128,7 +128,13 @@ function decodeBody(body: string, encoding: string): Buffer {
 
 function param(value: string, name: string): string | undefined {
   const ext = new RegExp(`${name}\\*=(?:UTF-8|utf-8)''([^;]+)`).exec(value);
-  if (ext) return decodeURIComponent(ext[1]);
+  if (ext) {
+    try {
+      return decodeURIComponent(ext[1]);
+    } catch {
+      return ext[1]; // a broken percent sequence: the name as written
+    }
+  }
   const m = new RegExp(`${name}=("([^"]*)"|[^;\\s]+)`, "i").exec(value);
   return m ? (m[2] ?? m[1]) : undefined;
 }
@@ -412,6 +418,7 @@ export class DemoMailbox {
   api(): gmail_v1.Gmail {
     const ok = <T>(data: T) => Promise.resolve({ data, status: 200 });
     const page = <T>(items: T[], max: number | null | undefined, token: string | null | undefined) => {
+      if (token && !/^\d+$/.test(token)) throw httpError(400, "Invalid pageToken");
       const start = token ? Number(token) : 0;
       const size = Math.max(1, Math.min(max ?? 100, 500));
       const slice = items.slice(start, start + size);
@@ -485,6 +492,9 @@ export class DemoMailbox {
           const add = p.requestBody?.addLabelIds ?? [];
           const remove = p.requestBody?.removeLabelIds ?? [];
           this.assertLabels([...add, ...remove]);
+          // Gmail's limit, which gmail.ts chunks for (BATCH_MODIFY_CHUNK): a demo that took more
+          // would hide a chunking fault.
+          if ((p.requestBody?.ids ?? []).length > 1000) throw httpError(400, "Too many ids: at most 1000 per request");
           for (const id of p.requestBody?.ids ?? []) {
             const m = this.messages.get(id);
             if (m) this.relabel(m, add, remove);
