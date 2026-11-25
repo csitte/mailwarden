@@ -17,6 +17,7 @@
 import { constants, promises as fs, realpathSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { CONFIG_DIR, CRED_PATH } from "./auth.js";
 import { CliError, ToolError } from "./cli.js";
 import { MAX_ATTACHMENT_BYTES, formatBytes } from "./draft.js";
 
@@ -38,11 +39,18 @@ function escapes(rel: string): boolean {
  * Why a value cannot be the attachment directory, or null. Pure. A filesystem root, the home
  * directory and any folder that contains it are refused: each would put every file the user owns
  * behind one path, which is the opposite of a folder the user fills with what may leave. A folder
- * below home is fine. On Windows only a drive-letter path is taken: `\\server\share`, `\\?\` and
+ * below home is fine, except mailwarden's own config folders (`secrets`: the one holding the
+ * tokens and the one holding `credentials.json`), refused whether the folder lies in one of them or
+ * contains one. On Windows only a drive-letter path is taken: `\\server\share`, `\\?\` and
  * `\\.\` spellings name the same places in forms the comparisons here cannot all see through
  * (`\\?\UNC\localhost\c$` parses as a share named `UNC`).
  */
-export function attachDirProblem(dir: string, home: string, platform: NodeJS.Platform = process.platform): string | null {
+export function attachDirProblem(
+  dir: string,
+  home: string,
+  platform: NodeJS.Platform = process.platform,
+  secrets: readonly string[] = [],
+): string | null {
   if (platform === "win32" && /^[\\/]{2}/.test(dir)) {
     return "it is a network, device or extended-length path; give a drive-letter path such as D:\\mail-out";
   }
@@ -51,6 +59,11 @@ export function attachDirProblem(dir: string, home: string, platform: NodeJS.Pla
   if (resolved === path.parse(resolved).root) return "it is the root of a drive or filesystem";
   if (home && within(resolved, path.resolve(home))) {
     return within(path.resolve(home), resolved) ? "it is the home directory itself" : "it contains the home directory";
+  }
+  for (const secret of secrets) {
+    const folder = path.resolve(secret);
+    if (within(folder, resolved)) return "it is or lies in mailwarden's config folder, which holds the OAuth token or client credentials";
+    if (within(resolved, folder)) return "it contains mailwarden's config folder, which holds the OAuth token or client credentials";
   }
   return null;
 }
@@ -69,13 +82,22 @@ function realOrNull(p: string): string | null {
  * MAILWARDEN_DOWNLOAD_DIR that is the same folder or lies inside it is refused too: every download
  * would then be refused (see `inAttachDir`), and the setting can only have meant something else.
  */
-export function resolveAttachDir(env: NodeJS.ProcessEnv, home = os.homedir()): string | undefined {
+export function resolveAttachDir(
+  env: NodeJS.ProcessEnv,
+  home = os.homedir(),
+  configDirs?: readonly string[],
+): string | undefined {
   const raw = env.MAILWARDEN_ATTACH_DIR?.trim();
   if (!raw) return undefined;
-  // As written and as resolved: a junction or symlink to a drive root or to home is the same folder.
+  const secrets = configDirs ?? [CONFIG_DIR, path.dirname(CRED_PATH)];
+  // As written and as resolved: a junction or symlink to a drive root, to home or to the config
+  // folder is the same folder.
   const real = realOrNull(raw);
   const realHome = (home && realOrNull(home)) || home;
-  const problem = attachDirProblem(raw, home) ?? (real ? attachDirProblem(real, realHome) : null);
+  const realSecrets = secrets.map((s) => realOrNull(s) ?? s);
+  const problem =
+    attachDirProblem(raw, home, process.platform, secrets) ??
+    (real ? attachDirProblem(real, realHome, process.platform, realSecrets) : null);
   if (problem) {
     throw new CliError(
       `MAILWARDEN_ATTACH_DIR is not usable (${raw}): ${problem}. Point it at a folder of its own that holds only what may be attached.`,

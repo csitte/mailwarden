@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`--demo`: the whole server against an invented mailbox, without a Google account.**
   `npx -y mailwarden --demo` serves about twenty fictional threads (every domain under `.example`,
   dated from the server's start) from memory: no credentials, no token, nothing read from
-  `~/.mailwarden`, no request out of the process — an unsubscribe answers with a 200 built in
+  `~/.mailwarden`, no file attached from the disk, no request out of the process — an unsubscribe answers with a 200 built in
   place. Every tool runs its real code; changes last until the server stops. The model is told
   first, in the server instructions, that the mail is invented, `get_profile` adds `demo: true` and
   `account: "(demo)"`, and stderr says so at start. The mailbox shows each feature on something true:
@@ -33,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   config dir.
 
 ### Fixed
+- **`MAILWARDEN_ATTACH_DIR` refuses mailwarden's config folder.** `MAILWARDEN_DIR` and the folder of
+  `credentials.json`, a folder in either and a folder containing either now stop the start like the
+  home directory does. Before, `MAILWARDEN_ATTACH_DIR=~/.mailwarden` was accepted, and `create_draft`
+  could attach `token.json`.
 - **`docs/SETUP.md` no longer says the "AI-powered agent" checkbox matters only for Google's hosted
   MCP servers.** Google announced on 2026-11-24 that from 2027-02-01 an agentic client calling the
   Workspace REST APIs directly is held to the Standard tier quotas; the guide now says so, with the

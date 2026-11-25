@@ -103,7 +103,9 @@ async function main(): Promise<void> {
   // acts on a real authorization.
   if (demoRequested(args)) {
     enterDemoMode();
-    if (resolveEnabledTiers(process.env).has("drafts")) resolveAttachDir(process.env);
+    // A bad MAILWARDEN_TOOLS fails at start, as in every mode. MAILWARDEN_ATTACH_DIR is not read:
+    // the demo attaches no file from the disk.
+    resolveEnabledTiers(process.env);
     if (mode === "http") {
       await startHttp(makeServer);
       return;

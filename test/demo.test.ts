@@ -181,6 +181,15 @@ describe("--demo: every tool runs against the invented mailbox", () => {
     expect(changed.added.length).toBeGreaterThan(0);
   });
 
+  it("attaches no file from the disk, even with MAILWARDEN_ATTACH_DIR set", async () => {
+    await fs.writeFile(path.join(tmp, "token.json"), "CANARY");
+    vi.stubEnv("MAILWARDEN_ATTACH_DIR", tmp);
+    const { call } = await connectDemo();
+    await expect(
+      call("create_draft", { threadId: "t02-budget", body: "x", attachments: [{ path: "token.json" }] }),
+    ).rejects.toThrow(/off in --demo/);
+  });
+
   it("a second server in the same process sees the same mailbox — HTTP builds one per request", async () => {
     const first = await connectDemo();
     await first.call("archive", { threadId: "t20-hike" });

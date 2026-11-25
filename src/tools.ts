@@ -467,7 +467,8 @@ export function registerTools(server: McpServer): void {
       confirmMode,
       resolveDraftSelfWithoutDialog(process.env),
       resolveDraftDialogOff(process.env),
-      resolveAttachDir(process.env),
+      // The demo never reads the disk: no attachment folder, whatever the environment says.
+      demoMode() ? undefined : resolveAttachDir(process.env),
     );
   }
 }
@@ -2031,7 +2032,15 @@ function registerDraftTools(
   attachDir: string | undefined,
 ): void {
   const registerTool = guarded(server);
-  const readFile = (given: string) => readAttachmentFile(attachDir, given);
+  const readFile = (given: string) =>
+    demoMode()
+      ? Promise.reject(
+          new ToolError(
+            "invalid_input",
+            "Attachments from files are off in --demo: the demo reads nothing from this computer's disk. Nothing was written.",
+          ),
+        )
+      : readAttachmentFile(attachDir, given);
   // `require` here may be forced by a new recipient rather than configured, and the refusal says which.
   // With MAILWARDEN_DRAFT_CONFIRM=off nothing is forced: the mode is the configured one or `off`.
   // One confirmer per call, so the dialog reads that request's protocol envelope and signal.

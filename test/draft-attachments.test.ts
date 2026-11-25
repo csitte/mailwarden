@@ -553,6 +553,20 @@ describe("attachDirProblem / resolveAttachDir", () => {
   it("accepts a folder below home", () => {
     expect(attachDirProblem(path.join(home, "Scanbot", "_Anhang-Ausgang"), home)).toBeNull();
   });
+  it("refuses mailwarden's config folder, a folder in it and a folder that contains it", () => {
+    const config = path.join(home, "work", ".mailwarden");
+    const secrets = [config];
+    expect(attachDirProblem(config, home, process.platform, secrets)).toMatch(/is or lies in mailwarden's config folder/);
+    expect(attachDirProblem(path.join(config, "out"), home, process.platform, secrets)).toMatch(/lies in mailwarden's config folder/);
+    expect(attachDirProblem(path.join(home, "work"), home, process.platform, secrets)).toMatch(/contains mailwarden's config folder/);
+    expect(attachDirProblem(path.join(home, "work", "out"), home, process.platform, secrets)).toBeNull();
+    expect(attachDirProblem(path.join(home, "work", ".mailwarden-out"), home, process.platform, secrets)).toBeNull();
+  });
+  it("refuses the config folder by default, from MAILWARDEN_DIR and MAILWARDEN_CREDENTIALS", () => {
+    const config = path.join(home, "cfg");
+    expect(() => resolveAttachDir({ MAILWARDEN_ATTACH_DIR: config }, home, [config])).toThrow(/config folder/);
+    expect(() => resolveAttachDir({ MAILWARDEN_ATTACH_DIR: path.join(home, "out") }, home, [config])).not.toThrow();
+  });
   it("refuses a download folder that is the attachment folder or lies in it", () => {
     const attach = path.join(home, "out");
     for (const download of [attach, path.join(attach, "dl"), attach + path.sep]) {

@@ -533,7 +533,10 @@ receives it once the person presses Send without looking at the attachment list.
   and where a link leads, and on Windows only a drive-letter path is taken — `\\?\`, `\\.\` and UNC
   spellings name the same places in forms a comparison cannot all see through. Any of those would put
   everything the user owns behind one path. Found by the input corpus before 0.28.0 shipped: `C:\Users`,
-  `\\?\UNC\localhost\c$` and a junction to home were accepted at first.
+  `\\?\UNC\localhost\c$` and a junction to home were accepted at first. Since 0.34.0 mailwarden's
+  config folder is refused the same way (`MAILWARDEN_DIR` and the folder of `credentials.json`, a
+  folder in either and a folder containing either): the token lies there, and a folder below home
+  passed every earlier check. Found by the Grok round before 0.34.0.
 - **Only the person fills the folder.** `download_attachment` and `export_thread` refuse to write into
   it, by either spelling of the folder and again on the real parent directory, and a
   `MAILWARDEN_DOWNLOAD_DIR` that is the folder or lies inside it stops the start. Without this, the
