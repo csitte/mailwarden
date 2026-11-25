@@ -41,6 +41,12 @@ server's memory, `~/.mailwarden` is not read, and nothing leaves the process —
 request included, which is answered in place. The demo's stand-in for the Gmail API has only the
 endpoints mailwarden calls, so there is no send or import method in it to reach either.
 
+Mail content passes through and is not stored: no cache, no index, no copy on disk, only the
+attachments a `download_attachment` call writes where it is told to. Google's Workspace AI Tools
+Addendum (in force from February 1, 2027) restricts storing data obtained through AI tools; what it
+means for an MCP server that calls the REST API, mailwarden included, is in the README section
+"Google's AI Tools Addendum".
+
 What goes to the AI client goes to whoever runs its model. Besides mail content that includes one
 fact about the machine: `get_profile` reports `serverPath`, the directory the server runs from,
 which usually contains the local user name (`/Users/<name>/...`, `C:\Users\<name>\...`). It is

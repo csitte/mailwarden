@@ -780,6 +780,31 @@ First time setting up a Google OAuth app? Follow the **[step-by-step setup guide
    authorized, an encrypted token with no `MAILWARDEN_TOKEN_PASSPHRASE` or whose key is not in this machine's keystore, a missing scope, or the
    7-day "Testing"-consent token expiry.
 
+### Google's AI Tools Addendum (from February 1, 2027)
+
+Google announced new terms for AI tools on November 24, 2026, the
+[Workspace AI Tools Addendum](https://workspace.google.com/terms/ai-tools). Its first term reads:
+"The GWS Access Tool must use a Google MCP where the GWS Access Tool is or is driven by an AI Agent,
+an AI Harness or an AI model or service employing an AI model." A "Google MCP" is an MCP server
+that Google itself makes available.
+
+mailwarden is an MCP server that an AI model drives and that calls the Gmail REST API. The addendum
+names no exception for that case, and Google has not said how it applies the term to MCP servers
+run by others. The terms bind whoever runs the OAuth client, and with mailwarden that is you: your
+own Google Cloud project, your own client. Read them and decide for yourself; this section is no
+legal advice. Two related points:
+
+- **Technically,** Google's [usage tiers page](https://developers.google.com/workspace/tools-safety)
+  names one effect from February 1, 2027: an agentic client that calls the REST APIs directly is
+  held to the Standard tier quotas, the published quotas mailwarden has always run on.
+- **Don't untick the "AI-powered agent" checkbox** to get out of that
+  ([setup guide](https://github.com/csitte/mailwarden/blob/main/docs/SETUP.md#the-ai-powered-agent-checkbox)):
+  the addendum forbids letting a tool avoid classification.
+
+Google's own Gmail MCP server offers search, reading, labels and drafts; unsubscribing, filters,
+snooze, trash and the sender checks have no counterpart there. On the addendum's storage terms:
+mailwarden keeps no copy of your mail (see [SECURITY.md](SECURITY.md), Data flow).
+
 ## Connect
 
 **Claude Code** (local stdio):

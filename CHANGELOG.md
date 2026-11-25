@@ -38,6 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Workspace REST APIs directly is held to the Standard tier quotas; the guide now says so, with the
   source.
 
+### Documentation
+- **README: Google's Workspace AI Tools Addendum.** Google's new terms (announced 2026-11-24, in force
+  from 2027-02-01) ask tools driven by an AI model to use a Google MCP server. The README quotes the
+  term, says that it names no exception for an MCP server that calls the REST API, as mailwarden
+  does, and that it binds whoever runs the OAuth client, which with mailwarden is each user; it adds
+  the one technical effect Google has named (Standard tier quotas) and that unticking the agent
+  checkbox to avoid that is itself forbidden. `SECURITY.md` states what is stored and what is not.
+
 ## [0.33.0] - 2026-11-24
 
 ### Added
