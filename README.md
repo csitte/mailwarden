@@ -795,7 +795,7 @@ run by others. The terms bind whoever runs the OAuth client, and with mailwarden
 own Google Cloud project, your own client. Read them and decide for yourself; this section is no
 legal advice. Two related points:
 
-- **Google's usage tiers page** ([tools-safety](https://developers.google.com/workspace/tools-safety))
+- **Google's usage tiers page** ([quota-usage-tiers](https://developers.google.com/workspace/guides/quota-usage-tiers))
   says the same for February 1, 2027: AI agents "must use MCP servers instead of REST APIs", and
   projects whose clients are agents should "plan to switch from calling REST APIs directly to MCP"
   before then. The one technical effect it names is that an agentic client calling the REST APIs

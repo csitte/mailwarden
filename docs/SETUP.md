@@ -117,7 +117,7 @@ stay exactly as they were
 only, and mailwarden never calls those: it talks to the Gmail REST API, and its egress guard allows
 nothing else. Google has announced one effect on REST as well: from February 1, 2027, an agentic
 client that calls the Workspace REST APIs directly is held to the Standard tier quotas
-([Usage tiers and quotas](https://developers.google.com/workspace/tools-safety)). Those are the
+([Usage tiers and quotas](https://developers.google.com/workspace/guides/quota-usage-tiers)). Those are the
 published quotas mailwarden has always run on. The same page says agents "must use MCP servers
 instead of REST APIs" from that date and asks projects to plan the switch; what that means for
 mailwarden is in the README section "Google's AI Tools Addendum".
