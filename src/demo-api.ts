@@ -38,8 +38,6 @@ interface StoredMessage {
   text?: string;
   html?: string;
   attachments: StoredAttachment[];
-  /** Whether the message was in the inbox when it was trashed, so untrash can put it back. */
-  inboxBeforeTrash?: boolean;
 }
 
 interface StoredLabel {
@@ -458,15 +456,16 @@ export class DemoMailbox {
         trash: (p: gmail_v1.Params$Resource$Users$Threads$Trash) => {
           for (const m of this.threadMessages(p.id!)) {
             if (m.labelIds.includes("TRASH")) continue;
-            m.inboxBeforeTrash = m.labelIds.includes("INBOX");
             this.relabel(m, ["TRASH"], ["INBOX"]);
           }
           return ok({ id: p.id });
         },
+        // As Gmail does (measured 2026-11-25 on a live thread): trash drops INBOX, untrash takes
+        // TRASH off and does not put INBOX back.
         untrash: (p: gmail_v1.Params$Resource$Users$Threads$Untrash) => {
           for (const m of this.threadMessages(p.id!)) {
             if (!m.labelIds.includes("TRASH")) continue;
-            this.relabel(m, m.inboxBeforeTrash ? ["INBOX"] : [], ["TRASH"]);
+            this.relabel(m, [], ["TRASH"]);
           }
           return ok({ id: p.id });
         },

@@ -171,7 +171,10 @@ describe("--demo: every tool runs against the invented mailbox", () => {
     expect((await call("search", { query: "from:maya.chen@northpeak.example subject:offsite" })).threads).toEqual([]);
     expect((await call("search", { query: "in:trash subject:offsite" })).threads).toHaveLength(1);
     await call("untrash", { threadId: "t05-offsite" });
-    expect((await call("search", { query: "in:inbox subject:offsite" })).threads).toHaveLength(1);
+    // Out of the trash but not back in the inbox, as the tool's description says and Gmail does.
+    expect((await call("search", { query: "in:trash subject:offsite" })).threads).toEqual([]);
+    expect((await call("search", { query: "in:inbox subject:offsite" })).threads).toEqual([]);
+    expect((await call("search", { query: "subject:offsite" })).threads).toHaveLength(1);
     const draft = await call("create_draft", { threadId: "t02-budget", body: "Thanks — reviewing it today." });
     expect(draft).toMatchObject({ threadId: "t02-budget", sent: false, marked: true });
     const thread = await call("get_thread", { threadId: "t02-budget", bodies: "text" });
