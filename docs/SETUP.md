@@ -118,8 +118,9 @@ only, and mailwarden never calls those: it talks to the Gmail REST API, and its 
 nothing else. Google has announced one effect on REST as well: from February 1, 2027, an agentic
 client that calls the Workspace REST APIs directly is held to the Standard tier quotas
 ([Usage tiers and quotas](https://developers.google.com/workspace/tools-safety)). Those are the
-published quotas mailwarden has always run on; Google has not said yet what else the enforcement
-does.
+published quotas mailwarden has always run on. The same page says agents "must use MCP servers
+instead of REST APIs" from that date and asks projects to plan the switch; what that means for
+mailwarden is in the README section "Google's AI Tools Addendum".
 
 **Tick it anyway, it is the accurate answer.** mailwarden is driven by an AI assistant, and Google
 asks for clients like that to be marked even when they use only the REST APIs. Two things worth

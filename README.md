@@ -795,16 +795,19 @@ run by others. The terms bind whoever runs the OAuth client, and with mailwarden
 own Google Cloud project, your own client. Read them and decide for yourself; this section is no
 legal advice. Two related points:
 
-- **Technically,** Google's [usage tiers page](https://developers.google.com/workspace/tools-safety)
-  names one effect from February 1, 2027: an agentic client that calls the REST APIs directly is
-  held to the Standard tier quotas, the published quotas mailwarden has always run on.
+- **Google's usage tiers page** ([tools-safety](https://developers.google.com/workspace/tools-safety))
+  says the same for February 1, 2027: AI agents "must use MCP servers instead of REST APIs", and
+  projects whose clients are agents should "plan to switch from calling REST APIs directly to MCP"
+  before then. The one technical effect it names is that an agentic client calling the REST APIs
+  directly is held to the Standard tier quotas, the published quotas mailwarden has always run on.
 - **Don't untick the "AI-powered agent" checkbox** to get out of that
   ([setup guide](https://github.com/csitte/mailwarden/blob/main/docs/SETUP.md#the-ai-powered-agent-checkbox)):
   the addendum forbids letting a tool avoid classification.
 
 Google's own Gmail MCP server offers search, reading, labels and drafts; unsubscribing, filters,
 snooze, trash and the sender checks have no counterpart there. On the addendum's storage terms:
-mailwarden keeps no copy of your mail (see [SECURITY.md](SECURITY.md), Data flow).
+mailwarden keeps no copy of your mail beyond the files you ask `download_attachment` and
+`export_thread` to write (see [SECURITY.md](SECURITY.md), Data flow).
 
 ## Connect
 
