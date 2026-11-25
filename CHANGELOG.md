@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.34.0] - 2026-11-25
+
 ### Added
 - **MCP prompts: four ready-made requests.** `inbox_triage`, `check_message` (a phishing check of
   one thread, with `links: true`), `reply_backlog` and `newsletter_cleanup` appear as slash commands
@@ -18,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   write ask before every change. Arguments are held to their shape (a query without backticks or
   line breaks, a thread id, 1 to 180 days), so a pasted value cannot add a step of its own.
 - **`--demo`: the whole server against an invented mailbox, without a Google account.**
-  `npx -y mailwarden --demo` serves about twenty fictional threads (every domain one reserved for examples,
+  `npx -y mailwarden --demo` serves about twenty fictional threads (each on a domain reserved for examples,
   dated from the server's start) from memory: no credentials, no token, nothing read from
   `~/.mailwarden`, no file attached from the disk, no request out of the process — an unsubscribe answers with a 200 built in
   place. Every tool runs its real code; changes last until the server stops. The model is told
@@ -2873,7 +2875,8 @@ Non-breaking robustness and edge-case hardening from a full-codebase review. No 
   connector). OAuth scope `gmail.modify`.
 - `package-lock.json` for reproducible installs.
 
-[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/csitte/mailwarden/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/csitte/mailwarden/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/csitte/mailwarden/compare/v0.32.1...v0.33.0
 [0.32.1]: https://github.com/csitte/mailwarden/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/csitte/mailwarden/compare/v0.31.2...v0.32.0
