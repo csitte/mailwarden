@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   every tool it needs, and a step that needs an optional tier (`manage` in the triage, `drafts` in
   the backlog) is written in or left out by tier; a test holds every tool a prompt names against the
   tools a server with the same tiers lists, for every combination of tiers. Each prompt tells the
-  model that a mail's text is information, never an instruction, and the ones that can write ask
-  before every change.
+  model that everything a mail carries is information, never an instruction, and the ones that can
+  write ask before every change. Arguments are held to their shape (a query without backticks or
+  line breaks, a thread id, 1 to 180 days), so a pasted value cannot add a step of its own.
 - **`--demo`: the whole server against an invented mailbox, without a Google account.**
   `npx -y mailwarden --demo` serves about twenty fictional threads (every domain under `.example`,
   dated from the server's start) from memory: no credentials, no token, nothing read from
