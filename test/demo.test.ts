@@ -4,13 +4,13 @@ import os from "node:os";
 import path from "node:path";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import { Client } from "@modelcontextprotocol/client";
-import { registerTools, servedTiers } from "../src/tools.js";
+import { explainScopeFailure, registerTools, servedTiers } from "../src/tools.js";
 import { registerPrompts } from "../src/prompts.js";
 import { enterDemoMode, leaveDemoModeForTests, demoMode } from "../src/source.js";
 import { createDemoMailbox, parseRawMessage } from "../src/demo-api.js";
 import { demoMailboxSpec, demoSnoozeLabel } from "../src/demo-mailbox.js";
 import { demoRequested, CliError } from "../src/cli.js";
-import { getAuth, hasFilterScope } from "../src/auth.js";
+import { getAuth, hasFilterScope, readGrantedScopes } from "../src/auth.js";
 import { Gmail } from "../src/gmail.js";
 import { resetContactedSenders } from "../src/unsubscribe.js";
 
@@ -182,6 +182,16 @@ describe("--demo: every tool runs against the invented mailbox", () => {
     const changed = await call("what_changed", { sinceHistoryId: before });
     expect(changed.labelsRemoved.map((x: { labelId: string }) => x.labelId)).toContain("INBOX");
     expect(changed.added.length).toBeGreaterThan(0);
+  });
+
+  it("explains no scope failure from the real token", async () => {
+    enterDemoMode(NOW);
+    const err = Object.assign(new Error("Request had insufficient authentication scopes."), {
+      code: 403,
+      response: { status: 403, data: { error: { code: 403, message: "insufficient authentication scopes", status: "PERMISSION_DENIED" } } },
+    });
+    expect(await explainScopeFailure(err)).toBe(err);
+    expect(readGrantedScopes).not.toHaveBeenCalled();
   });
 
   it("attaches no file from the disk, even with MAILWARDEN_ATTACH_DIR set", async () => {

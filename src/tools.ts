@@ -130,7 +130,9 @@ export function servedTiers(env: NodeJS.ProcessEnv = process.env): Set<ToolTier>
  * is then about something this function cannot see, and overwriting it would replace a true
  * message with a confident wrong one.
  */
-async function explainScopeFailure(err: unknown): Promise<unknown> {
+export async function explainScopeFailure(err: unknown): Promise<unknown> {
+  // The demo holds no grant to explain, and must not open the real token to look for one.
+  if (demoMode()) return err;
   try {
     // Inside the try, not before it: `fail()` calls this on EVERY failure, so a throw here would
     // escape `guarded`'s catch and turn a reported tool error into an unhandled rejection. The
