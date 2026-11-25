@@ -167,3 +167,22 @@ export function helpFooter(state: "ok" | "problem"): string {
 export function findStrayPositional(args: string[]): string | undefined {
   return args.find((a, i) => !a.startsWith("-") && args[i - 1] !== "--account");
 }
+
+/**
+ * Whether `--demo` asks for the invented mailbox, and refuses the combinations that would mean
+ * something else. `--auth`, `--sweep` and `--check` act on a real authorization, and `--account`
+ * names one: next to `--demo` each is a contradiction, and quietly honouring either half would
+ * either touch a real mailbox in a run meant to touch none, or show a demo where a real check was
+ * asked for. `--http` is fine: the demo then answers over HTTP.
+ */
+export function demoRequested(args: string[]): boolean {
+  if (!args.includes("--demo")) return false;
+  const clash = ["--auth", "--sweep", "--check", "--doctor"].find((f) => args.includes(f));
+  if (clash) {
+    throw new CliError(`\`--demo\` serves an invented mailbox and cannot be combined with \`${clash}\`, which acts on a real one.`);
+  }
+  if (args.some((a) => a === "--account" || a.startsWith("--account="))) {
+    throw new CliError("`--demo` serves an invented mailbox and takes no `--account`.");
+  }
+  return true;
+}

@@ -16,6 +16,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tools a server with the same tiers lists, for every combination of tiers. Each prompt tells the
   model that a mail's text is information, never an instruction, and the ones that can write ask
   before every change.
+- **`--demo`: the whole server against an invented mailbox, without a Google account.**
+  `npx -y mailwarden --demo` serves about twenty fictional threads (every domain under `.example`,
+  dated from the server's start) from memory: no credentials, no token, nothing read from
+  `~/.mailwarden`, no request out of the process — an unsubscribe answers with a 200 built in
+  place. Every tool runs its real code; changes last until the server stops. The model is told
+  first, in the server instructions, that the mail is invented, `get_profile` adds `demo: true` and
+  `account: "(demo)"`, and stderr says so at start. The mailbox shows each feature on something true:
+  a phishing mail with a link whose text and host differ and hidden text for an assistant, every
+  opt-out kind, conversations waiting either way, a CSV, an invitation, a gzipped DMARC report, a
+  snoozed thread, and two read updates its thread index still answers as unread, so `search`'s
+  re-verification has something to drop. Refused next to `--auth`, `--sweep`, `--check` and
+  `--account`; combines with `--http` and the tiers. The demo API implements exactly the endpoints
+  mailwarden calls; a test calls all 33 tools against it with `fetch` watched and the token code
+  set to throw, and the package smoke test starts the packed build with `--demo` and an empty
+  config dir.
 
 ## [0.33.0] - 2026-11-24
 

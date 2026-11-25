@@ -9,14 +9,17 @@
  *
  * @param {string} cliPath  path to the built dist/index.js
  * @param {NodeJS.ProcessEnv} env  extra environment (merged over process.env)
- * @returns {Promise<{serverInfo: any, tools: Array<any>, stderr: string}>}  `tools` are the raw MCP Tool
- *   objects from tools/list (name, description, inputSchema, annotations, …).
+ * @param {number} timeoutMs  how long the whole session may take
+ * @param {{args?: string[], calls?: [string, object][]}} extra  CLI arguments after the path, and
+ *   further requests to make after tools/list; their responses come back in `results`, in order.
+ * @returns {Promise<{serverInfo: any, instructions: string|undefined, tools: Array<any>, results: Array<any>, stderr: string}>}
+ *   `tools` are the raw MCP Tool objects from tools/list (name, description, inputSchema, annotations, …).
  */
 import { spawn } from "node:child_process";
 
-export function mcpSession(cliPath, env, timeoutMs = 20_000) {
+export function mcpSession(cliPath, env, timeoutMs = 20_000, extra = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cliPath], {
+    const child = spawn(process.execPath, [cliPath, ...(extra.args ?? [])], {
       env: { ...process.env, ...env },
       stdio: ["pipe", "pipe", "pipe"],
     });
@@ -70,11 +73,16 @@ export function mcpSession(cliPath, env, timeoutMs = 20_000) {
       });
       send({ jsonrpc: "2.0", method: "notifications/initialized" });
       const tools = await request(2, "tools/list", {});
+      const results = [];
+      let id = 3;
+      for (const [method, params] of extra.calls ?? []) results.push(await request(id++, method, params));
       clearTimeout(timer);
       child.kill();
       resolve({
         serverInfo: init.result?.serverInfo,
+        instructions: init.result?.instructions,
         tools: tools.result?.tools ?? [],
+        results,
         stderr,
       });
     })().catch((err) => {

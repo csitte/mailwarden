@@ -16,6 +16,10 @@ everyone doing it the first time, and for the two traps that cost real hours
 **Prerequisites:** Node.js ≥ 20.19 and a Google account. Nothing else — no server, no domain,
 no billing.
 
+Want to see what it does before any of this? `npx -y mailwarden --demo` runs the server against
+an invented mailbox in memory, with no Google account and no setup — see
+[Try it without a Google account](../README.md#try-it-without-a-google-account).
+
 ---
 
 ## 1. Create a Google Cloud project

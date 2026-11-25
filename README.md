@@ -229,7 +229,7 @@ signature that failed — the disagreement shows up in `alsoReported` instead of
 | `get_thread` | Full thread: headers, plaintext + HTML bodies, attachment metadata. Every message also carries `authentication` — SPF/DKIM/DMARC as the receiving server reported them, plus the domains each check validated (`signedBy`/`mailedBy`/`headerFrom`), who asserts it (`authservId`), the `returnPath`, `alsoReported` for results that contradict each other, `alsoSignedBy` for further domains whose DKIM signature passed, `otherReports` for reports that were not read, `dkimAligned` for whether a passing DKIM signer is the `From` domain, and `unchecked: true` when the message carried no report from Gmail — see [Judging a sender](#judging-a-sender--what-authentication-answers-and-what-it-doesnt). `full: false` fetches headers and labels only — it then **omits** `plaintextBody`/`htmlBody`/`attachments` and sets `metadataOnly: true`, rather than reporting them empty for a request that never looked; it is deprecated in favour of `bodies: "none"` (same quota, real attachment list), and combining it with `bodies` is rejected as `invalid_input`. For a long or HTML-heavy thread, shrink the answer instead: `bodies: "text"` keeps only the plaintext (an HTML-only mail is reduced to text and marked `bodyFromHtml`), `bodies: "new"` is `text` without the quoted history at the end of a reply (the trailing `>` block with its attribution line, or an Outlook *Original Message* block; inline answers, answers below a quote and forwarded messages, also an Outlook forward by its Fwd/FW/WG subject, stay whole; an answer below an Outlook plain-text header block goes with it) and marks a cut message `quotedStripped`, `bodies: "none"` keeps headers, authentication and the real attachment list without any body, `lastN` returns only the newest N messages and `afterMessageId` only those after one already read. Same quota whatever is kept; `messageCount` and `omittedMessages` always say how much of the thread the answer shows. A message whose HTML hides text from its reader (inline `display:none`, `font-size:0` and the like, or the `hidden` attribute) carries `hiddenTextChars`, the length of that text — counted, not removed; a block an `@media` rule shows again (on a phone, say) does not count. `links: true` adds each message's visible links as `{text, url, host}`, read by an HTML5 parser as a browser reads them: `host` is the host that opens, `text` the link's visible text (`hiddenText: true` when the link hides some) — compare the two; opt-in, because a newsletter's list is long. Links whose text names another domain than they open, or that hide text, come first. HTML that would make the parser build more than 250,000 nodes or take more than a second (a 1 MB newsletter of tables builds under half and parses in a fifth) is not read, and the message says `htmlTooComplex`. See [Security & privacy](#security--privacy) |
 | `read_attachment` | The text inside an attachment, without saving it: plain text (txt, csv, xml, json, ics, …), a gzip file, or the text entries of a ZIP archive — DMARC aggregate reports, exports, logs. The format is decided by the bytes, never by the declared name or type, and text that is not UTF-8 (an Excel CSV from Windows) is read as windows-1252 and marked `guessedCharset`; binary formats are refused with a pointer to `download_attachment`. Every size is capped before it is spent (5 MiB unpacked per entry, 20 MiB per archive, 50 entries), so a zip bomb stops at the limit. One answer carries at most `maxChars` characters of text across all entries (default 30,000, at most 100,000); a cut entry reports `nextOffset`, and `offset` continues it. For an archive, `list: true` shows names, sizes and text lengths first, and `entry` (a name or a pattern like `*.csv`) reads only what is needed, naming the rest in `notSelectedNames`; binary, encrypted, oversized and nested-archive entries are listed as `skipped`, not opened. Nothing is written to disk, and the text is fenced and stripped of hidden characters like a mail body |
 | `list_labels` | All labels (system + user) |
-| `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting. Also *which server* answers: `serverVersion` (bare only for a release build, otherwise with the commit, e.g. `0.23.0+a5ff4a7`), `build`, `serverPath` (the directory the running code was loaded from) and `account`, for the moment a documented tool seems missing and the question is whether the build you think is running actually is |
+| `get_profile` | Connected account's address, total message/thread counts and the mailbox's current `historyId` — confirm *which* mailbox is wired up before acting. Also *which server* answers: `serverVersion` (bare only for a release build, otherwise with the commit, e.g. `0.23.0+a5ff4a7`), `build`, `serverPath` (the directory the running code was loaded from) and `account`, for the moment a documented tool seems missing and the question is whether the build you think is running actually is. Under `--demo`, `demo: true` and `account: "(demo)"` |
 | `what_changed` | Mailbox events since a `historyId` you hold — arrivals, removals, labels on and off, in one call |
 | **`triage_digest`** | Structured overview of a mailbox slice for *decisions*: top senders (each with the signals its threads carry), label and age buckets, unread + attachment counts, and how many threads are newsletters / automated / calendar invites / reply-to mismatches — instead of a raw thread list |
 | `follow_ups` | Who is waiting on whom: threads whose last message is yours and unanswered for a few days (a note to your own address is left out; one other recipient in To or Cc keeps it), and inbox threads whose last message came from a person rather than a newsletter or a no-reply notice. Decided on each thread's last message and its **live** labels, so a thread the index still files under the inbox after it was archived is dropped |
@@ -723,7 +723,37 @@ it obvious ("I just registered there") lives in the conversation, not in the mai
 claude mcp add mailwarden -- npx -y mailwarden
 ```
 
-That's the whole install — `npx` fetches and runs the published package, no clone or build step. You only need Google OAuth credentials once (below).
+That's the whole install — `npx` fetches and runs the published package, no clone or build step. You only need Google OAuth credentials once (below). To look around first, `--demo` needs none ([below](#try-it-without-a-google-account)).
+
+### Try it without a Google account
+
+```bash
+claude mcp add mailwarden-demo -- npx -y mailwarden --demo
+```
+
+`--demo` serves an invented mailbox instead of Gmail: about twenty threads under `.example`
+domains, dated from the moment the server starts, held in memory. No credentials, no token, no
+Google project; nothing is read from `~/.mailwarden` and no request leaves the process, the one
+outbound one included (an unsubscribe "succeeds" with a 200 the server builds itself). Every tool
+runs its real code against it, and what you change (labels, archive, trash, snooze, filters,
+drafts) is gone when the server stops. The server tells the model first, in its instructions,
+that the mail is invented, and `get_profile` says `demo: true`.
+
+The mailbox is written so each feature has something true to show: a phishing mail whose link
+text names the bank while the link opens another host, with text hidden from the reader that
+addresses an assistant (`check_message` finds both); newsletters with each kind of opt-out
+(`newsletter_cleanup`); a colleague waiting on you and a quote you are waiting for
+(`reply_backlog`); a CSV, an invitation and a gzipped DMARC report to read; a snoozed thread;
+and two read updates that its search index, like Gmail's, still answers as unread —
+`category:updates is:unread -in:inbox` returns the two that really are. Tiers work as usual
+(`MAILWARDEN_TOOLS=read,manage,filters,drafts` to try drafts); `--demo` with `--http` serves it
+over HTTP. It cannot be combined with `--auth`, `--sweep`, `--check` or `--account`, which act on
+a real mailbox.
+
+The demo's search is not Gmail's: it understands the common operators (`from:` `to:` `subject:`
+`label:` `in:` `is:` `has:attachment` `category:` `filename:` `newer_than:` `older_than:`
+`after:` `before:`, `-`, `OR`, `( )`, `{ }`, quoted phrases) and matches substrings where Gmail
+matches words.
 
 ## Setup
 

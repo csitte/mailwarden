@@ -1,7 +1,8 @@
 import type { McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { Gmail, classifyBatchModify, filterCriteriaToQuery, looksLikeLabelId, unverifiedPredicates } from "./gmail.js";
-import { getAuth, hasFilterScope, readGrantedScopes, activeAccount } from "./auth.js";
+import { hasFilterScope, readGrantedScopes, activeAccount } from "./auth.js";
+import { demoMode, gmailClient, unsubscribeDeps } from "./source.js";
 import { snooze, unsnooze, listSnoozed, sweepSnoozed } from "./snooze.js";
 import { buildDigest, friendlyLabelName } from "./digest.js";
 import {
@@ -57,10 +58,8 @@ const SERVER_PATH: string = path.dirname(fileURLToPath(import.meta.url));
 const SERVER_IDENTITY = describeBuild(SERVER_VERSION, loadBuildRecord(SERVER_PATH));
 export { resolveEnabledTiers, type ToolTier } from "./tiers.js";
 
-/** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. */
-async function client(): Promise<Gmail> {
-  return new Gmail(await getAuth(false));
-}
+/** Fresh authed client per call — cheap, and avoids stale auth in long-lived servers. The demo mailbox under `--demo`. */
+const client = gmailClient;
 
 /**
  * Every result carries BOTH representations: `structuredContent` (validated
@@ -106,7 +105,8 @@ const fail = (err: unknown) => ({
  */
 export function servedTiers(env: NodeJS.ProcessEnv = process.env): Set<ToolTier> {
   const tiers = resolveEnabledTiers(env);
-  if (tiers.has("filters") && hasFilterScope() === false) tiers.delete("filters");
+  // The demo answers every scope; a real token on this machine says nothing about it.
+  if (tiers.has("filters") && !demoMode() && hasFilterScope() === false) tiers.delete("filters");
   return tiers;
 }
 
@@ -452,7 +452,7 @@ export function registerTools(server: McpServer): void {
     // (skip + tell the user), `undefined` = unknown (no token yet, an old token
     // without a recorded scope, or a passphrase-encrypted one) → keep the prior behavior of
     // advertising and letting the runtime insufficient-scope message guide re-auth.
-    if (hasFilterScope() === false) {
+    if (!demoMode() && hasFilterScope() === false) {
       console.error(
         "mailwarden: the 'filters' tier is enabled but the stored token lacks the " +
           "gmail.settings.basic scope — filter tools are hidden. Re-run `mailwarden --auth` to grant it.",
@@ -688,6 +688,8 @@ function registerReadTools(server: McpServer): void {
           .optional(),
         serverPath: z.string(),
         account: z.string(),
+        // Present only under `--demo`: the mailbox is invented, and an assistant must say so.
+        demo: z.literal(true).optional(),
       },
       annotations: { title: "Get profile", ...readOnly },
     },
@@ -696,7 +698,8 @@ function registerReadTools(server: McpServer): void {
         ...(await (await client()).getProfile()),
         ...SERVER_IDENTITY,
         serverPath: SERVER_PATH,
-        account: activeAccount() ?? "(default)",
+        account: demoMode() ? "(demo)" : (activeAccount() ?? "(default)"),
+        ...(demoMode() ? { demo: true as const } : {}),
       }),
   );
 
@@ -1452,7 +1455,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
     },
     async ({ threadId, force }, ctx: CallContext) =>
       ok(
-        await unsubscribeThread(await client(), threadId, undefined, {
+        await unsubscribeThread(await client(), threadId, unsubscribeDeps(), {
           force,
           beforeRequest: async (endpoint, info) => {
             await confirmWithUser(
@@ -1525,7 +1528,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
       // and the real run held to exactly that list: a thread the dialog did not show is not contacted.
       let approved: Map<string, string> | undefined;
       if (!dryRun && dialogPlan(server, ctx, confirmMode) !== "proceed") {
-        const rehearsal = await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun: true });
+        const rehearsal = await bulkUnsubscribe(gmail, threadIds, unsubscribeDeps(), { dryRun: true });
         approved = approvedEndpoints(rehearsal);
         const contacted = rehearsal.results.filter((r) => r.wouldCall).map((r) => `${dialogText(r.from ?? "") || r.threadId} → ${new URL(r.wouldCall!).host}`);
         if (contacted.length > 0) {
@@ -1541,7 +1544,7 @@ function registerManageTools(server: McpServer, confirmMode: ConfirmMode): void 
           );
         }
       }
-      return ok(await bulkUnsubscribe(gmail, threadIds, undefined, { dryRun, approved }));
+      return ok(await bulkUnsubscribe(gmail, threadIds, unsubscribeDeps(), { dryRun, approved }));
     },
   );
 

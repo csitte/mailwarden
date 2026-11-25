@@ -4,6 +4,7 @@ import { McpServer } from "@modelcontextprotocol/server";
 import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
 import { registerTools, servedTiers } from "./tools.js";
 import { registerPrompts } from "./prompts.js";
+import { demoMode, enterDemoMode } from "./source.js";
 import {
   getAuth,
   hasModifyScope,
@@ -20,6 +21,7 @@ import { resolveAttachDir } from "./attach.js";
 import {
   CliError,
   debugEnabled,
+  demoRequested,
   findStrayPositional,
   helpFooter,
   readAccountArg,
@@ -62,12 +64,21 @@ async function warnAboutScopeGap(): Promise<void> {
   }
 }
 
+/**
+ * Said first, before anything about the tools: an assistant that reports on this mailbox must not
+ * let anyone think it is theirs.
+ */
+const DEMO_INSTRUCTIONS =
+  "DEMO MODE: this server is connected to an invented mailbox (you@example.com) held in memory, not to Gmail. " +
+  "Nothing it does reaches Google or any other server, and every change is gone when the server stops. " +
+  "When you report on this mail, say that it is demo mail. ";
+
 function makeServer(): McpServer {
   // `instructions` is what a tool-search client reads at session start to decide whether to look
   // for our tools at all — derived from the same tier set that decides which tools get registered.
   const server = new McpServer(
     { name: "mailwarden", version: VERSION },
-    { instructions: serverInstructions(servedTiers()) },
+    { instructions: (demoMode() ? DEMO_INSTRUCTIONS : "") + serverInstructions(servedTiers()) },
   );
   registerTools(server);
   registerPrompts(server, servedTiers());
@@ -86,6 +97,21 @@ async function main(): Promise<void> {
   if (accountArg !== undefined) process.env.MAILWARDEN_ACCOUNT = accountArg;
 
   const mode = resolveMode(args);
+
+  // `--demo`: an invented mailbox in memory instead of Google. Decided before anything reads a
+  // token, so a demo run never opens one; `demoRequested` refuses `--account` and every mode that
+  // acts on a real authorization.
+  if (demoRequested(args)) {
+    enterDemoMode();
+    if (resolveEnabledTiers(process.env).has("drafts")) resolveAttachDir(process.env);
+    if (mode === "http") {
+      await startHttp(makeServer);
+      return;
+    }
+    await makeServer().connect(new StdioServerTransport());
+    console.error("mailwarden MCP server running on stdio — DEMO: an invented mailbox in memory; nothing reaches Gmail.");
+    return;
+  }
 
   // Setup doctor first: it diagnoses a malformed MAILWARDEN_ACCOUNT / MAILWARDEN_TOOLS itself
   // (with a formatted report) rather than crashing on the misconfiguration it exists to explain.

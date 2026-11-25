@@ -133,6 +133,31 @@ try {
   );
   check("read tier registers no write tools", writeTools.length === 0, writeTools.join(",") || "none");
 
+  // --demo needs no credentials at all: the empty config dir is the proof. index.ts, which decides
+  // the mode, is outside the unit tests' coverage, so this is the one place the switch is run.
+  console.log("\nMCP handshake (--demo):");
+  const demo = await mcpSession(cliPath, { MAILWARDEN_DIR: emptyConfig }, 20_000, {
+    args: ["--demo"],
+    calls: [
+      ["tools/call", { name: "get_profile", arguments: {} }],
+      ["tools/call", { name: "search", arguments: { query: "category:updates is:unread -in:inbox" } }],
+      ["prompts/list", {}],
+    ],
+  });
+  const [demoProfile, demoSearch, demoPrompts] = demo.results;
+  check("--demo tells the model first that the mailbox is invented", (demo.instructions ?? "").startsWith("DEMO MODE"));
+  check(
+    "--demo answers get_profile from the invented mailbox, marked as demo",
+    demoProfile?.result?.structuredContent?.demo === true &&
+      demoProfile.result.structuredContent.emailAddress === "you@example.com",
+    JSON.stringify(demoProfile?.result?.structuredContent ?? demoProfile?.error),
+  );
+  const demoHits = (demoSearch?.result?.structuredContent?.threads ?? []).map((t) => t.threadId).sort();
+  check("--demo search re-verifies the stale index (2 of 4 hits)", demoHits.join(",") === "t14-usage,t15-dmarc", demoHits.join(","));
+  const promptNames = (demoPrompts?.result?.prompts ?? []).map((p) => p.name);
+  check("prompts are listed", promptNames.length === 4, promptNames.join(","));
+  check("--demo says so on stderr", /DEMO/.test(demo.stderr), demo.stderr.trim());
+
   console.log("\nShipped documentation:");
   const installed = path.join(consumer, "node_modules", "mailwarden");
   // GitHub's slug: lowercase, drop punctuation, then turn EACH remaining space into a hyphen —

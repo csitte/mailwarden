@@ -36,6 +36,11 @@ One exception, and only when the `unsubscribe` or `bulk_unsubscribe` tool is cal
 (threat 9 below). Otherwise nothing else is contacted — no telemetry, no analytics, no crash
 reporting, no third-party host.
 
+With `--demo` the right-hand side is not there: the tools talk to an invented mailbox in the
+server's memory, `~/.mailwarden` is not read, and nothing leaves the process — the unsubscribe
+request included, which is answered in place. The demo's stand-in for the Gmail API has only the
+endpoints mailwarden calls, so there is no send or import method in it to reach either.
+
 What goes to the AI client goes to whoever runs its model. Besides mail content that includes one
 fact about the machine: `get_profile` reports `serverPath`, the directory the server runs from,
 which usually contains the local user name (`/Users/<name>/...`, `C:\Users\<name>\...`). It is
