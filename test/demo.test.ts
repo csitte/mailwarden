@@ -293,4 +293,15 @@ describe("demoRequested", () => {
       expect(() => demoRequested(["--demo", ...flag])).toThrow(CliError);
     },
   );
+
+  it.each([["--demo=1"], ["--Demo"], ["-demo"], ["--DEMO"], ["--demo=true", "--http"], ["--demos"]])(
+    "refuses the near miss %s instead of serving the real mailbox",
+    (...args) => {
+      expect(() => demoRequested(args)).toThrow(/write exactly `--demo`/);
+    },
+  );
+
+  it("refuses a bare word next to --demo", () => {
+    expect(() => demoRequested(["--demo", "stray"])).toThrow(/Unexpected argument 'stray'/);
+  });
 });

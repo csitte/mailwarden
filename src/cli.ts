@@ -174,9 +174,19 @@ export function findStrayPositional(args: string[]): string | undefined {
  * names one: next to `--demo` each is a contradiction, and quietly honouring either half would
  * either touch a real mailbox in a run meant to touch none, or show a demo where a real check was
  * asked for. `--http` is fine: the demo then answers over HTTP.
+ *
+ * A near miss (`--demo=1`, `--Demo`, `-demo`) is refused rather than read as "no demo": the run
+ * would otherwise serve the real mailbox to someone who meant to show an invented one, and nothing
+ * would say so. Likewise a bare word next to `--demo`, which no mode takes.
  */
 export function demoRequested(args: string[]): boolean {
+  const nearMiss = args.find((a) => a !== "--demo" && /^-+demo/i.test(a));
+  if (nearMiss !== undefined) {
+    throw new CliError(`Unknown argument '${nearMiss}'. For the invented mailbox write exactly \`--demo\`.`);
+  }
   if (!args.includes("--demo")) return false;
+  const stray = findStrayPositional(args);
+  if (stray !== undefined) throw new CliError(`Unexpected argument '${stray}' next to \`--demo\`.`);
   const clash = ["--auth", "--sweep", "--check", "--doctor"].find((f) => args.includes(f));
   if (clash) {
     throw new CliError(`\`--demo\` serves an invented mailbox and cannot be combined with \`${clash}\`, which acts on a real one.`);

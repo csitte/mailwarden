@@ -27,7 +27,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   opt-out kind, conversations waiting either way, a CSV, an invitation, a gzipped DMARC report, a
   snoozed thread, and two read updates its thread index still answers as unread, so `search`'s
   re-verification has something to drop. Refused next to `--auth`, `--sweep`, `--check` and
-  `--account`; combines with `--http` and the tiers. The demo API implements exactly the endpoints
+  `--account`; combines with `--http` and the tiers. A near miss (`--demo=1`, `--Demo`, `-demo`)
+  stops the start instead of serving the real mailbox. The demo API implements exactly the endpoints
   mailwarden calls; a test calls all 33 tools against it with `fetch` watched and the token code
   set to throw, and the package smoke test starts the packed build with `--demo` and an empty
   config dir.
