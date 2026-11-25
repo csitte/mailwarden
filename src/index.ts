@@ -70,7 +70,8 @@ async function warnAboutScopeGap(): Promise<void> {
  */
 const DEMO_INSTRUCTIONS =
   "DEMO MODE: this server is connected to an invented mailbox (you@example.com) held in memory, not to Gmail. " +
-  "Nothing it does reaches Google or any other server, and every change is gone when the server stops. " +
+  "Nothing it does reaches Google or any other server, and every change to this mailbox is gone when the server stops; " +
+  "only a file a tool writes to disk (download_attachment, export_thread) stays. " +
   "When you report on this mail, say that it is demo mail. ";
 
 function makeServer(): McpServer {
