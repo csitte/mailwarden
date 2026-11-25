@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   set to throw, and the package smoke test starts the packed build with `--demo` and an empty
   config dir.
 
+### Fixed
+- **`docs/SETUP.md` no longer says the "AI-powered agent" checkbox matters only for Google's hosted
+  MCP servers.** Google announced on 2026-11-24 that from 2027-02-01 an agentic client calling the
+  Workspace REST APIs directly is held to the Standard tier quotas; the guide now says so, with the
+  source.
+
 ## [0.33.0] - 2026-11-24
 
 ### Added

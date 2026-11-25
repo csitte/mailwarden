@@ -113,9 +113,13 @@ as a self-declaration: it grants no extra scopes or privileges, and consent and 
 stay exactly as they were
 ([Manage OAuth Clients](https://support.google.com/cloud/answer/15549257)).
 
-**mailwarden works either way.** The mark only matters for Google's own hosted Workspace MCP
-servers, which Google says will accept agentic clients only. mailwarden never calls those: it talks
-to the Gmail REST API, and its egress guard allows nothing else.
+**mailwarden works either way.** Google's own hosted Workspace MCP servers accept agentic clients
+only, and mailwarden never calls those: it talks to the Gmail REST API, and its egress guard allows
+nothing else. Google has announced one effect on REST as well: from February 1, 2027, an agentic
+client that calls the Workspace REST APIs directly is held to the Standard tier quotas
+([Usage tiers and quotas](https://developers.google.com/workspace/tools-safety)). Those are the
+published quotas mailwarden has always run on; Google has not said yet what else the enforcement
+does.
 
 **Tick it anyway, it is the accurate answer.** mailwarden is driven by an AI assistant, and Google
 asks for clients like that to be marked even when they use only the REST APIs. Two things worth
