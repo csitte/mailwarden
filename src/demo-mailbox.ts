@@ -407,7 +407,7 @@ export function demoMailboxSpec(now: number): DemoMailboxSpec {
         id: "t18-spam",
         messages: [
           {
-            from: "Prize Desk <winner@prize-desk.example.biz>",
+            from: "Prize Desk <winner@prize-desk.example>",
             to: SELF,
             subject: "You have won a holiday — claim today",
             daysAgo: 0.9,

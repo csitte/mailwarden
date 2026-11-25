@@ -732,8 +732,8 @@ That's the whole install — `npx` fetches and runs the published package, no cl
 claude mcp add mailwarden-demo -- npx -y mailwarden --demo
 ```
 
-`--demo` serves an invented mailbox instead of Gmail: about twenty threads under `.example`
-domains, dated from the moment the server starts, held in memory. No credentials, no token, no
+`--demo` serves an invented mailbox instead of Gmail: about twenty threads on domains reserved for
+examples (`.example`, `example.com` and the like), dated from the moment the server starts, held in memory. No credentials, no token, no
 Google project; nothing is read from `~/.mailwarden` and no request leaves the process, the one
 outbound one included (an unsubscribe "succeeds" with a 200 the server builds itself). Every tool
 runs its real code against it, and what you change (labels, archive, trash, snooze, filters,

@@ -277,10 +277,12 @@ describe("the demo API's Gmail behaviour", () => {
     expect(demoSnoozeLabel(NOW)).toBe("MCP/Snoozed/2026-11-26");
   });
 
-  it("uses only invented domains under .example", () => {
+  it("uses only domains reserved for examples (RFC 2606)", () => {
     const spec = JSON.stringify(demoMailboxSpec(NOW));
-    const domains = new Set([...spec.matchAll(/@([a-z0-9.Ѐ-ӿ-]+)/gi)].map((m) => m[1].toLowerCase()));
-    for (const d of domains) expect(d, d).toMatch(/\.example(\.(net|org|biz))?$|^example\.(com|org)$/);
+    const domains = new Set(
+      [...spec.matchAll(/@([a-z0-9.Ѐ-ӿ-]+)|https?:\/\/([a-z0-9.Ѐ-ӿ-]+)/gi)].map((m) => (m[1] ?? m[2]).toLowerCase()),
+    );
+    for (const d of domains) expect(d, d).toMatch(/\.example$|(^|\.)example\.(com|net|org)$/);
   });
 
   it("reads a draft's raw MIME back: headers, text, HTML, a base64 attachment with an encoded name", () => {
